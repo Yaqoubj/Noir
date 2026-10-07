@@ -1,0 +1,53 @@
+Noir 0.7.0 uses the following components from their official distributions:
+
+VideoLAN.LibVLC.Windows 3.0.24
+License: LGPL-2.1-or-later
+Project and source: https://code.videolan.org/videolan/libvlc-nuget
+VLC source: https://code.videolan.org/videolan/vlc
+
+Android companion: org.videolan.android:libvlc-all 3.7.7 (unmodified)
+License: LGPL-2.1-or-later
+Source and build instructions: https://code.videolan.org/videolan/vlc-android
+Java source artifact: https://repo.maven.apache.org/maven2/org/videolan/android/libvlc-all/3.7.7/libvlc-all-3.7.7-sources.jar
+Android source is provided in Noir-Android-Source.zip; its LibVLC dependency
+can be changed and the app rebuilt with the included build instructions.
+
+QRCoder 1.8.0 (Windows phone-pairing QR)
+License: MIT
+Source: https://github.com/Shane32/QRCoder
+
+Microsoft ASP.NET Core 10.0.5 (Windows local HTTPS service)
+License: MIT and included Microsoft runtime third-party notices
+Source: https://github.com/dotnet/aspnetcore
+
+LibVLCSharp and LibVLCSharp.WPF 3.10.1
+License: LGPL-2.1-or-later
+Source: https://code.videolan.org/videolan/LibVLCSharp
+NuGet source commit: 4896d0e06d19ac40b46802cf7dc167d432f3fd63
+
+These components are dynamically linked and can be replaced by compatible
+versions. Their original copyrights and notices remain applicable.
+Full LGPL 2.1 text is provided in LGPL-2.1.txt next to this document.
+
+Microsoft .NET and WPF runtime components ship in Microsoft's unmodified
+self-contained runtime distribution. Its LICENSE.txt and
+THIRD-PARTY-NOTICES.txt remain included in the runtime folder.
+
+Online metadata (cached for offline use):
+TVmaze: https://www.tvmaze.com/api -- CC BY-SA 4.0
+Wikipedia: https://en.wikipedia.org/wiki/Wikipedia:Copyrights -- CC BY-SA
+Source page links are retained and shown in each enriched title's Details.
+Artwork retains the rights of its respective owners; Wikipedia image rights
+can be inspected through the source article's image page.
+
+Microsoft.Web.WebView2 1.0.4258.31
+Microsoft WebView2 SDK license: https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.4258.31/License
+Documentation: https://learn.microsoft.com/en-us/microsoft-edge/webview2/
+The embedded review window uses the separately installed Edge WebView2 runtime.
+
+IMDb's non-commercial episode dataset is used locally for personal-use episode
+identifier matching only: https://data.imdb.com/non-commercial-datasets/
+Dataset: https://datasets.imdbws.com/title.episode.tsv.gz
+Reviews are displayed live on their original websites, not scraped or rehosted.
+IMDb, Letterboxd, Serializd, Trakt, Reddit and Rotten Tomatoes retain their respective content rights,
+site terms, login requirements and spoiler controls.

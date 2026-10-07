@@ -1,0 +1,18 @@
+plugins { id 'com.android.application' }
+android {
+    // A checkout builds debug APKs without the maintainer's private release key.
+    def hasReleaseKey = rootProject.file('.signing/noir.p12').exists() && rootProject.file('.signing/password.txt').exists()
+    signingConfigs {
+        if (hasReleaseKey) {
+            noir { storeFile rootProject.file('.signing/noir.p12'); storePassword rootProject.file('.signing/password.txt').text.trim(); keyAlias 'noir'; keyPassword storePassword }
+        }
+    }
+    namespace 'app.noir.mobile'
+    compileSdk 36
+    defaultConfig { applicationId 'app.noir.mobile'; minSdk 26; targetSdk 35; versionCode 3; versionName '0.2.0'; testInstrumentationRunner 'app.noir.mobile.TestRunner' }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    defaultConfig { if(project.hasProperty('noirAbi')) { ndk { abiFilters project.property('noirAbi') } } }
+    buildTypes { release { minifyEnabled false; if (hasReleaseKey) { signingConfig signingConfigs.noir } } }
+    packaging { jniLibs { useLegacyPackaging true } }
+}
+dependencies { implementation 'org.videolan.android:libvlc-all:3.7.7'; androidTestImplementation 'androidx.test:runner:1.6.2'; androidTestImplementation 'junit:junit:4.13.2' }

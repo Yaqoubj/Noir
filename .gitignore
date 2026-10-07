@@ -1,0 +1,26 @@
+# Only app source and documentation belong in this repository.
+/outputs/
+/work/
+/NoirValidation/
+/screenshot*.png
+*.apk
+*.aab
+*.zip
+*.p12
+*.pfx
+*.jks
+*.keystore
+**/bin/
+**/obj/
+**/publish/
+**/build/
+**/.gradle/
+**/.signing/
+**/local.properties
+.vs/
+.idea/
+*.user
+*.suo
+.env
+.env.*
+REDDIT_API_APPLICATION.md
