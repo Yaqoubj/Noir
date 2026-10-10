@@ -78,7 +78,11 @@ public sealed partial class LibraryStore
     {
         var temp=OrganizerJournal+".tmp";
         using(var stream=new FileStream(temp,FileMode.Create,FileAccess.Write,FileShare.None)) {JsonSerializer.Serialize(stream,plan,JsonOptions);stream.Flush(true);}
-        File.Move(temp,OrganizerJournal,true);
+        for(int attempt=0;;attempt++)
+        {
+            try {File.Move(temp,OrganizerJournal,true);break;}
+            catch(Exception e) when(attempt<5&&(e is IOException or UnauthorizedAccessException)) {Thread.Sleep(40*(attempt+1));}
+        }
     }
     void Relocate(string id,string from,string to)
     {

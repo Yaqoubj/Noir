@@ -1,4 +1,4 @@
-﻿using Noir;
+using Noir;
 using LibVLCSharp.Shared;
 using System.Text.Json;
 
@@ -16,6 +16,7 @@ MobileChecks.Run(root,Check);
 OrganizerChecks.Run(root,Check);
 ProfileChecks.Run(root,Check);
 PremiumChecks.Run(root,Check);
+await UxChecks.Run(root,Check);
 var post="https://old.reddit.com/r/television/comments/abc123/episode_discussion/comment42/?context=3";
 Check(RedditDiscussion.Reddit(post)=="https://www.reddit.com/r/television/comments/abc123/episode_discussion/comment42/","Reddit discussion links preserve the exact comment and remove tracking parameters");
 Check(new[]{"https://www.reddit.com/search/?q=test","https://reddit.com.evil.test/r/t/comments/abc123/","https://evil.test@reddit.com/r/t/comments/abc123/","http://reddit.com/r/t/comments/abc123/","https://reddit.com:444/r/t/comments/abc123/","https://reddit.com/r/t/comments/abc123/%22script/"}.All(u=>RedditDiscussion.Reddit(u)==null),"Discussion links reject searches, spoofed domains, credentials, insecure URLs and injected paths");
@@ -111,6 +112,7 @@ using(var gzip=new System.IO.Compression.GZipStream(index,System.IO.Compression.
 using(var writer=new StreamWriter(gzip)) writer.Write("tconst\tparentTconst\tseasonNumber\tepisodeNumber\ntt900\ttt500\t2\t3\ntt901\ttt500\t2\t4\ntt902\ttt600\t1\t1\n");
 var indexed=await EpisodeReviewIndex.Resolve([new(){Id="first",ImdbId="tt500",Season=2,Episode=3},new(){Id="second",ImdbId="tt500",Season=2,Episode=4},new(){Id="missing",ImdbId="tt500",Season=3,Episode=1}],caseRoot);
 Check(indexed.Count==2 && indexed["first"]=="tt900" && indexed["second"]=="tt901","Cached IMDb episode index maps season and episode exactly and leaves missing episodes unresolved");
+await DownloadChecks.Run(caseRoot,Check);
 var productionCopy=Path.Combine(caseRoot,"real-copy");Directory.CreateDirectory(productionCopy);
 var syncStore=new LibraryStore(Path.Combine(caseRoot,"sync"));syncStore.State.Roots=[];
 syncStore.State.SyncTrakt=syncStore.State.SyncSerializd=true;
@@ -156,7 +158,7 @@ if(!args.Contains("--offline")) using(var metadataClient=new MetadataClient(case
 }
 Core.Initialize();using var vlc=new LibVLC("--no-video-title-show","--quiet","--vout=dummy","--aout=dummy");
 using var player=new LibVLCSharp.Shared.MediaPlayer(vlc);
-var real=library.First(x=>x.Title=="Dorohedoro"&&x.Season==1);
+var real=library.Where(x=>!x.IsMovie&&x.Available&&File.Exists(x.Path)&&Path.GetExtension(x.Path).Equals(".mkv",StringComparison.OrdinalIgnoreCase)).OrderBy(x=>new FileInfo(x.Path).Length).First();
 using var media=new Media(vlc,new Uri(real.Path));
 Check(player.Play(media),"Bundled VLC accepts a real MKV episode");
 for(int i=0;i<100&&(!player.IsSeekable||player.Time<500);i++) await Task.Delay(100);

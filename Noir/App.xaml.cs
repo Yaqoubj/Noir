@@ -4,6 +4,8 @@ using System.Windows;
 namespace Noir;
 public partial class App : Application
 {
+    void Window_Loaded(object sender,RoutedEventArgs e){if(sender is Window window){WindowAppearance.Apply(window);WindowAppearance.Fit(window);}}
+    void Scroll_Wheel(object sender,System.Windows.Input.MouseWheelEventArgs e)=>SmoothScrolling.Wheel(sender,e);
     Mutex? single;
     protected override void OnStartup(StartupEventArgs e)
     {

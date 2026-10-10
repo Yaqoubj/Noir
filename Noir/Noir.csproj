@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -7,10 +7,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <PlatformTarget>x64</PlatformTarget>
-    <Version>0.8.0</Version>
+    <Version>0.12.1</Version>
     <ApplicationIcon>Assets\noir.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
+    <Content Include="../work/subtitle-runtime/**/*" Link="Tools/subtitle-sync/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="Allow-Noir-Phone.ps1" CopyToOutputDirectory="PreserveNewest" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.5" />

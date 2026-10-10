@@ -1,4 +1,4 @@
-﻿#if NOIR_VALIDATE
+#if NOIR_VALIDATE
 using System.IO;
 using System.Text.Json;
 using System.Windows;
@@ -10,6 +10,10 @@ public partial class MainWindow
 {
     async Task ValidatePlayback()
     {
+        if(Environment.GetCommandLineArgs().Contains("--navigation-only")){await ValidateNavigationDiscover();Close();return;}
+        if(Environment.GetCommandLineArgs().Contains("--ux-only")){await ValidateUx();Close();return;}
+        if(Environment.GetCommandLineArgs().Contains("--smoothness-only")){await ValidatePlayerSmoothness();Close();return;}
+        if(Environment.GetCommandLineArgs().Contains("--downloads-only")) {await ValidateDownloads();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--premium-only")) {await ValidatePremium();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--embeds-only")) {await ValidateEmbeds();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--history-organizer-only")) {await ValidateOrganizerHistory();Close();return;}
@@ -49,11 +53,15 @@ public partial class MainWindow
             ShowControls();UpdateLayout();
             var videoSize=new Size(Video.ActualWidth,Video.ActualHeight);
             Assert(Math.Abs(videoSize.Width-PlayerRoot.ActualWidth)<1 && Math.Abs(videoSize.Height-PlayerRoot.ActualHeight)<1,"Video uses the full player area even when the controls are visible");
-            ToggleControls();UpdateLayout();
+            HandleVideoClick(1);UpdateLayout();
             Assert(!ControlsVisible && PlayerFooter.Visibility==Visibility.Collapsed,"Clicking the picture hides both control bars");
             Assert(player.IsPlaying,"Hiding controls does not pause the video");
             Assert(Math.Abs(Video.ActualHeight-videoSize.Height)<1,"Hiding controls does not resize the video or change its framing");
-            ToggleControls();Assert(ControlsVisible,"A second click restores the controls");
+            HandleVideoClick(1);Assert(!ControlsVisible,"A hidden-player click waits briefly for a possible double click");
+            await Until(()=>ControlsVisible,"A single click restores the controls");
+            HandleVideoClick(2);Assert(fullscreen&&!ControlsVisible,"Double click enters fullscreen without revealing bars");
+            HandleVideoClick(2);Assert(!fullscreen&&!ControlsVisible,"Double click exits fullscreen with controls hidden");
+            ShowControls();
             await Until(()=>!ControlsVisible,"Controls also hide after three seconds without interaction",8);
             store.State.FillVideo=true;ApplyPictureMode(true);
             Assert(player.CropGeometry==$"{(int)Math.Round(videoSize.Width)}:{(int)Math.Round(videoSize.Height)}","Fill mode sets a crop matching the whole video surface");
@@ -91,7 +99,7 @@ public partial class MainWindow
             Assert(player.SetSpu(-1),"Turning subtitles off succeeds");
             Assert(player.AudioTrackDescription.Length>1,"Audio track menu loads");
             var intro=store.GetIntro(episode);
-            Assert(intro is {Valid:true},"Saved opening markers were imported");
+            Assert(intro is {Valid:true},"The actual opening chapter is discovered and remembered");
             store.State.AutoSkipIntro=true;
             introHandled=false;HideControls();SeekAbsolute(Math.Max(0,intro!.Start-20));
             await Until(()=>pendingTarget==null,"Seeking before the intro still works");
@@ -110,6 +118,8 @@ public partial class MainWindow
             SeekAbsolute(outro!.Start+2);
             await Until(()=>pendingTarget==null&&creditsReached&&store.GetProgress(episode)!.Completed,"Reaching the ending marks the episode watched before the file ends");
             Assert(!ended && player.IsPlaying && nextTimer?.IsEnabled!=true,"Credits keep playing and do not trigger an early auto-next countdown");
+            ShowControls();await Task.Delay(350);Assert(CreditsChip.Visibility==Visibility.Visible&&NextPanel.Visibility==Visibility.Collapsed,"Credits show a small next-episode chip");
+            CreditsChip_Click(this,new RoutedEventArgs());Assert(NextPanel.Visibility==Visibility.Visible,"The credits chip expands on request");
             var outroForward=SeekOrigin;Forward_Click(this,new RoutedEventArgs());
             await Until(()=>pendingTarget==null&&player.Time/1000d>=outroForward+7,"Seeking forward through credits still works");
             SavePlayback();Assert(store.GetProgress(episode)!.Completed,"Saving during credits preserves watched status");
@@ -121,16 +131,17 @@ public partial class MainWindow
             await Until(()=>current?.Episode==2&&!ended&&player.IsPlaying,"Countdown advances to the next episode",18);
             Assert(store.ContinueFor(items.Where(x=>x.GroupKey==episode.GroupKey))?.Episode==2,"Continue advances to episode two rather than restarting episode one");
             store.State.AutoNext=false;
+            await Until(()=>currentDuration>60 && player.Length>60000,"Next episode duration is ready before seeking to its end");
             SeekAbsolute(currentDuration-1);
             await Until(()=>ended,"The second episode reaches its end without automatic advance");
             SeekAbsolute(41.75);
             await Until(()=>pendingTarget==null && player.IsPlaying && Math.Abs(player.Time/1000d-41.75)<3,"Seeking back after the file has ended restarts playback at the selected time");
             var movie=items.First(x=>x.IsMovie);
             await PlayVideo(movie,true);
-            await Until(()=>player.IsPlaying&&player.Time>1000,"4K HEVC movie starts through VLC",30);
-            Assert(player.Length>60000,"4K movie exposes its full duration");
+            await Until(()=>player.IsPlaying&&player.Time>1000,"Movie fixture starts through VLC",30);
+            Assert(player.Length>60000,"Movie exposes its full duration");
             SeekAbsolute(37.25);
-            await Until(()=>pendingTarget==null&&Math.Abs(player.Time/1000d-37.25)<2.5,"4K movie seeking works",30);
+            await Until(()=>pendingTarget==null&&Math.Abs(player.Time/1000d-37.25)<2.5,"Movie seeking works",30);
             player.SetPause(true);SavePlayback();ReturnToLibrary();
             Assert(store.GetProgress(movie) is {Completed:false,Position:>30},"Movie progress is retained in Continue Watching");
             results.Add("ALL DESKTOP PLAYBACK CHECKS PASSED");

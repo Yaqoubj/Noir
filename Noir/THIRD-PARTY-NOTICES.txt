@@ -51,3 +51,21 @@ Dataset: https://datasets.imdbws.com/title.episode.tsv.gz
 Reviews are displayed live on their original websites, not scraped or rehosted.
 IMDb, Letterboxd, Serializd, Trakt, Reddit and Rotten Tomatoes retain their respective content rights,
 site terms, login requirements and spoiler controls.
+
+Subtitle timing helper (separate on-demand local process):
+ffsubsync 0.5.1: MIT, https://github.com/smacke/ffsubsync
+Python runtime and packages: original notices and license files are included
+under Tools/subtitle-sync/licenses. NumPy, SciPy, pysubs2, webrtcvad-wheels
+and their dependencies retain their original licenses.
+FFmpeg / ffprobe: original LICENSE and build information are included under
+Tools/subtitle-sync/ffmpeg. Source: https://ffmpeg.org/download.html
+Packaged Windows build: 9.0.2-full_build-www.gyan.dev, GPL v3.
+Source commit: https://github.com/FFmpeg/FFmpeg/commit/946fcce07b
+Build information and source links: https://www.gyan.dev/ffmpeg/builds/
+OpenSubtitles' public Stremio subtitle service supplies available subtitles;
+subtitle content retains its owners' rights. No audio is uploaded for timing.
+
+Cinemeta (Stremio official metadata addon) provides Discover search, title
+details and episode schedules: https://v3-cinemeta.strem.io/manifest.json
+Documentation: https://github.com/Stremio/stremio-official-addons/blob/master/index.json
+Metadata and poster artwork retain their respective owners' rights.

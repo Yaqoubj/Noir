@@ -1,5 +1,19 @@
-# Noir 0.8.0 / Android 0.2.0
+# Noir 0.12.1 / Android 0.4.0
 
+**Discover** searches new movies and TV shows, including anime, using Cinemeta without a separate API key. Open a poster for its synopsis, year, rating and full known episode list. Save it to My List, choose a released episode, or find season downloads through your existing AIOStreams/TorBox connection. Review files before confirming. Search results, schedules and downloaded artwork remain cached for offline browsing; browsing and saving never create watched history. Initial result grids load thirty cards at a time.
+
+Discover sits below My List. Downloads sits beside Scan Library. Android includes Discover and **More → Downloads**; new-title requests are verified on the paired PC before release selection.
+
+**Downloads** is a permanent sidebar tab with live progress, file sizes, subtitle status, pause, cancel and resume. Its badge shows active jobs, including requests from the phone. Progress updates preserve the list and scroll position.
+
+Windows uses a dark native title bar, correctly oriented scrollbars, smoother mouse-wheel scrolling, responsive search and episode rows, and a sidebar that scrolls on short windows. Initial windows and dialogs fit the current monitor’s work area. Leaving fullscreen restores the previous size and position.
+
+
+AIOStreams and TorBox downloads are configured in Settings. Credentials are encrypted for your Windows account and stay on the PC. Noir searches AIOStreams and your TorBox library independently and shows a separate result or error for each. AIOStreams discovers torrent references; TorBox verifies and downloads their files. AIO episode results can contain season packs. “Plan missing episodes” proposes known released episodes absent from the PC or queue, combining packs and gaps where possible. Review selected files, sizes and destinations before confirming; unknown numbering requires a manual episode match. Existing files and history are retained. URL-only and Usenet results are unsupported. Provider configuration errors remain visible even if account files are available. Noir does not change your AIOStreams addons.
+
+Choose preferred quality, an optional per-episode size limit and English/Arabic subtitle downloads in Settings. Subtitles come from the selected release or OpenSubtitles when available and are saved beside the video. Automatic alignment uses the local video's embedded text subtitles or speech timing, with confidence checks and permanent original backups. Uncertain matches retain their original timing. In the player’s Subtitles menu, “Download English / Arabic subtitles” works for existing local videos; “Auto-sync saved subtitles” retries alignment. This helper runs only when needed, without uploading audio. Paired phones receive both language sidecars and use the synced playback-language preference.
+
+Android refreshes the PC's bookmark before playback, updates episode detail pages after sync, and avoids overwriting newer progress when an old paused session closes. Matching SRT/ASS/SSA/VTT sidecars are copied into private phone storage and added to VLC alongside embedded subtitles. The selected English or Arabic full subtitles are preferred over signs-only or forced tracks.
 History now has Collection and Diary tabs, a month selector and viewing recap, progress cards, and ratings. Posters and watch dates remain after files are removed. Home separates Resume watching from Next episode and includes Recently added, a saved play queue, and announced upcoming episodes when TVmaze supplies dates.
 
 Use a title’s menu to set Watching / Planned / Finished / Dropped, save it to a named collection, or correct a title/year/IMDb/season match. Match corrections preserve file names and viewing identity. Collections, status and corrections sync with Android; play queues and downloaded copies stay on their device.
@@ -12,13 +26,13 @@ Review windows remember their last tab and sign-ins. Compact/embed mode has been
 
 A Windows movie and TV library with a black interface and embedded VLC playback.
 
-## Android companion (Windows 0.8.0 / Android 0.2.0)
+## Android companion (Windows 0.12.1 / Android 0.4.0)
 
 Review windows open the original community websites. Noir remembers the chosen Reddit discussion per episode/movie on that device and disposes the browser on close. Compact/embed mode was removed in 0.8.0. These websites require an internet connection.
 
 Windows 0.7.5 moved the shared profile to `C:\Users\<you>\.noir` so Desktop and Codex launches use the same library, and merges duplicate catalog groups while preserving newer progress. History has poster cards with watched counts. Settings → Organize filenames & folders previews verified titles, standardizes show season folders and movie folders, moves matching external subtitles, and keeps a durable journal for undo and interrupted moves. It never overwrites destination files or deletes extras. Archive changes retains the previous journal before another organization.
 
-Install `Noir-Android.apk` on an Android 8+ phone (ARM64). The `Noir-Android-All.apk` package also includes older ARM and x86 devices. In Windows Noir, open **Settings → Pair a phone** while both devices are on the same home Wi-Fi. Scan the QR code with the phone camera and choose Noir, or paste the complete pairing link into Android Noir's pairing screen. The link expires after ten minutes and is single-use. Pairing persists after closing either app. If the PC's address changes, pair again with the same PC; saved phone history stays intact.
+Install `Noir-Android.apk` on an Android 8+ phone (ARM64). The `Noir-Android-All.apk` package also includes older ARM and x86 devices. In Windows Noir, open **Settings → Phone Sync → Pair a phone** while both devices are on the same home Wi-Fi. Scan the QR code with the phone camera and choose Noir, or paste the complete pairing link into Android Noir's pairing screen. The link expires after ten minutes and is single-use. Pairing persists after closing either app. If the PC's address changes, pair again with the same PC; saved phone history stays intact.
 
 Noir syncs exact resume positions, individual viewing dates, ratings, private notes and My List. Android caches the full known episode list, descriptions and artwork, including watched titles whose PC files are deleted. Newer playback positions win over older offline positions, while earlier completed viewings still join the diary. Operations have durable receipts and viewing IDs to prevent duplicate completions. Phone completions also enter the PC's existing Trakt/Serializd queue if those integrations are enabled.
 
@@ -100,8 +114,19 @@ Core regression tests live in the neighboring `Noir.Checks` project. They cover 
 
 ## Third-party components
 
-Playback uses [VideoLAN LibVLC](https://www.videolan.org/vlc/libvlc.html) and [LibVLCSharp](https://code.videolan.org/videolan/LibVLCSharp); review pages use [Microsoft WebView2](https://learn.microsoft.com/en-us/microsoft-edge/webview2/). Their licenses are preserved with the installed binaries and license files. Metadata sources: [TVmaze](https://www.tvmaze.com/api) (CC BY-SA), [Wikipedia](https://en.wikipedia.org/wiki/Wikipedia:Copyrights) (CC BY-SA), and [IMDb's personal-use episode index](https://data.imdb.com/non-commercial-datasets/). Links to matching metadata source pages are preserved in title details. UI choices draw on [HBO Max's browsing, My List and Continue Watching guidance](https://help.hbomax.com/tk-en/answer/detail/000002559) and [Netflix's subtitle appearance guidance](https://help.netflix.com/en/node/100267). This is a personal prototype, Windows version 0.8.0.
+Playback uses [VideoLAN LibVLC](https://www.videolan.org/vlc/libvlc.html) and [LibVLCSharp](https://code.videolan.org/videolan/LibVLCSharp); review pages use [Microsoft WebView2](https://learn.microsoft.com/en-us/microsoft-edge/webview2/). Their licenses are preserved with the installed binaries and license files. Metadata sources: [Cinemeta](https://github.com/Stremio/stremio-official-addons/blob/master/index.json), [TVmaze](https://www.tvmaze.com/api) (CC BY-SA), [Wikipedia](https://en.wikipedia.org/wiki/Wikipedia:Copyrights) (CC BY-SA), and [IMDb's personal-use episode index](https://data.imdb.com/non-commercial-datasets/). Links to matching metadata source pages are preserved in title details. UI choices draw on [HBO Max's browsing, My List and Continue Watching guidance](https://help.hbomax.com/tk-en/answer/detail/000002559) and [Netflix's subtitle appearance guidance](https://help.netflix.com/en/node/100267). Windows version 0.12.1.
 
 
 
 
+
+
+## AIOStreams downloads and browsing, 0.12.1
+
+Noir uses TorBox for downloads and AIOStreams for discovery. A wrapped playback URL is not a download reference. If your host hides those references, open Settings → Downloads → AIOStreams download connection and import a configuration export that includes credentials. Noir creates a separate profile on that same AIOStreams host with its documented hash formatter. The original Stremio profile remains unchanged. A retired TorBox Search preset is omitted only from the new copy; Noir still reads your TorBox account directly. Private manifests and the original connection are encrypted for your Windows account.
+
+Release browsing starts with three suggestions, followed by expandable quality groups. Verified identical torrent references collapse into source entries; alternative encodes remain separate choices. Quality, audio language, readiness and size filters persist on desktop and Android. Unknown sizes remain available and season packs are checked against their actual file lists before selection. Choose files, review the destination and size, then queue. No release downloads merely because it appears in search.
+
+Settings are grouped into Playback, Library, Downloads, Phone Sync, Community and Advanced. Details separate Episodes, About and Activity. History uses consistent collection cards and a compact monthly summary. Large catalogs load forty cards at a time; expanded release groups load twenty rows at a time. Artwork decoding and its cache are bounded.
+
+Progress writes use an ordered background writer and flush when leaving playback or exiting. Pause, resolved manual seeks and credits also request a flush. Native stopping runs off the UI thread with guarded transitions. Clicking hides controls immediately; revealing them waits for the Windows double-click interval so a double click can enter fullscreen without flashing the bars. Audio/subtitle choices share one menu. Secondary player tools live in More, cached preview frames appear immediately, and credits use a small expandable next-episode chip.

@@ -17,6 +17,8 @@
 **/.gradle/
 **/.signing/
 **/local.properties
+**/__pycache__/
+*.pyc
 .vs/
 .idea/
 *.user

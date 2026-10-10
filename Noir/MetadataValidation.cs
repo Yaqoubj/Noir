@@ -1,4 +1,4 @@
-﻿#if NOIR_VALIDATE
+#if NOIR_VALIDATE
 using System.IO;
 using System.Text.Json;
 using System.Windows.Controls;
@@ -24,7 +24,7 @@ public partial class MainWindow
             var reopened=new LibraryStore(store.DataDirectory);
             Check(reopened.Archive.Any(i=>i.Title=="Hannibal"&&File.Exists(i.Poster)&&i.Summary==hannibal.Summary),"Updated show details and pictures survive reopening");
             Check(history==JsonSerializer.Serialize(store.State.Viewings)&&progress==JsonSerializer.Serialize(store.State.Progress),"Refresh leaves viewing history and exact resume times unchanged");
-            Navigate("Settings");Check(Descendants(ContentPanel).OfType<TextBlock>().Any(t=>t.Text=="Noir 0.8.0"),"Settings shows the actual installed build version");
+            Navigate("Settings");Check(Descendants(ContentPanel).OfType<TextBlock>().Any(t=>t.Text=="Noir 0.9.1"),"Settings shows the actual installed build version");
             CaptureLibrary(Path.Combine(store.DataDirectory,"metadata-refresh-settings.png"));
             File.WriteAllText(Path.Combine(store.DataDirectory,"metadata-refresh-checks.json"),JsonSerializer.Serialize(results,new JsonSerializerOptions{WriteIndented=true}));
         }

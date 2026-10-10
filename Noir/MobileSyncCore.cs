@@ -25,6 +25,7 @@ public sealed class MobileOperation
 }
 public sealed class MobileItem
 {
+    public List<MobileSubtitle> SubtitleFiles {get;set;}=[];
     public string Status {get;set;}="";
     public bool CaughtUp {get;set;}
     public long StatusAt {get;set;}
@@ -61,6 +62,7 @@ public sealed class MobileItem
 }
 public sealed class MobileSnapshot
 {
+    public string Subtitles {get;set;}="English";
     public List<string> Collections {get;set;}=[];
     public Dictionary<string,List<KnownEpisode>> Schedules {get;set;}=new();
     public int Schema { get; set; } = 1;
@@ -80,14 +82,14 @@ public sealed partial class LibraryStore
         lock(gate)
         {
             var result=new MobileSnapshot {ServerTime=DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),Instance=State.MobileInstanceId,
-                AutoNext=State.AutoNext,AutoSkipIntro=State.AutoSkipIntro,MarkWatchedAtCredits=State.MarkWatchedAtCredits,HideSpoilers=State.HideSpoilers,Collections=State.Collections.Keys.ToList(),Schedules=State.EpisodeSchedules.ToDictionary(p=>p.Key,p=>p.Value.Select(e=>new KnownEpisode{Season=e.Season,Episode=e.Episode,Title=e.Title,AirsAt=e.AirsAt,Image=File.Exists(e.Image)?Path.GetFileName(e.Image):""}).ToList())};
+                Subtitles=State.Subtitles,AutoNext=State.AutoNext,AutoSkipIntro=State.AutoSkipIntro,MarkWatchedAtCredits=State.MarkWatchedAtCredits,HideSpoilers=State.HideSpoilers,Collections=State.Collections.Keys.ToList(),Schedules=State.EpisodeSchedules.ToDictionary(p=>p.Key,p=>p.Value.Select(e=>new KnownEpisode{Season=e.Season,Episode=e.Episode,Title=e.Title,AirsAt=e.AirsAt,Image=File.Exists(e.Image)?Path.GetFileName(e.Image):""}).ToList())};
             foreach(var group in Archive.Select(i=>i.GroupKey).Distinct())
             {
             var episodes=EpisodesFor(group);var status=TitleStatus(episodes);var caughtUp=CaughtUp(group,DateTimeOffset.UtcNow);
             foreach(var i in episodes)
             {
                 var p=GetProgress(i);
-                result.Items.Add(new(){Id=i.Id,Group=i.GroupKey,Title=i.Title,EpisodeTitle=i.EpisodeTitle,Year=i.Year,Movie=i.IsMovie,Season=i.Season,Episode=i.Episode,
+                result.Items.Add(new(){SubtitleFiles=MobileSubtitles.Find(i).Select(s=>s.Info).ToList(),Id=i.Id,Group=i.GroupKey,Title=i.Title,EpisodeTitle=i.EpisodeTitle,Year=i.Year,Movie=i.IsMovie,Season=i.Season,Episode=i.Episode,
                     AddedAt=i.AddedAt,Status=status,StatusAt=State.MobileFieldTimes.GetValueOrDefault("status:"+group),CaughtUp=caughtUp,EpisodeImage=File.Exists(i.EpisodeImage)?Path.GetFileName(i.EpisodeImage):"",
                     Collections=State.Collections.Where(c=>c.Value.Contains(group)).Select(c=>c.Key).ToList(),CollectionTimes=State.Collections.Keys.ToDictionary(n=>n,n=>State.MobileFieldTimes.GetValueOrDefault("collection:"+n+":"+group)),
                     Available=i.Available&&File.Exists(i.Path),Summary=i.EpisodeSummary.Length>0?i.EpisodeSummary:i.Summary,ShowSummary=i.Summary,Reviews=ReviewLinks.Sources(i,State),Genres=i.Genres,Imdb=i.ImdbId,EpisodeImdb=i.EpisodeImdbId,

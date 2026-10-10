@@ -13,6 +13,9 @@
         <activity android:name=".PlayerActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden" />
         <activity android:name=".ReviewsActivity" android:exported="false" />
         <activity android:name=".DownloadsActivity" android:exported="false"/>
+        <activity android:name=".DiscoverActivity" android:exported="false"/>
+        <activity android:name=".DownloadHubActivity" android:exported="false"/>
+        <activity android:name=".PcDownloadsActivity" android:exported="false"/>
         <service android:name=".DownloadService" android:exported="false" android:foregroundServiceType="dataSync"/>
         <service android:name=".SyncJobService" android:exported="true" android:permission="android.permission.BIND_JOB_SERVICE"/>
     </application>

@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -22,22 +22,27 @@ public partial class MainWindow : Window
     readonly CancellationTokenSource metadataCancellation=new();
     readonly bool validationMode;
     readonly Dictionary<string, BitmapImage> images = new(StringComparer.OrdinalIgnoreCase);
+    long imageBytes;
+    string renderedContext="";
     public MainWindow(string? dataDirectory=null,string? playPath=null,bool validate=false,string? initialPage=null)
     {
         InitializeComponent();
+        ApplyNavigationIcons();
+        SourceInitialized+=(_,_)=>WindowAppearance.Apply(this);
         PlayerOverlay.Visibility=Visibility.Collapsed;
         Video.Content=null;
         store = new LibraryStore(dataDirectory);
+        store.PersistenceFailed+=_=>Dispatcher.BeginInvoke(()=>{if(!closing){SavedLabel.Text="Couldn't save progress";SavedLabel.Visibility=Visibility.Visible;Status.Text="Couldn't save the latest progress. Check your library storage.";}});
         validationMode=validate;
-        if(!validate) watchSync=new CommunitySync(store,Dispatcher,()=>{if(!closing&&page=="Settings") Render();});
+        if(!validate) watchSync=new CommunitySync(store,Dispatcher,()=>{if(!closing&&page=="Settings")Status.Text="Community sync updated. Reopen the Community section to see details.";});
         VolumeBar.Value = store.State.Volume;
         ready = true;
         Loaded += async (_, _) =>
         {
             foreach(Window overlay in OwnedWindows) if(overlay.Title=="LibVLCSharp.WPF") overlay.Hide();
             await ScanLibrary();
-            if(!validate) await StartMobileSync();
-            if(initialPage is "Home" or "History" or "Movies" or "Shows" or "My List" or "Settings") Navigate(initialPage);
+            if(!validate) {StartDownloads();await StartMobileSync();}
+            if(initialPage is "Home" or "History" or "Movies" or "Shows" or "My List" or "Settings" or "Discover" or "Downloads") Navigate(initialPage);
             if(!validate) watchSync?.Wake();
 #if NOIR_VALIDATE
             if(validate) { await ValidatePlayback();return; }
@@ -45,6 +50,15 @@ public partial class MainWindow : Window
             if(playPath!=null && items.FirstOrDefault(x=>string.Equals(x.Path,playPath,StringComparison.OrdinalIgnoreCase)) is { } item) await PlayVideo(item);
         };
         System.Windows.Automation.AutomationProperties.SetName(SearchBox,"Search movies and shows");
+    }
+    void Library_SizeChanged(object sender,SizeChangedEventArgs e)
+    {
+        if(MainPane==null)return;var narrow=ActualWidth<1100;
+        SidebarColumn.Width=new GridLength(narrow?168:196);MainPane.Margin=new Thickness(narrow?20:34,narrow?20:26,narrow?20:34,0);
+        SearchColumn.Width=narrow?new GridLength(0):new GridLength(290);
+        Grid.SetRow(SearchHost,narrow?1:0);Grid.SetColumn(SearchHost,narrow?0:1);Grid.SetColumnSpan(SearchHost,narrow?2:1);
+        SearchHost.Margin=new Thickness(narrow?0:16,narrow?12:0,0,0);
+        if(PlayerVolume!=null)PlayerVolume.Visibility=ActualWidth<1000?Visibility.Collapsed:Visibility.Visible;
     }
     async Task ScanLibrary(bool refreshMetadata=true)
     {
@@ -66,6 +80,8 @@ public partial class MainWindow : Window
         catch (Exception e) { store.Log(e); Status.Text = "Could not scan your library: " + e.Message; }
         finally { scanning = false; }
     }
+    void Discover_Click(object sender,RoutedEventArgs e)=>Navigate("Discover");
+    void Downloads_Click(object sender,RoutedEventArgs e)=>Navigate("Downloads");
     void Home_Click(object sender, RoutedEventArgs e) => Navigate("Home");
     void Movies_Click(object sender, RoutedEventArgs e) => Navigate("Movies");
     void Shows_Click(object sender, RoutedEventArgs e) => Navigate("Shows");
@@ -73,22 +89,42 @@ public partial class MainWindow : Window
     void Watchlist_Click(object sender, RoutedEventArgs e) => Navigate("My List");
     void Settings_Click(object sender, RoutedEventArgs e) => Navigate("Settings");
     async void Scan_Click(object sender, RoutedEventArgs e) => await ScanLibrary();
-    void Search_Changed(object sender, TextChangedEventArgs e) { if (ready) { detailKey=null; if(page=="Settings") page="Home"; Render(); } }
+    DispatcherTimer? searchDebounce;
+    void Search_Changed(object sender, TextChangedEventArgs e)
+    {
+        if(!ready)return;
+        searchDebounce??=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(220)};
+        searchDebounce.Stop();searchDebounce.Tick-=CommitSearch;searchDebounce.Tick+=CommitSearch;searchDebounce.Start();
+    }
+    void CommitSearch(object? sender,EventArgs e){searchDebounce?.Stop();if(page=="Discover"){discoverTitle=null;_=SearchDiscover();return;}detailKey=null;if(page=="Settings")page="Home";Render();ContentScroll.ScrollToTop();}
     void Navigate(string target)
     {
-        page = target; detailKey = null;detailSeason=null;
+        CancelDiscover();SmoothScrolling.Stop(ContentScroll);page = target; detailKey = null;detailSeason=null;discoverTitle=null;
         SearchBox.Text = "";
+        searchDebounce?.Stop();
         Render();
         ContentScroll.ScrollToTop();
     }
     void Render()
     {
-        ContentPanel.Children.Clear();
+        var context=page+"|"+detailKey+"|"+SearchBox.Text;
+        var offset=context==renderedContext?ContentScroll.VerticalOffset:0;renderedContext=context;
+        var focused=Keyboard.FocusedElement as FrameworkElement;var focusName=focused!=null?System.Windows.Automation.AutomationProperties.GetName(focused):"";
+        try{
+        downloadPageUpdate=null;SmoothScrolling.Stop(ContentScroll);ContentPanel.Children.Clear();
+        SearchHost.Visibility=page=="Downloads"?Visibility.Collapsed:Visibility.Visible;
+        SearchPlaceholder.Text=page=="Discover"?"Search new movies & shows":"Search your library";
+        SearchBox.ToolTip=page=="Discover"?"Find new movies and shows online":"Search your library";
+        PageEyebrow.Text=page=="Discover"?"FIND YOUR NEXT WATCH":page=="Downloads"?"SAVED TO YOUR PC":"LOCAL LIBRARY";
+        DiscoverNav.Background=Brush(page=="Discover"?"#2C2720":"Transparent");
+        DownloadsNav.Background=Brush(page=="Downloads"?"#2C2720":"Transparent");
         HomeNav.Background = Brush(page == "Home" ? "#2C2720" : "Transparent");
         MovieNav.Background = Brush(page == "Movies" ? "#2C2720" : "Transparent");
         ShowNav.Background = Brush(page == "Shows" ? "#2C2720" : "Transparent");
         HistoryNav.Background = Brush(page == "History" ? "#2C2720" : "Transparent");
         WatchlistNav.Background = Brush(page == "My List" ? "#2C2720" : "Transparent");
+        if(page=="Downloads"){RenderDownloads();return;}
+        if(page=="Discover"){RenderDiscover();return;}
         if (page == "Settings") { RenderSettings(); return; }
         if (detailKey != null)
         {
@@ -145,8 +181,10 @@ public partial class MainWindow : Window
         }
         if (page != "Movies") Catalog(groups.Where(g=>!g[0].IsMovie).ToList(),"Shows");
         if (page != "Shows") Catalog(groups.Where(g=>g[0].IsMovie).ToList(),"Movies");
+        }finally{ContentScroll.ScrollToVerticalOffset(offset);if(focusName.Length>0)ViewElements(ContentPanel).FirstOrDefault(e=>System.Windows.Automation.AutomationProperties.GetName(e)==focusName)?.Focus();}
     }
-    void OpenDetails(List<VideoItem> group) { if(group.Count==0) return;detailKey=group[0].GroupKey;detailSeason=null;episodeFilter="All episodes";Render();ContentScroll.ScrollToTop(); }
+    string detailTab="Episodes";
+    void OpenDetails(List<VideoItem> group) { if(group.Count==0) return;searchDebounce?.Stop();detailTab=group[0].IsMovie?"About":"Episodes";detailKey=group[0].GroupKey;detailSeason=null;episodeFilter="All episodes";Render();ContentScroll.ScrollToTop(); }
     async Task RefreshMetadata(bool force=false)
     {
         if(closing) return;
@@ -170,7 +208,7 @@ public partial class MainWindow : Window
                     if(details!=null)foreach(var episode in details.Schedule.Where(e=>group.Any(i=>i.Available&&i.Season==e.Season&&i.Episode==e.Episode)&&e.Image.Length>0))
                     {try {episode.Image=await client.EpisodeArt(episode.Image,metadataCancellation.Token);}catch(Exception e){store.Log(e);}}
                     store.ApplyDetails(group[0].GroupKey,details,force);
-                    if(details!=null) {updated++;if(force) images.Clear();if(current==null) Render();}else unmatched++;
+                    if(details!=null) {updated++;if(force){images.Clear();imageBytes=0;}if(current==null) Render();}else unmatched++;
                 }
                 catch(OperationCanceledException) when(metadataCancellation.IsCancellationRequested) {break;}
                 catch(Exception e) {store.Log(e);failed++;}
@@ -199,41 +237,55 @@ public partial class MainWindow : Window
         b.Click+=(_,_)=>action();
         return b;
     }
-    BitmapImage? ImageSource(string path)
+    BitmapImage? ImageSource(string path,int width=1200)
     {
         if(!File.Exists(path)) return null;
-        if(images.TryGetValue(path,out var cached)) return cached;
-        try { var image=new BitmapImage();image.BeginInit();image.UriSource=new Uri(path);image.CacheOption=BitmapCacheOption.OnLoad;image.EndInit();image.Freeze();images[path]=image;return image; }
+        var cacheKey=path+"|"+width;
+        if(images.TryGetValue(cacheKey,out var cached)) return cached;
+        try {
+            var image=new BitmapImage();image.BeginInit();image.UriSource=new Uri(path);image.CacheOption=BitmapCacheOption.OnLoad;image.DecodePixelWidth=width;image.EndInit();image.Freeze();
+            var bytes=(long)image.PixelWidth*image.PixelHeight*4;
+            while(images.Count>0&&(images.Count>=100||imageBytes+bytes>64L*1024*1024)){var first=images.First();imageBytes-= (long)first.Value.PixelWidth*first.Value.PixelHeight*4;images.Remove(first.Key);}
+            images[cacheKey]=image;imageBytes+=bytes;return image;
+        }
         catch { return null; }
     }
     FrameworkElement Art(string path,string title,double height,bool portrait=false)
     {
-        var source=ImageSource(path);
+        var source=ImageSource(path,portrait?384:640);
         if(source!=null) return new Image { Source=source,Stretch=Stretch.UniformToFill,Height=height,ClipToBounds=true };
         var grid=new Grid { Height=height,Background=new LinearGradientBrush(Brush("#36312B").Color,Brush("#131315").Color,35) };
         var text=Text(title,portrait?25:21,weight:FontWeights.SemiBold);text.Margin=new(20);text.VerticalAlignment=VerticalAlignment.Center;
         grid.Children.Add(text);
         return grid;
     }
-    void Window_Closing(object? sender,System.ComponentModel.CancelEventArgs e)
+    bool closeReady;
+    async void Window_Closing(object? sender,System.ComponentModel.CancelEventArgs e)
     {
-        if(closing) return;
+        if(closeReady)return;
+        e.Cancel=true;if(closing)return;
         closing=true;
         StopWatchingFolders();
-        metadataCancellation.Cancel();
+        metadataCancellation.Cancel();CancelDiscover();SmoothScrolling.Stop(ContentScroll);downloadPageUpdate=null;
         HidePreview();
+        if(previews!=null)await previews.DisposeAsync();
         SavePlayback();
         watchSync?.Dispose();
+        downloads?.Dispose();
         if(mobileSync!=null) _=mobileSync.DisposeAsync();
         tick?.Stop(); nextTimer?.Stop(); hideTimer?.Stop();sleepTimer?.Stop();
+        clickTimer?.Stop();hintTimer?.Stop();searchDebounce?.Stop();
         if(player!=null)
         {
             DetachEvents();
-            player.Stop(); Video.MediaPlayer=null; player.Dispose(); media?.Dispose(); vlc?.Dispose();
+            Video.MediaPlayer=null;
+            var native=player;player=null;await nativeTransition.WaitAsync();
+            try{await Task.Run(()=>{native.Stop();native.Dispose();media?.Dispose();vlc?.Dispose();});}finally{nativeTransition.Release();}
         }
         store.State.Volume=(int)VolumeBar.Value;
-        store.Save();
+        try{await Task.Run(store.Save);await store.FlushPendingAsync();}catch(Exception error){try{store.Log(error);}catch{}}
         Video.Dispose();
+        closeReady=true;Close();
     }
 }
 

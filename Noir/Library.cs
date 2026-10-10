@@ -165,6 +165,13 @@ public sealed partial class LibraryStore
     readonly string statePath;
     readonly Dictionary<string, MediaSeed> metadata;
     readonly object gate = new();
+    readonly object writeGate=new(),saveQueueGate=new();
+    long saveRevision,writtenRevision;
+    (long Revision,byte[] Data)? queuedSnapshot;
+    Task saveWorker=Task.CompletedTask;
+    bool writerRunning;
+    Exception? saveFailure;
+    public event Action<Exception>? PersistenceFailed;
     readonly Dictionary<string,string> activeViewings = new();
     static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
     public LibraryStore(string? directory = null)
@@ -226,12 +233,45 @@ public sealed partial class LibraryStore
     public void Log(Exception e) => File.AppendAllText(System.IO.Path.Combine(DataDirectory, "errors.log"), $"{DateTimeOffset.Now:o} {e}\n");
     public void Save()
     {
-        lock (gate)
+        (long Revision,byte[] Data) snapshot;
+        lock(gate)snapshot=(++saveRevision,JsonSerializer.SerializeToUtf8Bytes(State,JsonOptions));
+        WriteSnapshot(snapshot);
+    }
+    public void SaveDeferred()
+    {
+        (long Revision,byte[] Data) snapshot;
+        lock(gate)snapshot=(++saveRevision,JsonSerializer.SerializeToUtf8Bytes(State,JsonOptions));
+        lock(saveQueueGate)
         {
+            queuedSnapshot=snapshot;
+            if(writerRunning)return;
+            writerRunning=true;saveWorker=Task.Run(DrainSaves);
+        }
+    }
+    void DrainSaves()
+    {
+        while(true)
+        {
+            (long Revision,byte[] Data) snapshot;
+            lock(saveQueueGate){if(queuedSnapshot is not {} next){writerRunning=false;return;}snapshot=next;queuedSnapshot=null;}
+            try{WriteSnapshot(snapshot);}
+            catch(Exception e){saveFailure=e;try{Log(e);}catch{}PersistenceFailed?.Invoke(e);}
+        }
+    }
+    public async Task FlushPendingAsync()
+    {
+        while(true){Task pending;lock(saveQueueGate)pending=saveWorker;await pending.ConfigureAwait(false);lock(saveQueueGate)if(!writerRunning)break;}
+        if(saveFailure is {} error)throw new IOException("Your latest library changes could not be saved.",error);
+    }
+    void WriteSnapshot((long Revision,byte[] Data) snapshot)
+    {
+        lock(writeGate)
+        {
+            if(snapshot.Revision<=writtenRevision)return;
             var temp = statePath + ".tmp";
             using(var file=new FileStream(temp,FileMode.Create,FileAccess.Write,FileShare.None))
             {
-                JsonSerializer.Serialize(file,State,JsonOptions);
+                file.Write(snapshot.Data);
                 file.Flush(true);
             }
             // Windows scanners can briefly hold an otherwise writable JSON file. Keep the
@@ -241,7 +281,7 @@ public sealed partial class LibraryStore
                 try
                 {
                     if(File.Exists(statePath)) File.Copy(statePath,statePath+".bak",true);
-                    File.Move(temp,statePath,true);break;
+                    File.Move(temp,statePath,true);writtenRevision=snapshot.Revision;saveFailure=null;break;
                 }
                 catch(Exception e) when(attempt<5&&(e is IOException||e is UnauthorizedAccessException)) {Thread.Sleep(40*(attempt+1));}
             }
@@ -293,7 +333,7 @@ public sealed partial class LibraryStore
             return (State.EpisodeSchedules.GetValueOrDefault(groupKey)??[]).Where(e=>e.Season>0&&e.AirsAt<=now&&!available.Contains((e.Season,e.Episode))).OrderBy(e=>e.Season).ThenBy(e=>e.Episode).ToList();
         }
     }
-    public bool Record(VideoItem item, double position, double duration, bool completed=false,DateTimeOffset? expectedUpdatedAt=null)
+    public bool Record(VideoItem item, double position, double duration, bool completed=false,DateTimeOffset? expectedUpdatedAt=null,bool deferSave=false)
     {
         if (!double.IsFinite(position) || position < 0 || !double.IsFinite(duration) || duration < 0) return false;
         bool newlyCompleted;
@@ -311,7 +351,7 @@ public sealed partial class LibraryStore
         if(newlyCompleted) AddViewing(entry.Item,viewingId,entry.Progress.UpdatedAt,"Playback");
         if(duration>0) entry.Item.Duration=duration;
         if(newlyCompleted) CommunityQueue.Enqueue(State,entry.Item,entry.Progress.UpdatedAt);
-        Save();
+        if(deferSave)SaveDeferred();else Save();
         }
         if(newlyCompleted) WatchCompleted?.Invoke();
         return true;

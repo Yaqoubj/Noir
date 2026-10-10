@@ -53,6 +53,22 @@ public sealed class MetadataClient : IDisposable
         response.EnsureSuccessStatusCode();return JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
     }
     public async Task<OnlineDetails?> Fetch(VideoItem item,CancellationToken token=default) => item.IsMovie?await Movie(item,token):await Show(item,token);
+    public async Task<string> DownloadIdentity(VideoItem item,CancellationToken token=default)
+    {
+        if(Regex.IsMatch(item.ImdbId,@"^tt\d+$"))return item.ImdbId;
+        if(!item.IsMovie){
+            var match=Regex.Match(item.SourceUrl,@"^https://(?:www\.)?tvmaze\.com/shows/(\d+)(?:/|$)");
+            if(match.Success){using var doc=await Json("https://api.tvmaze.com/shows/"+match.Groups[1].Value,token);var id=Value(Child(doc.RootElement,"externals"),"imdb");if(Regex.IsMatch(id,@"^tt\d+$"))return id;}
+            using var search=await Json("https://api.tvmaze.com/search/shows?q="+Uri.EscapeDataString(item.Title),token);
+            var matches=search.RootElement.EnumerateArray().Select(x=>Child(x,"show")).Where(x=>Normal(Value(x,"name"))==Normal(item.Title)&&(item.Year==0||Value(x,"premiered").StartsWith(item.Year.ToString()))).ToList();
+            if(matches.Count==1){var id=Value(Child(matches[0],"externals"),"imdb");if(Regex.IsMatch(id,@"^tt\d+$"))return id;}
+        }
+        // Cinemeta supplies IMDb identities. Only a unique exact title/year match is accepted.
+        using var catalog=await Json("https://v3-cinemeta.strem.io/catalog/"+(item.IsMovie?"movie":"series")+"/top/search="+Uri.EscapeDataString(item.Title)+".json",token);
+        var metas=Child(catalog.RootElement,"metas");if(metas.ValueKind!=JsonValueKind.Array)return "";
+        var candidates=metas.EnumerateArray().Where(m=>Normal(Value(m,"name"))==Normal(item.Title)&&(item.Year==0||Value(m,"releaseInfo").StartsWith(item.Year.ToString()))).ToList();
+        return candidates.Count==1&&Regex.IsMatch(Value(candidates[0],"id"),@"^tt\d+$")?Value(candidates[0],"id"):"";
+    }
     async Task<OnlineDetails?> Show(VideoItem item,CancellationToken token)
     {
         var title=LibraryStore.CleanShowTitle(item.Title);
@@ -144,7 +160,7 @@ public sealed class MetadataClient : IDisposable
         var bytes=await response.Content.ReadAsByteArrayAsync(token);
         if(bytes.Length==0 || bytes.Length>20_000_000) return "";
         if(refreshArtwork) path=Path.Combine(artDirectory,Convert.ToHexString(SHA256.HashData(bytes))+".jpg");
-        var temp=path+".tmp";await File.WriteAllBytesAsync(temp,bytes,token);File.Move(temp,path,true);return path;
+        var temp=path+"."+Guid.NewGuid().ToString("N")+".tmp";try{await File.WriteAllBytesAsync(temp,bytes,token);File.Move(temp,path,true);}finally{if(File.Exists(temp))File.Delete(temp);}return path;
     }
     public void Dispose()=>http.Dispose();
 }

@@ -8,7 +8,7 @@ public partial class MainWindow {
  var results=new List<string>();void Check(bool ok,string label){if(!ok)throw new Exception(label);results.Add("PASS: "+label);}
  try{
  Navigate("History");UpdateLayout();await Task.Delay(200);Check(Descendants(ContentPanel).OfType<ProgressBar>().Any(),"Collection cards show progress");CaptureLibrary(Path.Combine(store.DataDirectory,"premium-history.png"));
- historyView="Diary";historyMonth="All time";Render();UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"premium-diary.png"));Check(Descendants(ContentPanel).OfType<TextBlock>().Any(t=>t.Text.Contains("Viewings")),"Diary shows monthly recap");
+ historyView="Diary";historyMonth="All time";Render();UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"premium-diary.png"));Check(Descendants(ContentPanel).OfType<TextBlock>().Any(t=>t.Text.Contains("viewings",StringComparison.OrdinalIgnoreCase)),"Diary shows monthly recap");
  Navigate("Home");UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"premium-home.png"));
  var show=store.Archive.First(i=>!i.IsMovie);detailKey=show.GroupKey;detailSeason=1;Render();UpdateLayout();ContentScroll.ScrollToVerticalOffset(480);await Task.Delay(100);CaptureLibrary(Path.Combine(store.DataDirectory,"premium-episodes.png"));Check(Descendants(ContentPanel).OfType<ProgressBar>().Any(),"Episode page shows season progress");
  store.SetCollection(show,"Evening picks",true);Navigate("My List");collectionFilter="Evening picks";Render();UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"premium-collection.png"));Check(Descendants(ContentPanel).OfType<Button>().Any(b=>b.Content?.ToString()=="Evening picks"),"Named collection is selectable");

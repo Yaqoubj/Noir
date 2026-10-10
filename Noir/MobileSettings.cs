@@ -12,7 +12,8 @@ public partial class MainWindow
     {
         try
         {
-            mobileSync=new(store,store.MobileSnapshot,ops=>Dispatcher.Invoke(()=>{var ack=store.MergeMobile(ops);if(current==null&&!closing) Render();return ack;}),port);
+            mobileSync=new(store,store.MobileSnapshot,ops=>Dispatcher.Invoke(()=>{var ack=store.MergeMobile(ops);if(ops.Count>0&&current==null&&!closing&&page!="Settings") Render();return ack;}),port,downloads);
+            mobileSync.Discovered+=()=>Dispatcher.BeginInvoke(()=>{if(current==null&&!closing&&page is not ("Settings" or "Downloads" or "Discover"))Render();});
             await mobileSync.SetEnabled(mobileSync.Config.Enabled);
         }
         catch(Exception e) {store.Log(e);}
