@@ -1,4 +1,6 @@
-# Noir 0.12.1 / Android 0.4.0
+# Noir 0.12.2 / Android 0.4.1
+
+Android's Subtitles menu downloads English/Arabic files to the phone and can request a smart timing check from this PC. The PC verifies the video fingerprint, processes the subtitle in a temporary local workspace, and returns a correction only when confident. Your original PC subtitle files stay intact. Both language choices and manual timing remain saved on the phone.
 
 **Discover** searches new movies and TV shows, including anime, using Cinemeta without a separate API key. Open a poster for its synopsis, year, rating and full known episode list. Save it to My List, choose a released episode, or find season downloads through your existing AIOStreams/TorBox connection. Review files before confirming. Search results, schedules and downloaded artwork remain cached for offline browsing; browsing and saving never create watched history. Initial result grids load thirty cards at a time.
 
@@ -26,7 +28,7 @@ Review windows remember their last tab and sign-ins. Compact/embed mode has been
 
 A Windows movie and TV library with a black interface and embedded VLC playback.
 
-## Android companion (Windows 0.12.1 / Android 0.4.0)
+## Android companion (Windows 0.12.2 / Android 0.4.1)
 
 Review windows open the original community websites. Noir remembers the chosen Reddit discussion per episode/movie on that device and disposes the browser on close. Compact/embed mode was removed in 0.8.0. These websites require an internet connection.
 
@@ -114,14 +116,14 @@ Core regression tests live in the neighboring `Noir.Checks` project. They cover 
 
 ## Third-party components
 
-Playback uses [VideoLAN LibVLC](https://www.videolan.org/vlc/libvlc.html) and [LibVLCSharp](https://code.videolan.org/videolan/LibVLCSharp); review pages use [Microsoft WebView2](https://learn.microsoft.com/en-us/microsoft-edge/webview2/). Their licenses are preserved with the installed binaries and license files. Metadata sources: [Cinemeta](https://github.com/Stremio/stremio-official-addons/blob/master/index.json), [TVmaze](https://www.tvmaze.com/api) (CC BY-SA), [Wikipedia](https://en.wikipedia.org/wiki/Wikipedia:Copyrights) (CC BY-SA), and [IMDb's personal-use episode index](https://data.imdb.com/non-commercial-datasets/). Links to matching metadata source pages are preserved in title details. UI choices draw on [HBO Max's browsing, My List and Continue Watching guidance](https://help.hbomax.com/tk-en/answer/detail/000002559) and [Netflix's subtitle appearance guidance](https://help.netflix.com/en/node/100267). Windows version 0.12.1.
+Playback uses [VideoLAN LibVLC](https://www.videolan.org/vlc/libvlc.html) and [LibVLCSharp](https://code.videolan.org/videolan/LibVLCSharp); review pages use [Microsoft WebView2](https://learn.microsoft.com/en-us/microsoft-edge/webview2/). Their licenses are preserved with the installed binaries and license files. Metadata sources: [Cinemeta](https://github.com/Stremio/stremio-official-addons/blob/master/index.json), [TVmaze](https://www.tvmaze.com/api) (CC BY-SA), [Wikipedia](https://en.wikipedia.org/wiki/Wikipedia:Copyrights) (CC BY-SA), and [IMDb's personal-use episode index](https://data.imdb.com/non-commercial-datasets/). Links to matching metadata source pages are preserved in title details. UI choices draw on [HBO Max's browsing, My List and Continue Watching guidance](https://help.hbomax.com/tk-en/answer/detail/000002559) and [Netflix's subtitle appearance guidance](https://help.netflix.com/en/node/100267). Windows version 0.12.2.
 
 
 
 
 
 
-## AIOStreams downloads and browsing, 0.12.1
+## AIOStreams downloads and browsing, 0.12.2
 
 Noir uses TorBox for downloads and AIOStreams for discovery. A wrapped playback URL is not a download reference. If your host hides those references, open Settings → Downloads → AIOStreams download connection and import a configuration export that includes credentials. Noir creates a separate profile on that same AIOStreams host with its documented hash formatter. The original Stremio profile remains unchanged. A retired TorBox Search preset is omitted only from the new copy; Noir still reads your TorBox account directly. Private manifests and the original connection are encrypted for your Windows account.
 

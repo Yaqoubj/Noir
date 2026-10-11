@@ -1,8 +1,10 @@
-# Noir for Android 0.4.0
+# Noir for Android 0.4.1
+
+The player renders embedded subtitles on a separate VLC surface. Open **Subtitles** to download English or Arabic, choose a saved file, or adjust its timing. Downloads are matched to the exact video when possible and stay on the phone for offline use. Smart sync uses Windows Noir 0.12.2 to compare against the same video's dialogue; it checks the video fingerprint first and keeps the original subtitle when timing is uncertain. Manual timing and your language choice persist after closing the player.
 
 Discover searches movies and TV shows, caches posters and episode schedules, and sends episode or season download requests to your paired PC. **More → Downloads** opens the live PC queue and your phone's offline downloads. Browse Discover without a PC connection; saving My List or requesting a PC download requires Windows Noir to be open and reachable.
 
-A native Java Android companion to Windows Noir 0.12.1, using VideoLAN LibVLC for playback. Android 8+ is required.
+A native Java Android companion to Windows Noir 0.12.2, using VideoLAN LibVLC for playback. Android 8+ is required.
 
 ## Install and pair
 

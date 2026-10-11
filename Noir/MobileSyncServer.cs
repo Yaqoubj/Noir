@@ -27,6 +27,7 @@ public sealed class MobileSyncServer : IAsyncDisposable
     readonly X509Certificate2 certificate;
     readonly int port;
     readonly PcDownloads? downloads;
+    readonly MobileSubtitleTools subtitleTools;
     readonly Dictionary<string,(int Count,DateTimeOffset Since)> attempts=[];
     WebApplication? app;
     string pairCode="";
@@ -37,7 +38,7 @@ public sealed class MobileSyncServer : IAsyncDisposable
     public string Pin=>Convert.ToHexString(SHA256.HashData(certificate.RawData));
     public MobileSyncServer(LibraryStore store,Func<MobileSnapshot> snapshot,Func<List<MobileOperation>,List<string>> merge,int port=Port,PcDownloads? downloads=null)
     {
-        this.store=store;this.snapshot=snapshot;this.merge=merge;this.port=port;this.downloads=downloads;
+        this.store=store;this.snapshot=snapshot;this.merge=merge;this.port=port;this.downloads=downloads;subtitleTools=new(store);
         configPath=Path.Combine(store.DataDirectory,"mobile-host.json");
         if(File.Exists(configPath))
         {
@@ -111,6 +112,11 @@ public sealed class MobileSyncServer : IAsyncDisposable
                     var auth=ctx.Request.Headers.Authorization.ToString();
                     if(!auth.StartsWith("Bearer ",StringComparison.Ordinal)||!Authorized(auth[7..])) {ctx.Response.StatusCode=401;return;}
                 }
+                if(ctx.Request.Path.StartsWithSegments("/v1/subtitle-tools")&&ctx.Request.Path.Value!.EndsWith("/sync",StringComparison.Ordinal))
+                {
+                    var limit=ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
+                    if(limit is {IsReadOnly:false})limit.MaxRequestBodySize=6*1024*1024;
+                }
                 await next(ctx);
             });
             host.MapPost("/v1/pair",async(HttpContext ctx)=>
@@ -181,6 +187,16 @@ public sealed class MobileSyncServer : IAsyncDisposable
                 var item=store.Archive.FirstOrDefault(i=>i.Id==id);
                 var found=item==null?null:MobileSubtitles.Find(item).Where(s=>s.Info.Id==subtitle).Select(s=>s.Path).FirstOrDefault();
                 return found!=null?Results.File(found,"application/octet-stream"):Results.NotFound();
+            });
+            host.MapGet("/v1/subtitle-tools/{id}",async(string id,HttpContext ctx)=>
+            {
+                try{return Results.Json(await subtitleTools.Info(id,ctx.RequestAborted),Json);}
+                catch(IOException e){return Results.Json(new{error=e.Message},Json,statusCode:404);}
+            });
+            host.MapPost("/v1/subtitle-tools/{id}/sync",async(string id,MobileSubtitleSyncInput input,HttpContext ctx)=>
+            {
+                try{return Results.Json(await subtitleTools.Sync(id,input,ctx.RequestAborted),Json);}
+                catch(IOException e){return Results.Json(new{error=e.Message},Json,statusCode:400);}
             });
             await host.StartAsync();app=host;Status=$"Ready · HTTPS port {port}";
         }

@@ -42,7 +42,7 @@ final class DiscoveryClient {
         BitmapFactory.Options options=new BitmapFactory.Options();options.inSampleSize=1;while(bounds.outWidth/options.inSampleSize>768)options.inSampleSize*=2;bitmap=BitmapFactory.decodeFile(file.getPath(),options);if(bitmap!=null)bitmaps.put(url,bitmap);return bitmap;
     }
     static byte[] fetch(String url,int maximum)throws Exception{
-        HttpsURLConnection connection=(HttpsURLConnection)new URL(url).openConnection();connection.setConnectTimeout(6000);connection.setReadTimeout(15000);connection.setRequestProperty("User-Agent","Noir-Android/0.4.0");try{if(connection.getResponseCode()!=200)throw new IOException("Discover is temporarily unavailable.");try(InputStream input=connection.getInputStream()){return DataStore.read(input,maximum);}}finally{connection.disconnect();}
+        HttpsURLConnection connection=(HttpsURLConnection)new URL(url).openConnection();connection.setConnectTimeout(6000);connection.setReadTimeout(15000);connection.setRequestProperty("User-Agent","Noir-Android/0.4.1");try{if(connection.getResponseCode()!=200)throw new IOException("Discover is temporarily unavailable.");try(InputStream input=connection.getInputStream()){return DataStore.read(input,maximum);}}finally{connection.disconnect();}
     }
     static void write(File file,byte[] bytes)throws Exception{AtomicFile output=new AtomicFile(file);FileOutputStream stream=output.startWrite();try{stream.write(bytes);output.finishWrite(stream);}catch(Exception e){output.failWrite(stream);throw e;}}
 }

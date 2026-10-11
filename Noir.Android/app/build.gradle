@@ -9,7 +9,7 @@ android {
     }
     namespace 'app.noir.mobile'
     compileSdk 36
-    defaultConfig { applicationId 'app.noir.mobile'; minSdk 26; targetSdk 35; versionCode 7; versionName '0.4.0'; testInstrumentationRunner 'app.noir.mobile.TestRunner' }
+    defaultConfig { applicationId 'app.noir.mobile'; minSdk 26; targetSdk 35; versionCode 8; versionName '0.4.1'; testInstrumentationRunner 'app.noir.mobile.TestRunner' }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     defaultConfig { if(project.hasProperty('noirAbi')) { ndk { abiFilters project.property('noirAbi') } } }
     buildTypes { release { minifyEnabled false; if (hasReleaseKey) { signingConfig signingConfigs.noir } } }
