@@ -31,35 +31,21 @@ public partial class MainWindow
         var button=new Button {Content="⋯",Width=34,Height=30,FontSize=22,Padding=new(0),Background=Brush("#D9101012"),HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Top,Margin=new(8),ToolTip="Options for "+item.Label};
         System.Windows.Automation.AutomationProperties.SetName(button,"Options for "+item.Label);
         button.Click+=(_,e)=>{e.Handled=true;var menu=ItemMenu(item);menu.PlacementTarget=button;menu.Placement=PlacementMode.Bottom;menu.IsOpen=true;};
+        // Shown only while the pointer is over the card (or it has focus), so rows stay clean.
+        button.Opacity=0;button.Loaded+=(_,_)=>{if(VisualTreeHelper.GetParent(button) is UIElement host){host.MouseEnter+=(_,_)=>button.Opacity=1;host.MouseLeave+=(_,_)=>{if(!button.IsKeyboardFocused)button.Opacity=0;};}};
+        button.GotKeyboardFocus+=(_,_)=>button.Opacity=1;button.LostKeyboardFocus+=(_,_)=>button.Opacity=0;
         return button;
     }
     FrameworkElement ContinueShelf(IEnumerable<UpNext> videos,string label="Continue Watching",string subtitle="Pick up from your saved time, or play the next episode.")
     {
-        var container=new StackPanel();var title=new DockPanel{Margin=new(0,24,0,15)};
-        var arrows=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right};DockPanel.SetDock(arrows,Dock.Right);title.Children.Add(arrows);
-        var heading=new StackPanel();heading.Children.Add(Text(label,21,weight:FontWeights.SemiBold));heading.Children.Add(Body(subtitle,12));title.Children.Add(heading);
-        var row=new StackPanel{Orientation=Orientation.Horizontal};foreach(var entry in videos) row.Children.Add(ContinueCard(entry.Item,entry));
-        var scroll=new ScrollViewer {Content=row,HorizontalScrollBarVisibility=ScrollBarVisibility.Hidden,VerticalScrollBarVisibility=ScrollBarVisibility.Disabled,PanningMode=PanningMode.HorizontalOnly};
-        var previous=ActionButton("‹",()=>scroll.ScrollToHorizontalOffset(Math.Max(0,scroll.HorizontalOffset-576)));previous.ToolTip="Previous titles";previous.FontSize=22;previous.Padding=new(14,3,14,3);
-        var next=ActionButton("›",()=>scroll.ScrollToHorizontalOffset(Math.Min(scroll.ScrollableWidth,scroll.HorizontalOffset+576)));next.ToolTip="More titles";next.FontSize=22;next.Padding=new(14,3,14,3);next.Margin=new(8,0,0,0);arrows.Children.Add(previous);arrows.Children.Add(next);
-        void UpdateArrows(){previous.IsEnabled=scroll.HorizontalOffset>1;next.IsEnabled=scroll.HorizontalOffset<scroll.ScrollableWidth-1;arrows.Visibility=scroll.ScrollableWidth>1?Visibility.Visible:Visibility.Collapsed;}
-        scroll.ScrollChanged+=(_,_)=>UpdateArrows();scroll.Loaded+=(_,_)=>UpdateArrows();
-        scroll.PreviewMouseWheel+=(_,e)=>{if(System.Windows.Input.Keyboard.Modifiers.HasFlag(System.Windows.Input.ModifierKeys.Shift)){scroll.ScrollToHorizontalOffset(scroll.HorizontalOffset-e.Delta);e.Handled=true;}};
-        container.Children.Add(title);container.Children.Add(scroll);return container;
+        return Rail(label,subtitle,videos.Select(entry=>Lift(ContinueCard(entry.Item,entry))).ToList());
     }
     void RenderEpisodeAvailability(VideoItem item)
     {
         var schedule=store.State.EpisodeSchedules.GetValueOrDefault(item.GroupKey);if(schedule==null) return;
         var now=DateTimeOffset.UtcNow;var upcoming=schedule.Where(e=>e.AirsAt>now).OrderBy(e=>e.AirsAt).FirstOrDefault();
         if(upcoming!=null) ContentPanel.Children.Add(Body($"Next airing · S{upcoming.Season:00} E{upcoming.Episode:00} · {upcoming.AirsAt!.Value.ToLocalTime():ddd, d MMM yyyy}",13));
-        var missing=store.MissingEpisodes(item.GroupKey,now);if(missing.Count==0) return;
-        var rows=new StackPanel();rows.Children.Add(Body("Released episodes that are not in your local folders. Dates and numbering come from TVmaze; specials are excluded.",12));
-        foreach(var ep in missing)
-        {
-            var existing=store.Archive.FirstOrDefault(x=>x.GroupKey==item.GroupKey&&x.Season==ep.Season&&x.Episode==ep.Episode);
-            rows.Children.Add(Body($"S{ep.Season:00} · E{ep.Episode:00}"+(!store.State.HideSpoilers?" · "+ep.Title:"")+(existing!=null&&store.EverWatched(existing)?" · Watched · File unavailable":" · Not in folder"),12));
-        }
-        ContentPanel.Children.Add(new Expander {Header=$"{missing.Count} released episodes not in your folders",Content=rows,Margin=new(0,14,0,2),Foreground=Brush("#AAA6A0")});
+        RenderMissingRail(item);
     }
     Window DiaryWindow(VideoItem item)
     {

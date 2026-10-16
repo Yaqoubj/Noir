@@ -30,10 +30,10 @@ public partial class MainWindow : Window
         StartupTrace.Mark("MainWindow constructor");StartupTrace.WatchDispatcher(Dispatcher);
         InitializeComponent();
         ApplyNavigationIcons();
-        SourceInitialized+=(_,_)=>{WindowAppearance.Apply(this);WindowAppearance.Restore(this,store.DataDirectory);};
         PlayerOverlay.Visibility=Visibility.Collapsed;
         Video.Content=null;
         StartupTrace.Mark("UI built");store = new LibraryStore(dataDirectory);StartupTrace.Mark("Library loaded");
+        SourceInitialized+=(_,_)=>{WindowAppearance.Apply(this);WindowAppearance.Restore(this,store.DataDirectory);};
         store.PersistenceFailed+=_=>Dispatcher.BeginInvoke(()=>{if(!closing){SavedLabel.Text="Couldn't save progress";SavedLabel.Visibility=Visibility.Visible;Status.Text="Couldn't save the latest progress. Check your library storage.";}});
         validationMode=validate;
         if(!validate) watchSync=new CommunitySync(store,Dispatcher,()=>{if(!closing&&page=="Settings")Status.Text="Community sync updated. Reopen the Community section to see details.";});
@@ -56,11 +56,16 @@ public partial class MainWindow : Window
     }
     void Library_SizeChanged(object sender,SizeChangedEventArgs e)
     {
-        if(MainPane==null)return;var narrow=ActualWidth<1100;
-        SidebarColumn.Width=new GridLength(narrow?168:196);MainPane.Margin=new Thickness(narrow?20:34,narrow?20:26,narrow?20:34,0);
-        SearchColumn.Width=narrow?new GridLength(0):new GridLength(290);
-        Grid.SetRow(SearchHost,narrow?1:0);Grid.SetColumn(SearchHost,narrow?0:1);Grid.SetColumnSpan(SearchHost,narrow?2:1);
-        SearchHost.Margin=new Thickness(narrow?0:16,narrow?12:0,0,0);
+        if(ContentPanel==null)return;
+        // Generous margins on wide windows; the search field narrows before navigation does.
+        var pad=ActualWidth<1000?24:ActualWidth<1400?40:56;sidePad=pad;
+        var compact=ActualWidth<1100;
+        if(compact&&NavScroll.Parent==TopBarContent){TopBarContent.Children.Remove(NavScroll);CompactNavHost.Child=NavScroll;}
+        else if(!compact&&NavScroll.Parent==CompactNavHost){CompactNavHost.Child=null;TopBarContent.Children.Add(NavScroll);}
+        CompactNavHost.Visibility=compact?Visibility.Visible:Visibility.Collapsed;
+        CompactNavHost.Margin=new Thickness(pad,0,pad,0);NavScroll.Margin=compact?new Thickness(0):new Thickness(34,0,16,0);
+        TopBar.Height=compact?126:78;ApplyPageLayout();
+        SearchHost.Width=ActualWidth<1100?190:270;TopBarContent.Margin=new Thickness(Math.Max(20,pad-12),0,Math.Max(16,pad-20),0);
         if(PlayerVolume!=null)PlayerVolume.Visibility=ActualWidth<1000?Visibility.Collapsed:Visibility.Visible;
     }
     async Task ScanLibrary(bool refreshMetadata=true)
@@ -119,14 +124,11 @@ public partial class MainWindow : Window
         SearchHost.Visibility=page=="Downloads"?Visibility.Collapsed:Visibility.Visible;
         SearchPlaceholder.Text=page=="Discover"?"Search new movies & shows":"Search your library";
         SearchBox.ToolTip=page=="Discover"?"Find new movies and shows online":"Search your library";
-        PageEyebrow.Text=page=="Discover"?"FIND YOUR NEXT WATCH":page=="Downloads"?"SAVED TO YOUR PC":"LOCAL LIBRARY";
-        DiscoverNav.Background=Brush(page=="Discover"?"#2C2720":"Transparent");
-        DownloadsNav.Background=Brush(page=="Downloads"?"#2C2720":"Transparent");
-        HomeNav.Background = Brush(page == "Home" ? "#2C2720" : "Transparent");
-        MovieNav.Background = Brush(page == "Movies" ? "#2C2720" : "Transparent");
-        ShowNav.Background = Brush(page == "Shows" ? "#2C2720" : "Transparent");
-        HistoryNav.Background = Brush(page == "History" ? "#2C2720" : "Transparent");
-        WatchlistNav.Background = Brush(page == "My List" ? "#2C2720" : "Transparent");
+        PageEyebrow.Text=page switch{"Discover"=>"FIND YOUR NEXT WATCH","Downloads"=>"SAVED TO YOUR PC","Settings"=>"PREFERENCES","History"=>"YOUR VIEWING LIFE","My List"=>"SAVED FOR LATER",_=>SearchBox.Text.Length>0?"SEARCH":"YOUR LIBRARY"};
+        // Home and title pages open on a full-bleed hero beneath the floating top bar.
+        cinematic=(page=="Home"&&SearchBox.Text.Length==0||detailKey!=null)&&page is not ("Settings" or "Discover" or "Downloads");ApplyPageLayout();
+        foreach(var (button,name) in new[]{(HomeNav,"Home"),(ShowNav,"Shows"),(MovieNav,"Movies"),(WatchlistNav,"My List"),(HistoryNav,"History"),(DiscoverNav,"Discover"),(DownloadsNav,"Downloads"),(SettingsNav,"Settings")})button.Tag=page==name?"Selected":null;
+        if(offset==0)PageEntrance();
         if(page=="Downloads"){RenderDownloads();return;}
         if(page=="Discover"){RenderDiscover();return;}
         if (page == "Settings") { RenderSettings(); return; }
@@ -166,15 +168,16 @@ public partial class MainWindow : Window
             var justFinished=latest!=null && store.UpNextFor(latest)==null && latest.Max(HistoryDate)>DateTimeOffset.UtcNow.AddDays(-3) && (continuations.Count==0||latest.Max(HistoryDate)>continuations[0].Activity);
             var heroNext=continuations.FirstOrDefault(x=>x.Kind!=UpNextKind.Upcoming);
             var hero = justFinished ? latest!.OrderByDescending(HistoryDate).First() : heroNext?.Item ?? ChoiceFor(groups.FirstOrDefault(g => g.Any(CanPlay)) ?? groups[0]);
-            ContentPanel.Children.Add(Hero(hero, groups.First(g=>g[0].GroupKey==hero.GroupKey), heroNext!=null&&!justFinished, justFinished));
+            var slides=new List<(VideoItem Item,List<VideoItem> Group,bool Continuing,bool Finished)>{(hero,groups.First(g=>g[0].GroupKey==hero.GroupKey),heroNext!=null&&!justFinished,justFinished)};
+            foreach(var more in continuations.Where(x=>x.Kind!=UpNextKind.Upcoming&&x.Item.GroupKey!=hero.GroupKey&&ImageSource(x.Item.Backdrop)!=null).Take(3))slides.Add((more.Item,groups.First(g=>g[0].GroupKey==more.Item.GroupKey),true,false));
+            foreach(var pick in groups.Where(g=>slides.All(s=>s.Item.GroupKey!=g[0].GroupKey)&&g.Any(CanPlay)&&!g.Any(store.EverWatched)&&ImageSource(g[0].Backdrop)!=null).OrderByDescending(g=>store.State.Watchlist.Contains(g[0].GroupKey)).ThenByDescending(g=>g.Max(i=>i.AddedAt)).Take(Math.Max(0,5-slides.Count)))slides.Add((ChoiceFor(pick),pick,false,false));
+            ContentPanel.Children.Add(HeroCarousel(slides));
             if (continuations.Count > 0)
             {
-                var resume=continuations.Where(x=>store.GetProgress(x.Item) is {Completed:false,Position:>0}).ToList();
-                var next=continuations.Where(x=>x.Kind!=UpNextKind.Upcoming).Except(resume).ToList();
-                var waiting=continuations.Where(x=>x.Kind==UpNextKind.Upcoming).ToList();
-                if(resume.Count>0)ContentPanel.Children.Add(ContinueShelf(resume,"Resume","Your exact saved positions."));
-                if(next.Count>0)ContentPanel.Children.Add(ContinueShelf(next,"Next episode",next.Any(x=>x.Kind==UpNextKind.NotOnPc)?"Continue after the episodes you finished. Episodes not on this PC can be downloaded in one click.":"Continue after the episodes you finished."));
-                if(waiting.Count>0)ContentPanel.Children.Add(ContinueShelf(waiting,"Waiting for new episodes","You're caught up. These return here when the next episode airs."));
+                // One shelf, most recent first: resumes, next episodes and downloads sit together;
+                // shows waiting for their next air date follow at the end.
+                var shelf=continuations.Where(x=>x.Kind!=UpNextKind.Upcoming).Concat(continuations.Where(x=>x.Kind==UpNextKind.Upcoming)).ToList();
+                ContentPanel.Children.Add(ContinueShelf(shelf,"Continue Watching",shelf.Any(x=>x.Kind==UpNextKind.NotOnPc)?"Resume, play the next episode, or get it on this PC in one click.":"Resume where you stopped or play the next episode."));
             }
             else ContentPanel.Children.Add(Heading("Continue Watching","Start a movie or episode. It will appear here when you return."));
         }
@@ -182,15 +185,24 @@ public partial class MainWindow : Window
         {
             RenderHomeExtras(groups);
             var watched=groups.Where(g=>g.Any(store.EverWatched)).OrderByDescending(g=>g.Max(HistoryDate)).Take(12).ToList();
-            if(watched.Count>0) Catalog(watched,"Recently watched · History");
+            if(watched.Count>0) RailCatalog(watched,"Recently watched","",()=>{historyView="Collection";Navigate("History");});
             var saved=groups.Where(g=>store.State.Watchlist.Contains(g[0].GroupKey)).ToList();
-            if(saved.Count>0) Catalog(saved,"My List");
+            if(saved.Count>0) RailCatalog(saved,"My List","",()=>Navigate("My List"));
         }
         if (groups.Count == 0)
         {
             if(page=="My List") {ContentPanel.Children.Add(Heading("Your next watch","Use + My List on any title to keep it here."));return;}
             ContentPanel.Children.Add(Heading(query.Length>0?"No matches":"Your cinema starts here",query.Length>0?"Try another title.":"Add your movie and show folders in Settings."));
             if(query.Length==0) ContentPanel.Children.Add(ActionButton("Add folders",()=>Navigate("Settings"),true));
+            return;
+        }
+        if(page=="Home")
+        {
+            // Home browses in rows; the full grids live on the Shows and Movies pages.
+            RailCatalog(groups.Where(g=>!g[0].IsMovie).OrderByDescending(g=>g.Max(HistoryDate)).ToList(),"Your shows","",()=>Navigate("Shows"));
+            RailCatalog(groups.Where(g=>g[0].IsMovie).OrderByDescending(g=>g.Max(HistoryDate)).ToList(),"Your movies","",()=>Navigate("Movies"));
+            foreach(var genre in groups.SelectMany(g=>g[0].Genres.Split('·',StringSplitOptions.TrimEntries|StringSplitOptions.RemoveEmptyEntries)).GroupBy(x=>x).Where(x=>x.Count()>=3).OrderByDescending(x=>x.Count()).Take(3).Select(x=>x.Key))
+                RailCatalog(groups.Where(g=>g[0].Genres.Split('·',StringSplitOptions.TrimEntries).Contains(genre)).ToList(),genre);
             return;
         }
         if (page != "Movies") Catalog(groups.Where(g=>!g[0].IsMovie).ToList(),"Shows");

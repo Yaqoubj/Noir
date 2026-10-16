@@ -62,6 +62,7 @@ public sealed class PlayerState
     public bool RunInBackground { get; set; } = true;
     public bool KeepAwakeWhileBusy { get; set; } = true;
     public bool BackgroundHintShown { get; set; }
+    public HashSet<string> NewEpisodeAlerts { get; set; } = [];
 }
 public sealed class ViewingRecord
 {

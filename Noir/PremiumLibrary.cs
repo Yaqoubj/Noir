@@ -5,17 +5,19 @@ using System.Windows.Media;
 namespace Noir;
 public partial class MainWindow
 {
-    string historyView="Collection",collectionFilter="My List",historyMonth="",statusFilter="All";
+    string historyView="Stats",collectionFilter="My List",historyMonth="",statusFilter="All";
     int diaryLimit=60;
     void RenderPremiumHistory()
     {
         PageTitle.Text="Watch history";
-        ContentPanel.Children.Add(Body("Your collection and viewing diary. Posters and dates stay here when files are gone."));
+        ContentPanel.Children.Add(Body("Your latest viewing, stats, collection and diary. Posters and dates stay here when files are gone."));
+        if(SearchBox.Text.Trim().Length==0)RenderLatest();
         var records=store.Archive.SelectMany(i=>store.ViewingHistory(i).Select(v=>(Item:i,View:v))).OrderByDescending(r=>r.View.WatchedAt).ToList();
         var months=records.Select(r=>r.View.WatchedAt.ToLocalTime().ToString("yyyy-MM")).Append(DateTime.Now.ToString("yyyy-MM")).Distinct().OrderDescending().ToList();
         if(historyMonth.Length==0)historyMonth=months[0];
-        var navigation=new WrapPanel{Margin=new(0,10,0,4)};var tabs=Chips(["Collection","Diary"],historyView,v=>{historyView=v;Render();});tabs.Margin=new(0);navigation.Children.Add(tabs);
+        var navigation=new WrapPanel{Margin=new(0,10,0,4)};var tabs=Chips(["Stats","Collection","Diary"],historyView,v=>{historyView=v;Render();});tabs.Margin=new(0);navigation.Children.Add(tabs);
         var month=ActionButton(historyMonth=="All time"?"All time ▾":DateTime.Parse(historyMonth+"-01").ToString("MMMM yyyy")+" ▾",()=>{});month.Margin=new(8,0,0,8);var monthMenu=new ContextMenu();foreach(var value in new[]{"All time"}.Concat(months)){var selected=value;var option=new MenuItem{Header=value=="All time"?value:DateTime.Parse(value+"-01").ToString("MMMM yyyy")};option.Click+=(_,_)=>{historyMonth=selected;diaryLimit=60;Render();};monthMenu.Items.Add(option);}month.Click+=(_,_)=>{monthMenu.PlacementTarget=month;monthMenu.IsOpen=true;};navigation.Children.Add(month);ContentPanel.Children.Add(navigation);
+        if(historyView=="Stats"){month.Visibility=Visibility.Collapsed;RenderHistoryStats();return;}
         var monthly=records.Where(r=>historyMonth=="All time"||r.View.WatchedAt.ToLocalTime().ToString("yyyy-MM")==historyMonth).ToList();
         var rewindCount=monthly.Count(r=>store.ViewingHistory(r.Item).Any(v=>v.WatchedAt<r.View.WatchedAt));
         ContentPanel.Children.Add(new Border{Background=Brush("#18181B"),CornerRadius=new(10),Padding=new(16,12,16,12),Margin=new(0,8,0,12),Child=Text($"{monthly.Count} viewings   ·   {monthly.Select(r=>r.Item.GroupKey).Distinct().Count()} titles   ·   {rewindCount} rewatches   ·   {monthly.Sum(r=>r.Item.Duration)/3600:0.#} h known runtime",13,"#C7C2BC")});
@@ -41,7 +43,7 @@ public partial class MainWindow
             if(filtered.Count==0)ContentPanel.Children.Add(Heading("No viewings in this month","Choose another month or All time."));
             if(filtered.Count>diaryLimit)ContentPanel.Children.Add(ActionButton("Load more viewings",()=>{diaryLimit+=60;Render();}));return;
         }
-        var filters=new WrapPanel{Margin=new(0,12,0,8)};foreach(var filter in new[]{Chips(["All","Movies","Shows"],historyType,v=>{historyType=v;Render();}),Chips(["All","Watching","Planned","Finished","Dropped","Unavailable"],statusFilter,v=>{statusFilter=v;Render();}),Chips(["Recent","A–Z"],historySort,v=>{historySort=v;Render();})}){filter.Margin=new(0);filters.Children.Add(filter);}ContentPanel.Children.Add(new Expander{Header="Filter collection · "+historyType+" · "+statusFilter+" · "+historySort,Content=filters,Margin=new(0,8,0,12)});
+        var filters=new WrapPanel{Margin=new(0,12,0,8)};foreach(var filter in new[]{Chips(["All","Movies","Shows"],historyType,v=>{historyType=v;Render();}),Chips(["All","Watching","Planned","Finished","Dropped","Unavailable"],statusFilter,v=>{statusFilter=v;Render();}),Chips(["Recent","A–Z"],historySort,v=>{historySort=v;Render();})}){filter.Margin=new(0);filters.Children.Add(filter);}filters.Margin=new(0,10,0,6);ContentPanel.Children.Add(filters);
         var groups=store.Archive.GroupBy(i=>i.GroupKey).Select(g=>store.EpisodesFor(g.Key)).Where(g=>g.Any(i=>store.EverWatched(i)||store.GetProgress(i) is {Position:>0})||store.State.TitleStatuses.ContainsKey(g[0].GroupKey)).Where(g=>g.Any(Fits))
             .Where(g=>statusFilter=="All"||(statusFilter=="Unavailable"?!g.Any(CanPlay):store.TitleStatus(g)==statusFilter))
             .Where(g=>historyFilter!="Unavailable"||!g.Any(CanPlay)).ToList();
@@ -94,10 +96,22 @@ public partial class MainWindow
     }
     void RenderHomeExtras(List<List<VideoItem>> groups)
     {
-        if(mobileSync!=null){ContentPanel.Children.Add(Body(mobileSync.Running?"Phone sync ready"+(mobileSync.Config.LastSyncAt is {} at?" · Last synced "+at.ToLocalTime().ToString("d MMM, HH:mm"):" · Waiting for first sync"):"Phone sync unavailable · Saved history is kept",12));}
-        if(store.State.PlayQueue.Count>0){ContentPanel.Children.Add(Heading("Your play queue","Saved on this PC. Files that are unavailable are skipped during playback."));var row=new WrapPanel();foreach(var id in store.State.PlayQueue.ToList()){var i=store.Archive.FirstOrDefault(i=>i.Id==id);if(i==null)continue;var card=new StackPanel{Width=288,Margin=new(0,0,15,12)};card.Children.Add(ContinueCard(i));var remove=ActionButton("Remove from queue",()=>{store.State.PlayQueue.Remove(id);store.Save();Render();});card.Children.Add(remove);var order=new WrapPanel();order.Children.Add(ActionButton("Move earlier",()=>{store.MoveQueue(id,-1);Render();}));order.Children.Add(ActionButton("Move later",()=>{store.MoveQueue(id,1);Render();}));card.Children.Add(order);row.Children.Add(card);}ContentPanel.Children.Add(row);}
-        var added=groups.Where(g=>g.Any(i=>i.AddedAt.HasValue)).OrderByDescending(g=>g.Max(i=>i.AddedAt)).Take(8).ToList();if(added.Count>0)Catalog(added,"Recently added");
-        var upcoming=store.State.EpisodeSchedules.SelectMany(g=>g.Value.Where(e=>e.Season>0&&e.AirsAt>DateTimeOffset.UtcNow&&e.AirsAt<DateTimeOffset.UtcNow.AddDays(30)).Select(e=>(Group:g.Key,Episode:e))).OrderBy(x=>x.Episode.AirsAt).Take(8).ToList();
-        if(upcoming.Count>0){ContentPanel.Children.Add(Heading("Coming up","Announced dates from your cached TVmaze information."));foreach(var x in upcoming){var g=groups.FirstOrDefault(g=>g[0].GroupKey==x.Group);if(g==null)continue;var b=ActionButton(g[0].Title+" · S"+x.Episode.Season.ToString("00")+" E"+x.Episode.Episode.ToString("00")+" · "+x.Episode.AirsAt!.Value.ToLocalTime().ToString("ddd, d MMM"),()=>OpenDetails(g));b.Margin=new(0,0,0,8);ContentPanel.Children.Add(b);}}
+        // The play queue as a row; order and removal are small icon buttons on each card.
+        var queued=store.State.PlayQueue.ToList().Select(id=>store.Archive.FirstOrDefault(i=>i.Id==id)).OfType<VideoItem>().ToList();
+        if(queued.Count>0)
+        {
+            var cards=new List<FrameworkElement>();var position=0;
+            foreach(var i in queued)
+            {
+                var id=i.Id;var card=(StackPanel)ContinueCard(i);var tools=new StackPanel{Orientation=Orientation.Horizontal,Margin=new(0,0,0,4)};
+                card.Children.Insert(1,new TextBlock{Text=$"#{++position} in queue",FontSize=11,Foreground=Brush("#E4C084"),Margin=new(0,8,0,0)});
+                Button Small(string glyph,string tip,Action act){var b=ActionButton(glyph,act);b.ToolTip=tip;b.Width=34;b.Height=30;b.Padding=new(0);b.Margin=new(0,0,6,0);b.Background=Brush("#1C1C1F");System.Windows.Automation.AutomationProperties.SetName(b,tip);tools.Children.Add(b);return b;}
+                Small("‹","Move earlier",()=>{store.MoveQueue(id,-1);Render();});Small("›","Move later",()=>{store.MoveQueue(id,1);Render();});Small("✕","Remove from queue",()=>{store.State.PlayQueue.Remove(id);store.Save();Render();});
+                card.Children.Add(tools);cards.Add(Lift(card));
+            }
+            ContentPanel.Children.Add(Rail("Your play queue","Plays in this order. Files that aren't on this PC are skipped.",cards));
+        }
+        var added=groups.Where(g=>g.Any(i=>i.AddedAt.HasValue)).OrderByDescending(g=>g.Max(i=>i.AddedAt)).Take(16).ToList();if(added.Count>0)RailCatalog(added,"Recently added");
+        RenderComingUp(groups);
     }
 }

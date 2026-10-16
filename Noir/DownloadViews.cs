@@ -9,7 +9,7 @@ public partial class MainWindow
     Action? downloadPageUpdate;
     int lastDownloadCount=-1;
     void DownloadChanged()=>Dispatcher.BeginInvoke(()=>{if(closing)return;UpdateDownloadBadge();UpdateBackgroundState();if(!hiddenInTray)downloadPageUpdate?.Invoke();});
-    void UpdateDownloadBadge(){var count=downloads?.Jobs().Count(j=>j.Status is "Queued" or "Preparing" or "Downloading" or "Subtitles")??0;if(count==lastDownloadCount)return;lastDownloadCount=count;DownloadsNav.Content=NavigationLabel(count>0?$"Downloads · {count}":"Downloads","M12,1 L12,16 M6,10 L12,16 L18,10 M2,17 L2,23 L22,23 L22,17");}
+    void UpdateDownloadBadge(){var count=downloads?.Jobs().Count(j=>j.Status is "Queued" or "Preparing" or "Downloading" or "Subtitles")??0;if(count==lastDownloadCount)return;lastDownloadCount=count;DownloadsNav.Content=DownloadIcon(count);DownloadsNav.ToolTip=count>0?$"Downloads · {count} in progress":"Downloads";}
     void StartDownloads()
     {
         try

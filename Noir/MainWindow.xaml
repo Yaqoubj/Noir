@@ -1,44 +1,52 @@
 <Window x:Class="Noir.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
- Title="Noir" Width="1320" Height="900" MinWidth="780" MinHeight="520" SizeChanged="Library_SizeChanged" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display" WindowStartupLocation="Manual" PreviewKeyDown="Window_KeyDown" Closing="Window_Closing">
+ Title="Noir" Width="1320" Height="900" MinWidth="780" MinHeight="520" SizeChanged="Library_SizeChanged" UseLayoutRounding="True" TextOptions.TextFormattingMode="Ideal" FontFamily="Segoe UI Variable Text, Segoe UI" Background="{StaticResource Ink}" WindowStartupLocation="Manual" PreviewKeyDown="Window_KeyDown" Closing="Window_Closing">
  <Grid>
   <Grid x:Name="LibraryRoot" Background="{StaticResource Ink}">
-   <Grid.ColumnDefinitions><ColumnDefinition x:Name="SidebarColumn" Width="196"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-   <Border Background="#101012" BorderBrush="#252527" BorderThickness="0,0,1,0">
-    <DockPanel Margin="12,22,12,16">
-
-     <StackPanel DockPanel.Dock="Bottom">
-      <TextBlock x:Name="LibraryCount" FontSize="12" Foreground="{StaticResource Muted}" Margin="14,0,0,16"/>
-      <Button x:Name="DownloadsNav" Content="Downloads" HorizontalContentAlignment="Left" Click="Downloads_Click" Margin="0,0,0,4"/>
-      <Button x:Name="ScanNav" Background="Transparent" HorizontalContentAlignment="Left" Click="Scan_Click" Margin="0,0,0,4"/>
-      <Button x:Name="SettingsNav" Background="Transparent" HorizontalContentAlignment="Left" Click="Settings_Click"/>
+   <!-- Full-width content. Cinematic pages put their hero under the floating top bar. -->
+   <ScrollViewer x:Name="ContentScroll" ScrollChanged="Content_ScrollChanged">
+    <StackPanel x:Name="PageBody">
+     <StackPanel x:Name="LibraryHeader" Margin="56,108,56,10">
+      <TextBlock x:Name="PageEyebrow" Text="LOCAL LIBRARY" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Accent}"/>
+      <TextBlock x:Name="PageTitle" Foreground="{StaticResource Text}" Text="Your evening, queued." FontSize="40" FontWeight="Bold" FontFamily="Segoe UI Variable Display, Segoe UI" Margin="0,6,0,0" TextTrimming="CharacterEllipsis"/>
      </StackPanel>
-     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-     <StackPanel>
-      <TextBlock Text="NOIR" Foreground="{StaticResource Text}" FontSize="28" FontWeight="Bold" Margin="15,0,0,3"/>
-      <TextBlock Text="YOUR OWN CINEMA" FontSize="9" Foreground="#AAA49A" Margin="16,0,0,22"/>
-      <Button x:Name="HomeNav" Content="⌂    Home" HorizontalContentAlignment="Left" Click="Home_Click" Margin="0,0,0,8"/>
-      <Button x:Name="MovieNav" Content="▣    Movies" HorizontalContentAlignment="Left" Click="Movies_Click" Margin="0,0,0,8"/>
-      <Button x:Name="ShowNav" Content="▤    Shows" HorizontalContentAlignment="Left" Click="Shows_Click" Margin="0,0,0,8"/>
-      <Button x:Name="HistoryNav" Content="◷    History" HorizontalContentAlignment="Left" Click="History_Click" Margin="0,0,0,8"/>
-      <Button x:Name="WatchlistNav" Content="+    My List" HorizontalContentAlignment="Left" Click="Watchlist_Click" Margin="0,0,0,8"/>
-      <Button x:Name="DiscoverNav" Content="Discover" HorizontalContentAlignment="Left" Click="Discover_Click" Margin="0,0,0,8"/>
+     <StackPanel x:Name="ContentPanel" Margin="56,0,56,56"/>
+    </StackPanel>
+   </ScrollViewer>
+   <!-- Floating top bar: transparent over artwork, solid once the page scrolls. -->
+   <Grid x:Name="TopBar" VerticalAlignment="Top" Height="78">
+    <Grid.RowDefinitions><RowDefinition Height="78"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <Border Grid.RowSpan="2" IsHitTestVisible="False"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#D90B0B0D" Offset="0"/><GradientStop Color="#000B0B0D" Offset="1"/></LinearGradientBrush></Border.Background></Border>
+    <Border Grid.RowSpan="2" x:Name="TopBarFill" Background="#F20D0D0F" Opacity="0" IsHitTestVisible="False" BorderBrush="#1FFFFFFF" BorderThickness="0,0,0,1"/>
+    <DockPanel x:Name="TopBarContent" Margin="44,0,36,0">
+     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+      <Grid x:Name="SearchHost" Width="270" Height="42" Margin="0,0,10,0">
+       <TextBox x:Name="SearchBox" Style="{StaticResource SearchPill}" ToolTip="Search your library" TextChanged="Search_Changed" AutomationProperties.Name="Search library"/>
+       <Path Data="M10,1 A9,9 0 1 1 9.99,1 M16.5,16.5 L23,23" Stroke="#B8B2AA" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Width="16" Height="16" Stretch="Uniform" HorizontalAlignment="Left" Margin="16,0,0,0" IsHitTestVisible="False"/>
+       <TextBlock x:Name="SearchPlaceholder" Text="Search movies &amp; shows" Foreground="#8F8A83" FontSize="13.5" Margin="44,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Text,ElementName=SearchBox}" Value=""><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+      </Grid>
+      <Button x:Name="DownloadsNav" Style="{StaticResource TopIcon}" Click="Downloads_Click" ToolTip="Downloads" AutomationProperties.Name="Downloads"/>
+      <Button x:Name="ScanNav" Style="{StaticResource TopIcon}" Click="Scan_Click" ToolTip="Scan library for new files" AutomationProperties.Name="Scan library"/>
+      <Button x:Name="SettingsNav" Style="{StaticResource TopIcon}" Click="Settings_Click" ToolTip="Settings" AutomationProperties.Name="Settings"/>
      </StackPanel>
+     <TextBlock Text="N O I R" Foreground="{StaticResource Accent}" FontSize="21" FontWeight="Bold" FontFamily="Segoe UI Variable Display, Segoe UI" VerticalAlignment="Center" Cursor="Hand" MouseLeftButtonDown="Logo_Click" ToolTip="Home"/>
+     <ScrollViewer x:Name="NavScroll" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled" Margin="34,0,16,0" VerticalAlignment="Center">
+      <StackPanel x:Name="NavLinks" Orientation="Horizontal">
+       <Button x:Name="HomeNav" Content="Home" Style="{StaticResource TopNav}" Click="Home_Click"/>
+       <Button x:Name="ShowNav" Content="Shows" Style="{StaticResource TopNav}" Click="Shows_Click"/>
+       <Button x:Name="MovieNav" Content="Movies" Style="{StaticResource TopNav}" Click="Movies_Click"/>
+       <Button x:Name="WatchlistNav" Content="My List" Style="{StaticResource TopNav}" Click="Watchlist_Click"/>
+       <Button x:Name="HistoryNav" Content="History" Style="{StaticResource TopNav}" Click="History_Click"/>
+       <Button x:Name="DiscoverNav" Content="Discover" Style="{StaticResource TopNav}" Click="Discover_Click"/>
+      </StackPanel>
      </ScrollViewer>
     </DockPanel>
+    <Border x:Name="CompactNavHost" Grid.Row="1" Visibility="Collapsed"/>
+   </Grid>
+   <!-- Status messages float briefly at the bottom instead of occupying a line. -->
+   <Border x:Name="StatusToast" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="24,0,24,26" Padding="18,10" CornerRadius="20" Background="#F21C1C1F" BorderBrush="#33E4C084" BorderThickness="1" Opacity="0" IsHitTestVisible="False" MaxWidth="720">
+    <TextBlock x:Name="Status" Foreground="#E9E4DC" FontSize="13" TextWrapping="Wrap" TextAlignment="Center"/>
    </Border>
-   <DockPanel x:Name="MainPane" Grid.Column="1" Margin="34,26,34,0">
-    <Grid x:Name="LibraryHeader" DockPanel.Dock="Top" Margin="0,0,0,22">
-     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-     <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition x:Name="SearchColumn" Width="290"/></Grid.ColumnDefinitions>
-     <StackPanel><TextBlock x:Name="PageEyebrow" Text="LOCAL LIBRARY" FontSize="10" Foreground="{StaticResource Accent}"/><TextBlock x:Name="PageTitle" Foreground="{StaticResource Text}" Text="Your evening, queued." FontSize="25" FontWeight="SemiBold" Margin="0,5,0,0"/></StackPanel>
-     <Grid x:Name="SearchHost" Grid.Column="1" Height="38" VerticalAlignment="Center">
-      <TextBox x:Name="SearchBox" ToolTip="Search your library" TextChanged="Search_Changed" AutomationProperties.Name="Search library"/>
-      <TextBlock x:Name="SearchPlaceholder" Text="Search movies &amp; shows" Foreground="#817E78" Margin="13,0" VerticalAlignment="Center" IsHitTestVisible="False"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Text,ElementName=SearchBox}" Value=""><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
-     </Grid>
-    </Grid>
-    <TextBlock x:Name="Status" DockPanel.Dock="Bottom" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,10,0,15" TextWrapping="Wrap"/>
-    <ScrollViewer x:Name="ContentScroll"><StackPanel x:Name="ContentPanel"/></ScrollViewer>
-   </DockPanel>
+   <TextBlock x:Name="LibraryCount" Visibility="Collapsed"/>
   </Grid>
   <Grid x:Name="PlayerRoot" Background="Black" Visibility="Collapsed">
    <vlc:VideoView x:Name="Video" Background="Black" SizeChanged="Video_SizeChanged">
@@ -61,21 +69,21 @@
     <StackPanel.Background><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#00101012" Offset="0"/><GradientStop Color="#D0101012" Offset="0.3"/><GradientStop Color="#F0101012" Offset="1"/></LinearGradientBrush></StackPanel.Background>
     <Grid Margin="24,15,24,8">
      <Grid.ColumnDefinitions><ColumnDefinition Width="70"/><ColumnDefinition/><ColumnDefinition Width="70"/></Grid.ColumnDefinitions>
-     <TextBlock x:Name="Elapsed" Foreground="{StaticResource Text}" Text="0:00" VerticalAlignment="Center"/>
-     <Slider x:Name="SeekBar" Grid.Column="1" Minimum="0" Maximum="1" IsMoveToPointEnabled="True" PreviewMouseLeftButtonDown="Seek_Begin" PreviewMouseLeftButtonUp="Seek_End" Thumb.DragCompleted="Seek_DragCompleted" MouseMove="Seek_Preview" MouseLeave="Seek_Leave" VerticalAlignment="Center" AutomationProperties.Name="Playback position"/>
-     <TextBlock x:Name="Total" Foreground="{StaticResource Text}" Grid.Column="2" Text="0:00" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+     <TextBlock x:Name="Elapsed" Foreground="{StaticResource Text}" Text="0:00" VerticalAlignment="Center" FontSize="13"/>
+     <Slider x:Name="SeekBar" Style="{StaticResource SeekSlider}" Grid.Column="1" Minimum="0" Maximum="1" IsMoveToPointEnabled="True" PreviewMouseLeftButtonDown="Seek_Begin" PreviewMouseLeftButtonUp="Seek_End" Thumb.DragCompleted="Seek_DragCompleted" MouseMove="Seek_Preview" MouseLeave="Seek_Leave" VerticalAlignment="Center" AutomationProperties.Name="Playback position"/>
+     <TextBlock x:Name="Total" Foreground="{StaticResource Text}" Grid.Column="2" Text="0:00" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="13" Cursor="Hand" ToolTip="Switch between time left and length" MouseLeftButtonDown="Total_Click"/>
     </Grid>
-    <Grid Margin="24,0,24,17">
+    <Grid Margin="24,2,24,18">
      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-     <Button x:Name="PauseButton" Content="Pause" Click="Pause_Click" Style="{StaticResource Primary}" MinWidth="92"/>
-     <Button Grid.Column="1" Content="−10s" Click="Rewind_Click" Margin="8,0,0,0"/>
-     <Button Grid.Column="2" Content="+10s" Click="Forward_Click" Margin="8,0,0,0"/>
-     <StackPanel x:Name="PlayerVolume" Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0"><TextBlock Text="Volume" VerticalAlignment="Center" Foreground="{StaticResource Muted}"/><Slider x:Name="VolumeBar" Minimum="0" Maximum="100" Width="70" Value="75" ValueChanged="Volume_Changed" Margin="10,0,0,0" VerticalAlignment="Center" AutomationProperties.Name="Volume"/></StackPanel>
+     <Button x:Name="PauseButton" Click="Pause_Click" Style="{StaticResource PlayerRound}" ToolTip="Pause (Space)" AutomationProperties.Name="Pause"><Path Data="M3,1 L9,1 L9,23 L3,23 Z M15,1 L21,1 L21,23 L15,23 Z" Fill="#16120C" Width="18" Height="18" Stretch="Uniform"/></Button>
+     <Button Grid.Column="1" Click="Rewind_Click" Style="{StaticResource PlayerIcon}" Margin="10,0,0,0" ToolTip="Back 10 seconds (←)" AutomationProperties.Name="Back 10 seconds"><Grid Width="30" Height="30"><Path Data="M15,4 A11,11 0 1 0 26,15 M15,4 L20,0.5 M15,4 L20,7.5" Stroke="#F4F1EB" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/><TextBlock Text="10" FontSize="10" FontWeight="SemiBold" Foreground="#F4F1EB" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,2,0,0"/></Grid></Button>
+     <Button Grid.Column="2" Click="Forward_Click" Style="{StaticResource PlayerIcon}" Margin="2,0,0,0" ToolTip="Forward 10 seconds (→)" AutomationProperties.Name="Forward 10 seconds"><Grid Width="30" Height="30"><Path Data="M15,4 A11,11 0 1 1 4,15 M15,4 L10,0.5 M15,4 L10,7.5" Stroke="#F4F1EB" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/><TextBlock Text="10" FontSize="10" FontWeight="SemiBold" Foreground="#F4F1EB" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,2,0,0"/></Grid></Button>
+     <StackPanel x:Name="PlayerVolume" Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0" ToolTip="Volume (↑ ↓ · M to mute)"><Path Data="M1,8 L6,8 L12,3 L12,21 L6,16 L1,16 Z M16,8.5 A5,5 0 0 1 16,15.5 M19,5 A10,10 0 0 1 19,19" Stroke="#F4F1EB" StrokeThickness="1.6" StrokeLineJoin="Round" Width="22" Height="22" Stretch="Uniform" VerticalAlignment="Center"/><Slider x:Name="VolumeBar" Minimum="0" Maximum="100" Width="84" Value="75" ValueChanged="Volume_Changed" Margin="10,0,0,0" VerticalAlignment="Center" AutomationProperties.Name="Volume"/></StackPanel>
      <TextBlock x:Name="SavedLabel" Visibility="Collapsed" Grid.Column="4" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#C7C2BC" FontSize="11" TextTrimming="CharacterEllipsis"/>
-     <Button Grid.Column="5" Content="Audio &amp; subtitles" Click="Languages_Click" Margin="8,0,0,0" Background="Transparent"/>
-     <Button Grid.Column="6" Content="More" Click="PlayerMore_Click" Margin="8,0,0,0" Background="Transparent"/>
+     <Button Grid.Column="5" Click="Languages_Click" Style="{StaticResource PlayerIcon}" ToolTip="Audio &amp; subtitles" AutomationProperties.Name="Audio and subtitles"><Grid Width="30" Height="22"><Border BorderBrush="#F4F1EB" BorderThickness="1.6" CornerRadius="4"/><TextBlock Text="CC" FontSize="10.5" FontWeight="Bold" Foreground="#F4F1EB" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid></Button>
+     <Button Grid.Column="6" Click="PlayerMore_Click" Style="{StaticResource PlayerIcon}" Margin="4,0,0,0" ToolTip="More: picture, sleep timer, intro times" AutomationProperties.Name="More"><Path Data="M1,5 L23,5 M1,12 L23,12 M1,19 L23,19 M7,2 L7,8 M17,9 L17,15 M10,16 L10,22" Stroke="#F4F1EB" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Width="22" Height="22" Stretch="Uniform"/></Button>
      <Button x:Name="PictureModeButton" Visibility="Collapsed" Grid.Column="7" Content="Fill" Click="PictureMode_Click"/>
-     <Button Grid.Column="8" AutomationProperties.Name="Fullscreen" Click="Fullscreen_Click" ToolTip="Fullscreen (F)" Margin="8,0,0,0" Background="Transparent"><Viewbox Width="22" Height="22"><Path Stroke="#F4F1EB" StrokeThickness="1.6" Data="M1,8 L1,1 L8,1 M16,1 L23,1 L23,8 M23,16 L23,23 L16,23 M8,23 L1,23 L1,16"/></Viewbox></Button>
+     <Button Grid.Column="8" AutomationProperties.Name="Fullscreen" Click="Fullscreen_Click" ToolTip="Fullscreen (F)" Margin="4,0,0,0" Style="{StaticResource PlayerIcon}"><Viewbox Width="22" Height="22"><Path Stroke="#F4F1EB" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M1,8 L1,1 L8,1 M16,1 L23,1 L23,8 M23,16 L23,23 L16,23 M8,23 L1,23 L1,16"/></Viewbox></Button>
     </Grid>
    </StackPanel>
     </Grid>

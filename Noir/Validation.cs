@@ -10,6 +10,7 @@ public partial class MainWindow
 {
     async Task ValidatePlayback()
     {
+        if(Environment.GetCommandLineArgs().Contains("--premium-redesign-only")){await ValidatePremiumRedesign();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--navigation-only")){await ValidateNavigationDiscover();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--ux-only")){await ValidateUx();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--smoothness-only")){await ValidatePlayerSmoothness();Close();return;}

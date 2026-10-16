@@ -1,0 +1,5 @@
+<resources><style name="NoirTheme" parent="android:style/Theme.Material.NoActionBar">
+    <item name="android:fontFamily">sans</item><item name="android:windowLightStatusBar">false</item><item name="android:windowLightNavigationBar">false</item>
+    <item name="android:colorAccent">#E4C084</item><item name="android:windowBackground">#0C0C0E</item>
+    <item name="android:statusBarColor">#0C0C0E</item><item name="android:navigationBarColor">#0C0C0E</item><item name="android:windowActionModeOverlay">true</item><item name="android:windowSplashScreenBackground">#0C0C0E</item><item name="android:windowSplashScreenIconBackgroundColor">#0C0C0E</item>
+</style></resources>

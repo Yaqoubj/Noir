@@ -1,22 +1,30 @@
-# Noir 0.13.0 / Android 0.4.1
+# Noir 0.13.0 / Android 0.5.0
 
 **What's new in 0.13.0**
+
+- **A cinematic library.** A floating top navigation, rotating Home artwork, visible title actions, season pills, Discover spotlight and popular rows, calendar cards and History Stats, Collection and Diary. Narrow windows keep every navigation link accessible; hero text clears the bar.
+- **Android 0.5.0.** Matching Home and History browsing, calendar cards, artwork-led episode action sheets, and a More screen for downloads, sync and preferences. Episode lists reuse one settings snapshot per render to avoid repeated full-library copies.
 
 - **Videos open instantly.** Noir now ships VLC's plugin cache and prepares the player in the background a moment after launch. Opening the first video after starting Noir took about 13 seconds on a cold disk; it now starts in well under a second.
 - **The window fits your screen.** The first launch sizes Noir to the monitor's usable area (maximized on small or highly scaled screens), so the title bar is always reachable. Noir remembers its size, position and maximized state.
 - **Smarter Continue Watching.** Finishing the last episode on your PC no longer drops a show from Home. The next episode stays under *Next episode* with a one-click download (or its live download progress), and caught-up shows wait under *Waiting for new episodes* with the air date. After a movie or a finished series, Home offers to rate it.
 - **Smarter end of episode.** When the next episode isn't on this PC, the end screen offers *Download* (or *View download*); when it hasn't aired, it shows the date; after a movie it offers *Rate it*.
+- **A new look.** Home opens on a full-width hero with genre tags and browses in sideways rows (Continue Watching, Recently added, Recently watched, My List, your shows and movies, and your biggest genres) with cards that lift on hover. The player uses icon controls, a round play button, a thicker seek bar and shows the time left (click it to switch to the length).
+- **One Continue Watching row.** Resumes, next episodes, episodes to download and shows waiting for their next air date sit together, most recent first. Freshly aired episodes are tagged NEW EPISODE.
+- **History → Latest and Stats.** History opens with your latest episodes and movies, each with its next step (resume, play next, get the next episode, watch again, rate, comments). Stats shows total watch time, this month against last, streaks, your biggest binge, a 12-week chart, favourite days and time of day, top shows with completion, genres, a catch-up list and milestones. *Share my stats* saves an image to Pictures\Noir and copies it.
+- **New-episode alerts.** While Noir runs (including in the tray) it refreshes schedules every six hours and notifies you once when the next episode of a show you're watching airs; clicking opens the download.
+- **Comments that look like Noir.** The reviews window has the title's artwork, Noir chips and icon buttons, and a loading cover. Community sites get a dark, uncluttered reading style (Reddit without its header, sidebars and app prompts; light pages such as IMDb search are darkened with photos kept true). Use ◐ to see a site's own look, for example to sign in. Noir never accepts site banners for you.
 - **Runs in the background.** Closing the window keeps Noir in the notification area so phone sync, streaming to your phone and PC downloads continue. A notification appears when a download is ready. Noir keeps the PC from sleeping only while downloading or streaming to your phone. Optional: start in the background when you sign in. Right-click the tray icon → **Quit Noir** to exit; Settings → Phone Sync or Downloads → *Running in the background* controls all of this.
 
 Android's Subtitles menu downloads English/Arabic files to the phone and can request a smart timing check from this PC. The PC verifies the video fingerprint, processes the subtitle in a temporary local workspace, and returns a correction only when confident. Your original PC subtitle files stay intact. Both language choices and manual timing remain saved on the phone.
 
 **Discover** searches new movies and TV shows, including anime, using Cinemeta without a separate API key. Open a poster for its synopsis, year, rating and full known episode list. Save it to My List, choose a released episode, or find season downloads through your existing AIOStreams/TorBox connection. Review files before confirming. Search results, schedules and downloaded artwork remain cached for offline browsing; browsing and saving never create watched history. Initial result grids load thirty cards at a time.
 
-Discover sits below My List. Downloads sits beside Scan Library. Android includes Discover and **More → Downloads**; new-title requests are verified on the paired PC before release selection.
+Discover is in the top navigation. Downloads sits beside Scan Library. Android includes Discover and **More → Downloads**; new-title requests are verified on the paired PC before release selection.
 
-**Downloads** is a permanent sidebar tab with live progress, file sizes, subtitle status, pause, cancel and resume. Its badge shows active jobs, including requests from the phone. Progress updates preserve the list and scroll position.
+**Downloads** has a permanent top-bar button with live progress, file sizes, subtitle status, pause, cancel and resume. Its badge shows active jobs, including requests from the phone. Progress updates preserve the list and scroll position.
 
-Windows uses a dark native title bar, correctly oriented scrollbars, smoother mouse-wheel scrolling, responsive search and episode rows, and a sidebar that scrolls on short windows. Initial windows and dialogs fit the current monitor’s work area. Leaving fullscreen restores the previous size and position.
+Windows uses a dark native title bar, correctly oriented scrollbars, smoother mouse-wheel scrolling, responsive search and episode rows, and navigation that adapts to narrow windows. Initial windows and dialogs fit the current monitor’s work area. Leaving fullscreen restores the previous size and position.
 
 
 AIOStreams and TorBox downloads are configured in Settings. Credentials are encrypted for your Windows account and stay on the PC. Noir searches AIOStreams and your TorBox library independently and shows a separate result or error for each. AIOStreams discovers torrent references; TorBox verifies and downloads their files. AIO episode results can contain season packs. “Plan missing episodes” proposes known released episodes absent from the PC or queue, combining packs and gaps where possible. Review selected files, sizes and destinations before confirming; unknown numbering requires a manual episode match. Existing files and history are retained. URL-only and Usenet results are unsupported. Provider configuration errors remain visible even if account files are available. Noir does not change your AIOStreams addons.
@@ -36,7 +44,7 @@ Review windows remember their last tab and sign-ins. Compact/embed mode has been
 
 A Windows movie and TV library with a black interface and embedded VLC playback.
 
-## Android companion (Windows 0.13.0 / Android 0.4.1)
+## Android companion (Windows 0.13.0 / Android 0.5.0)
 
 Review windows open the original community websites. Noir remembers the chosen Reddit discussion per episode/movie on that device and disposes the browser on close. Compact/embed mode was removed in 0.8.0. These websites require an internet connection.
 

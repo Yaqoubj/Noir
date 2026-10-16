@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Windows;
@@ -41,26 +41,134 @@ public sealed class ReviewBrowser : Window
         initialSource??=store?.State.ReviewTabs.GetValueOrDefault(video.GroupKey);
         targetUrl=initialSource!=null&&sources.TryGetValue(initialSource,out var initial)?initial:sources.First().Value;
         var root=new DockPanel();
-        var header=new StackPanel{Margin=new(18,16,18,10)};DockPanel.SetDock(header,Dock.Top);root.Children.Add(header);
-        header.Children.Add(MainWindow.Text(video.IsMovie?video.Title:video.Title+" · "+video.EpisodeLabel,23,weight:FontWeights.SemiBold));
-        header.Children.Add(MainWindow.Body("Community ratings and conversations. Check episode numbers and spoiler labels before reading.",12));
-        var tabs=new WrapPanel();header.Children.Add(tabs);
+        // Header: the title's artwork behind a dark fade, title, source chips and quiet icon buttons.
+        var hero=new Grid{MinHeight=150,ClipToBounds=true};DockPanel.SetDock(hero,Dock.Top);root.Children.Add(hero);
+        var art=File.Exists(video.Backdrop)?video.Backdrop:File.Exists(video.EpisodeImage)?video.EpisodeImage:File.Exists(video.Poster)?video.Poster:"";
+        if(art.Length>0)try{var image=new System.Windows.Media.Imaging.BitmapImage();image.BeginInit();image.UriSource=new Uri(art);image.DecodePixelWidth=1280;image.CacheOption=System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;image.EndInit();image.Freeze();hero.Background=new System.Windows.Media.ImageBrush(image){Stretch=System.Windows.Media.Stretch.UniformToFill,AlignmentY=System.Windows.Media.AlignmentY.Center,Opacity=.55};}catch{}
+        var fade=new System.Windows.Media.LinearGradientBrush{StartPoint=new(0,0),EndPoint=new(0,1)};fade.GradientStops.Add(new(System.Windows.Media.Color.FromArgb(150,13,13,15),0));fade.GradientStops.Add(new(System.Windows.Media.Color.FromArgb(255,13,13,15),1));
+        hero.Children.Add(new Border{Background=fade});
+        var header=new StackPanel{Margin=new(24,20,24,12)};hero.Children.Add(header);
+        var titleRow=new DockPanel();header.Children.Add(titleRow);
+        var tools=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Top};DockPanel.SetDock(tools,Dock.Right);titleRow.Children.Add(tools);
+        tools.Children.Add(Icon("←","Back",()=>{if(web.CoreWebView2?.CanGoBack==true) web.GoBack();}));
+        tools.Children.Add(Icon("↻","Reload",()=>{web.CoreWebView2?.Reload();}));
+        styleToggle=Icon("◐","Noir style is on · click to show the site's own look",ToggleStyle);tools.Children.Add(styleToggle);
+        tools.Children.Add(Icon("↗","Open in your web browser",()=>System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(targetUrl){UseShellExecute=true})));
+        var titles=new StackPanel();titleRow.Children.Add(titles);
+        titles.Children.Add(MainWindow.Text("REVIEWS & DISCUSSION",10,"#E4C084",FontWeights.SemiBold));
+        var name=MainWindow.Text(video.IsMovie?video.Title:video.Title+" · "+video.EpisodeLabel,26,weight:FontWeights.Bold);name.Margin=new(0,4,0,2);titles.Children.Add(name);
+        if(!video.IsMovie&&video.EpisodeTitle.Length>0)titles.Children.Add(MainWindow.Text(video.EpisodeTitle,13,"#C7C2BC"));
+        var tabs=new WrapPanel{Margin=new(0,16,0,0)};header.Children.Add(tabs);
         foreach(var source in sources)
         {
-            var tab=Button(source.Key,async()=>await OpenSource(source.Key));tab.Margin=new(0,0,8,8);tabs.Children.Add(tab);tabsBySource[source.Key]=tab;
+            var tab=Button(source.Key,async()=>await OpenSource(source.Key));tab.Margin=new(0,0,8,4);tab.Padding=new(16,7,16,7);tabs.Children.Add(tab);tabsBySource[source.Key]=tab;
         }
-        SelectSource(initialSource!=null&&sources.ContainsKey(initialSource)?initialSource:sources.First().Key);
-        var toolbar=new DockPanel{Margin=new(18,0,18,10)};DockPanel.SetDock(toolbar,Dock.Top);root.Children.Add(toolbar);
-        toolbar.Children.Add(Button("←",()=>{if(web.CoreWebView2?.CanGoBack==true) web.GoBack();}));
-        toolbar.Children.Add(Button("↻",()=>{web.CoreWebView2?.Reload();}));
-        var external=Button("Open in browser",()=>System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(targetUrl){UseShellExecute=true}));DockPanel.SetDock(external,Dock.Right);toolbar.Children.Add(external);toolbar.Children.Add(address);
-        var modes=new WrapPanel{Margin=new(18,0,18,10)};DockPanel.SetDock(modes,Dock.Top);root.Children.Add(modes);
-        modes.Children.Add(paste);paste.Click+=(_,_)=>ChooseRedditLink();UpdateModes();
-        DockPanel.SetDock(status,Dock.Bottom);root.Children.Add(status);root.Children.Add(web);Content=root;
-        Loaded+=async(_,_)=>await OpenSource(selectedSource);
+        paste.Margin=new(8,0,0,4);paste.Padding=new(14,7,14,7);paste.Background=MainWindow.Brush("Transparent");tabs.Children.Add(paste);paste.Click+=(_,_)=>ChooseRedditLink();
+        SelectSource(initialSource!=null&&sources.ContainsKey(initialSource)?initialSource:sources.First().Key);UpdateModes();
+        address.Visibility=Visibility.Collapsed;
+        status.Margin=new(26,6,26,10);status.FontSize=11.5;DockPanel.SetDock(status,Dock.Bottom);root.Children.Add(status);
+        // The page sits in a framed panel; a Noir cover hides half-drawn pages while they load.
+        var stage=new Grid{Margin=new(18,4,18,0)};
+        stage.Children.Add(new Border{BorderBrush=MainWindow.Brush("#26262A"),BorderThickness=new(1),CornerRadius=new(12),Background=MainWindow.Brush("#0B0B0D"),Padding=new(1),Child=web});
+        var spinner=new StackPanel{HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
+        spinner.Children.Add(MainWindow.Text("NOIR",22,"#E4C084",FontWeights.Bold));loadingText.Margin=new(0,8,0,0);spinner.Children.Add(loadingText);
+        cover.Child=spinner;stage.Children.Add(cover);
+        root.Children.Add(stage);Content=root;
+        // App.xaml's implicit Window style does not reach subclasses, so fit to the screen here.
+        Loaded+=async(_,_)=>{WindowAppearance.Apply(this);WindowAppearance.Fit(this);await OpenSource(selectedSource);};
         Closed+=(_,_)=>{closed=true;navigation?.Cancel();web.Dispose();};
     }
     static Button Button(string text,Action action) {var b=new Button{Content=text,Padding=new(13,9,13,9)};b.Click+=(_,_)=>action();return b;}
+    static new Button Icon(string glyph,string tip,Action action)
+    {
+        var b=new Button{Content=glyph,ToolTip=tip,Width=40,Height=40,Padding=new(0),FontSize=17,Margin=new(6,0,0,0),Background=MainWindow.Brush("#CC1A1A1D")};
+        System.Windows.Automation.AutomationProperties.SetName(b,tip);b.Click+=(_,_)=>action();return b;
+    }
+    readonly Border cover=new(){Background=MainWindow.Brush("#0B0B0D"),CornerRadius=new(12),Margin=new(1)};
+    readonly TextBlock loadingText=new(){Foreground=MainWindow.Brush("#AAA6A0"),FontSize=13,HorizontalAlignment=HorizontalAlignment.Center};
+    Button? styleToggle;
+    bool noirStyle=true;
+    System.Windows.Threading.DispatcherTimer? coverTimer;
+    // The native page window cannot be drawn over, so it stays hidden behind the Noir cover while loading.
+    void ShowCover(string source)
+    {
+        loadingText.Text=$"Opening {source}…";cover.Visibility=Visibility.Visible;web.Visibility=Visibility.Hidden;
+        coverTimer??=new(TimeSpan.FromSeconds(10),System.Windows.Threading.DispatcherPriority.Normal,(_,_)=>HideCover(),Dispatcher);coverTimer.Stop();coverTimer.Start();
+    }
+    void HideCover(){coverTimer?.Stop();cover.Visibility=Visibility.Collapsed;web.Visibility=Visibility.Visible;}
+    void ToggleStyle()
+    {
+        noirStyle=!noirStyle;if(styleToggle!=null)styleToggle.ToolTip=noirStyle?"Noir style is on · click to show the site's own look":"Showing the site's own look · click for Noir style";
+        if(styleToggle!=null)styleToggle.Opacity=noirStyle?1:.55;
+        _=web.CoreWebView2?.ExecuteScriptAsync($"window.__noirStyle&&window.__noirStyle({(noirStyle?"true":"false")})");
+    }
+    // Dark, uncluttered reading styles for the community sites. Purely cosmetic: it hides site
+    // chrome (headers, sidebars, app prompts, footers) and never clicks or submits anything.
+    // Sign-in screens and spoiler controls keep working; the ◐ button shows the original site.
+    const string NoirStyleScript="""
+    (() => {
+      const host = location.hostname.replace(/^www\./, '');
+      const common = `
+        html, body { background: #0d0d0f !important; color-scheme: dark; }
+        ::selection { background: #e4c08455; }
+        ::-webkit-scrollbar { width: 10px; height: 10px; }
+        ::-webkit-scrollbar-track { background: #0d0d0f; }
+        ::-webkit-scrollbar-thumb { background: #3a3630; border-radius: 6px; border: 2px solid #0d0d0f; }
+        ::-webkit-scrollbar-thumb:hover { background: #5e4e36; }
+        a { accent-color: #e4c084; }`;
+      const sites = {
+        'reddit.com': `
+          reddit-header-large, reddit-header-small, header.v2, #left-sidebar-container, #right-sidebar-container,
+          shreddit-async-loader[bundlename="left_nav"], xpromo-app-selector, shreddit-experience-tree,
+          faceplate-tracker[noun="open_app"], [slot="credit-bar"] ~ faceplate-tracker[noun="join"], #onetrust-consent-sdk ~ div[class*="xpromo"],
+          shreddit-ad-post, shreddit-comments-page-ad, [bundlename="comment_body_header_ad"] { display: none !important; }
+          shreddit-app { --shreddit-header-height: 0px !important; padding-top: 12px !important; }
+          .grid-container { display: block !important; }
+          #subgrid-container, .subgrid-container { max-width: 820px !important; margin: 0 auto !important; padding: 0 16px !important; }
+          .main-container { display: block !important; max-width: none !important; }
+          main.main, main#main-content { max-width: none !important; width: 100% !important; }
+          .theme-rpl, shreddit-app, html { --color-neutral-background: #0d0d0f !important; --color-neutral-background-weak: #141416 !important;
+            --color-neutral-background-container: #141416 !important; --color-neutral-border-weak: #26262a !important;
+            --color-neutral-content-strong: #f4f1eb !important; --color-neutral-content: #d9d4cc !important; --color-neutral-content-weak: #9a958e !important;
+            --color-global-brand-orangered: #e4c084 !important; --color-primary: #e4c084 !important; --color-primary-plain: #e4c084 !important; --color-a-default: #e4c084 !important; }
+          shreddit-post-text-body a, .md a { color: #e4c084 !important; text-decoration-color: #e4c08466 !important; }`,
+        'imdb.com': `
+          #imdbHeader, footer, .ipc-page-background--baseAlt ~ footer, [data-testid="ad-wrap"], .nas-slot, [class*="InlineAd"], #inline20, #top_ad_wrapper { display: none !important; }
+          .ipc-page-background, .ipc-page-background--base, .ipc-page-content-container { background: #0d0d0f !important; }`,
+        'letterboxd.com': `
+          #header, #footer, .banner, .ad-slot, .sidebar-ad, #sidebar-ad, .pw-tag { display: none !important; }
+          body, #content { background: #0d0d0f !important; }`,
+        'app.trakt.tv': `footer, [class*="advert"], [class*="Advert"], [class*="vip-upsell"] { display: none !important; }`,
+        'trakt.tv': `footer, #top-nav ~ .ad, [class*="advert"] { display: none !important; }`,
+        'serializd.com': `div.footer, [class*="AdBanner"], [class*="ad-container"], .pw-tag, [id^="pw-"], [class*="pw-corner"], [id^="google_ads_iframe"] { display: none !important; }
+          body, #root, #__next { background: #0d0d0f !important; }`,
+        'rottentomatoes.com': `rt-header, #header-main, .header_main, footer, #footer, .ad-unit, [id*="ad-unit"], [class*="AdUnit"], #header_ad, .leaderboard_wrapper, ad-unit, [data-adtype] { display: none !important; }`
+      };
+      // Light pages (IMDb search, Rotten Tomatoes) are re-coloured dark; photos keep their colours.
+      const darken = `
+        html.noir-invert { filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.94) !important; }
+        html.noir-invert, html.noir-invert body { background: #f2f2f0 !important; }
+        html.noir-invert img, html.noir-invert picture, html.noir-invert video, html.noir-invert iframe, html.noir-invert canvas,
+        html.noir-invert svg image, html.noir-invert [style*="background-image"] { filter: invert(1) hue-rotate(180deg) brightness(1.08) !important; }`;
+      const site = Object.keys(sites).find(k => host === k || host.endsWith('.' + k));
+      const style = document.createElement('style');
+      style.id = 'noir-style';
+      style.textContent = common + darken + (site ? sites[site] : '');
+      // Judge the colour behind the main content rather than <body>, which is often dark under a white column.
+      const backdrop = el => { for (; el && el !== document.documentElement; el = el.parentElement) { const c = getComputedStyle(el).backgroundColor.match(/[\d.]+/g); if (c && (c.length < 4 || +c[3] > .5)) return c; } return null; };
+      const light = () => { let lit = 0, seen = 0; for (const [x, y] of [[.3, .35], [.5, .5], [.7, .4], [.4, .7], [.6, .8]]) { const c = backdrop(document.elementFromPoint(innerWidth * x, innerHeight * y)); if (!c) continue; seen++; if ((.2126 * c[0] + .7152 * c[1] + .0722 * c[2]) / 255 > .6) lit++; } return seen > 0 && lit * 2 > seen; };
+      const judge = () => { if (!document.body) return; const root = document.documentElement; if (!style.disabled && !root.classList.contains('noir-invert') && light()) root.classList.add('noir-invert'); };
+      addEventListener('load', () => { judge(); setTimeout(judge, 1200); }); document.addEventListener('DOMContentLoaded', () => setTimeout(judge, 300));
+      // A consent or sign-in overlay can hide the page at first; look again after the person dismisses it.
+      let checks = 0; addEventListener('pointerup', () => { if (checks++ < 6) setTimeout(judge, 700); }, true);
+      // Sites that rebuild <head> (React apps) would drop the sheet, so keep it on <html> and re-add it.
+      const attach = () => { if (!style.isConnected && document.documentElement) document.documentElement.appendChild(style); };
+      attach(); document.addEventListener('DOMContentLoaded', attach);
+      new MutationObserver(attach).observe(document, { childList: true, subtree: false });
+      new MutationObserver(attach).observe(document.documentElement, { childList: true });
+      window.__noirStyle = on => { style.disabled = !on; if (on) judge(); else document.documentElement.classList.remove('noir-invert'); };
+    })();
+    """;
     void SelectSource(string name)
     {
         selectedSource=name;
@@ -88,7 +196,7 @@ public sealed class ReviewBrowser : Window
     {
         if(closed) return;
         var version=++navigationVersion;
-        UpdateModes();targetUrl=url;address.Text=url;status.Text="Loading reviews…";
+        UpdateModes();targetUrl=url;address.Text=url;status.Text="Loading reviews…";ShowCover(selectedSource);
         try
         {
             initialization ??= InitializeBrowser();
@@ -104,6 +212,7 @@ public sealed class ReviewBrowser : Window
                 await web.EnsureCoreWebView2Async(environment);
                 if(closed) return;
                 web.CoreWebView2.Profile.PreferredColorScheme=CoreWebView2PreferredColorScheme.Dark;
+                await web.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(NoirStyleScript);
                 web.CoreWebView2.PermissionRequested+=(_,e)=>e.State=CoreWebView2PermissionState.Deny;
                 web.CoreWebView2.NewWindowRequested+=(_,e)=>{e.Handled=true;if(SafeUrl(e.Uri)) web.CoreWebView2.Navigate(e.Uri);};
                 web.CoreWebView2.NavigationStarting+=(_,e)=>
@@ -118,6 +227,7 @@ public sealed class ReviewBrowser : Window
                 web.CoreWebView2.NavigationCompleted+=async(_,e)=>
                 {
                     if(closed) return;
+                    HideCover();if(!noirStyle)_=web.CoreWebView2.ExecuteScriptAsync("window.__noirStyle&&window.__noirStyle(false)");
                     status.Text=e.IsSuccess?SourceHint():"This page couldn't load. Try Reload, another review tab, or Open in browser.";
                     if(e.IsSuccess&&library!=null&&selectedSource=="Serializd")
                     {

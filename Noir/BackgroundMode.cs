@@ -27,17 +27,43 @@ public partial class MainWindow
         tray=new Forms.NotifyIcon{Text="Noir",ContextMenuStrip=menu,Visible=true};
         try{tray.Icon=System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath!);}catch{tray.Icon=System.Drawing.SystemIcons.Application;}
         tray.DoubleClick+=(_,_)=>ShowFromTray();
-        tray.BalloonTipClicked+=(_,_)=>ShowFromTray(lastBalloonPage);
+        tray.BalloonTipClicked+=(_,_)=>{var action=lastBalloonAction;ShowFromTray(lastBalloonPage);action?.Invoke();};
         if(System.Windows.Application.Current!=null) System.Windows.Application.Current.SessionEnding+=(_,_)=>quitting=true;
         foreach(var job in downloads?.Jobs()??[]) if(job.Status=="Completed") announcedDownloads.Add(job.Id);
         awakeTimer=new DispatcherTimer(TimeSpan.FromSeconds(20),DispatcherPriority.Background,(_,_)=>UpdateBackgroundState(),Dispatcher);awakeTimer.Start();
         UpdateBackgroundState();
+        // Schedules change while Noir sits in the tray; refresh them so new episodes are noticed.
+        scheduleTimer=new DispatcherTimer(TimeSpan.FromHours(6),DispatcherPriority.Background,async(_,_)=>{await RefreshMetadata();CheckNewEpisodes();},Dispatcher);scheduleTimer.Start();
+        _=Dispatcher.InvokeAsync(async()=>{await Task.Delay(TimeSpan.FromSeconds(20));CheckNewEpisodes();},DispatcherPriority.ApplicationIdle);
     }
+    DispatcherTimer? scheduleTimer;
     string? lastBalloonPage;
-    void Notify(string title,string text,string? page=null)
+    Action? lastBalloonAction;
+    void Notify(string title,string text,string? page=null,Action? action=null)
     {
         if(tray==null) return;
-        lastBalloonPage=page;tray.ShowBalloonTip(5000,title,text,Forms.ToolTipIcon.None);
+        lastBalloonPage=page;lastBalloonAction=action;tray.ShowBalloonTip(5000,title,text,Forms.ToolTipIcon.None);
+    }
+    // A released episode of a show you follow that aired in the last two weeks and is not watched yet.
+    bool IsNewEpisode(VideoItem item)
+    {
+        if(item.IsMovie||store.EverWatched(item)) return false;
+        var airs=store.State.EpisodeSchedules.GetValueOrDefault(item.GroupKey)?.FirstOrDefault(e=>e.Season==item.Season&&e.Episode==item.Episode)?.AirsAt;
+        return airs is {} at&&at<=DateTimeOffset.UtcNow&&at>DateTimeOffset.UtcNow.AddDays(-14);
+    }
+    // One notification per newly aired episode that is next up for a show you are watching.
+    void CheckNewEpisodes()
+    {
+        if(tray==null||closing) return;
+        var fresh=store.Archive.GroupBy(i=>i.GroupKey).Where(g=>!g.First().IsMovie&&store.TitleStatus(g)!="Dropped"&&!store.State.HiddenContinue.Contains(g.Key))
+            .Select(g=>store.UpNextFor(store.EpisodesFor(g.Key))).OfType<UpNext>()
+            .Where(u=>u.Kind is UpNextKind.Ready or UpNextKind.NotOnPc&&IsNewEpisode(u.Item)&&store.State.NewEpisodeAlerts.Add(u.Item.GroupKey+":"+u.Item.Season+":"+u.Item.Episode)).ToList();
+        if(fresh.Count==0) return;
+        store.Save();
+        var first=fresh[0].Item;var ready=fresh[0].Kind==UpNextKind.Ready;
+        var text=fresh.Count>1?$"{first.Title} {first.EpisodeLabel} and {fresh.Count-1} more are out.":$"{first.Title} {first.EpisodeLabel} is out."+(ready?" It's on this PC.":" Click to download it.");
+        Notify("New episode",text,"Home",fresh.Count==1&&!ready?()=>FindDownloads(first):null);
+        if(!hiddenInTray&&page=="Home"&&current==null) Render();
     }
     // Called on every download change and periodically: tooltip, finished-download notices, sleep prevention.
     void UpdateBackgroundState()
@@ -82,7 +108,7 @@ public partial class MainWindow
     void QuitFromTray(){quitting=true;if(!IsVisible)hiddenInTray=false;Close();}
     void DisposeBackgroundServices()
     {
-        awakeTimer?.Stop();SetThreadExecutionState(EsContinuous);
+        awakeTimer?.Stop();scheduleTimer?.Stop();SetThreadExecutionState(EsContinuous);
         if(tray!=null){tray.Visible=false;tray.Dispose();tray=null;}
     }
     static bool StartsWithWindows()

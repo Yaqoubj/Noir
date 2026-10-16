@@ -158,13 +158,13 @@ public partial class MainWindow
             }
             ShowControls();
             NowTitle.Text=item.Title;NowEpisode.Text=item.IsMovie?"Movie":item.EpisodeLabel+(item.EpisodeTitle.Length>0?" · "+item.EpisodeTitle:"");
-            PauseButton.Content="Pause";SkipIntro.Visibility=Visibility.Collapsed;
+            SetPlayState("Pause");SkipIntro.Visibility=Visibility.Collapsed;
             PlayerMessage.Text=resume>0?"Resuming at "+LibraryStore.Time(resume)+"…":"Opening video…";PlayerMessage.Visibility=Visibility.Visible;
-            SavedLabel.Text="";Elapsed.Text=LibraryStore.Time(resume);Total.Text=LibraryStore.Time(currentDuration);
+            SavedLabel.Text="";Elapsed.Text=LibraryStore.Time(resume);UpdateTotalLabel(resume);
             SeekBar.Maximum=Math.Max(1,currentDuration);SeekBar.Value=Math.Min(resume,SeekBar.Maximum);
             endedHandler=(_,_)=>Dispatcher.BeginInvoke(()=> { if(thisSerial==serial && !closing) PlaybackEnded(); });
             errorHandler=(_,_)=>Dispatcher.BeginInvoke(()=> { if(thisSerial==serial && !closing) { PlayerMessage.Text="VLC could not play this file. Return to the library and try another episode.";PlayerMessage.Visibility=Visibility.Visible;SavePlayback();tick?.Stop(); } });
-            playingHandler=(_,_)=>Dispatcher.BeginInvoke(()=> { if(thisSerial==serial && !closing) { StartupTrace.Mark("VLC Playing");store.ConsumeQueue(item);if(pendingTarget==null) PlayerMessage.Visibility=Visibility.Collapsed;PauseButton.Content="Pause";ApplyPictureMode(true); } });
+            playingHandler=(_,_)=>Dispatcher.BeginInvoke(()=> { if(thisSerial==serial && !closing) { StartupTrace.Mark("VLC Playing");store.ConsumeQueue(item);if(pendingTarget==null) PlayerMessage.Visibility=Visibility.Collapsed;SetPlayState("Pause");ApplyPictureMode(true); } });
             native.EndReached+=endedHandler;native.EncounteredError+=errorHandler;native.Playing+=playingHandler;
             media=new Media(vlc!,new Uri(item.Path));
             media.AddOption($":freetype-rel-fontsize={store.State.SubtitleSize}");media.AddOption($":freetype-color={store.State.SubtitleColor}");media.AddOption($":freetype-background-opacity={(store.State.SubtitleBackground?180:0)}");
@@ -229,8 +229,8 @@ public partial class MainWindow
         }
         lastPosition=time;
         if(!seeking) { SeekBar.Maximum=Math.Max(1,currentDuration);SeekBar.Value=Math.Clamp(time,0,SeekBar.Maximum); }
-        Elapsed.Text=LibraryStore.Time(time);Total.Text=LibraryStore.Time(currentDuration);
-        PauseButton.Content=player.IsPlaying?"Pause":"Play";
+        Elapsed.Text=LibraryStore.Time(time);UpdateTotalLabel(time);
+        SetPlayState(player.IsPlaying?"Pause":"Play");
         if(!tracksSelected && time>0.2)
         {
             var descriptions=player.SpuDescription;
@@ -312,7 +312,7 @@ public partial class MainWindow
         // Reaching credits records completion without stopping playback. Only the natural end advances automatically.
         ended=true;pendingTarget=null;tick?.Stop();CreditsChip.Visibility=Visibility.Collapsed;
         creditsReached=true;store.Record(current,currentDuration,currentDuration,true,deferSave:true);
-        SavedLabel.Text="Watched";PauseButton.Content="Replay";Elapsed.Text=Total.Text;SeekBar.Value=SeekBar.Maximum;
+        SavedLabel.Text="Watched";SetPlayState("Replay");Elapsed.Text=LibraryStore.Time(currentDuration);UpdateTotalLabel(currentDuration);SeekBar.Value=SeekBar.Maximum;
         SkipIntro.Visibility=Visibility.Collapsed;ShowControls();
         if(sleepPlan?.EpisodeEnded()==true) {StopForSleep();return;}
         nextItem=store.QueuedNext(current,items)??LibraryStore.Next(current,items,store.State);
@@ -369,7 +369,7 @@ public partial class MainWindow
         if(ended) { _ = PlayVideo(current,true);return; }
         if(player.State is not (VLCState.Playing or VLCState.Paused)) return;
         player.SetPause(player.IsPlaying);SavePlayback();_ = FlushPlayback();ShowControls();
-        PauseButton.Content=player.IsPlaying?"Pause":"Play";
+        SetPlayState(player.IsPlaying?"Pause":"Play");
     }
     void Back_Click(object sender,RoutedEventArgs e)=>ReturnToLibrary();
     void PlayerEpisodes_Click(object sender,RoutedEventArgs e)
