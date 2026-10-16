@@ -23,7 +23,7 @@ foreach ($packageFile in Get-ChildItem -LiteralPath $packageRoot -Recurse -File)
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Noir\README.md') -Destination (Join-Path $appRoot 'README.md')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Noir\THIRD-PARTY-NOTICES.txt') -Destination (Join-Path $appRoot 'NOIR-THIRD-PARTY-NOTICES.txt')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Noir\LGPL-2.1.txt') -Destination (Join-Path $appRoot 'LGPL-2.1.txt')
-Set-Content -LiteralPath (Join-Path $appRoot 'Noir.version') -Value '0.12.2'
+Set-Content -LiteralPath (Join-Path $appRoot 'Noir.version') -Value '0.13.0'
 $shortcutTool=New-Object -ComObject WScript.Shell
 $desktopPath=[Environment]::GetFolderPath('DesktopDirectory')
 $startPath=[Environment]::GetFolderPath('Programs')

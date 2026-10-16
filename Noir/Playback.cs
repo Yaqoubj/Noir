@@ -52,9 +52,28 @@ public partial class MainWindow
         await nativeTransition.WaitAsync();try{if(!ReferenceEquals(player,native)||closing)return;await Task.Run(native.Stop);}finally{nativeTransition.Release();}
     }
     DateTime pointerSuppressedUntil;
+    Task<LibVLC>? warmEngine;
+    string warmStyle="";
+    string EngineStyle()=>$"{store.State.SubtitleSize}:{store.State.SubtitleColor}:{store.State.SubtitleBackground}:{store.State.Subtitles}";
+    string[] EngineOptions()=>["--no-video-title-show","--quiet","--avcodec-hw=any",store.State.Subtitles=="Arabic"?"--sub-language=ara,ar":"--sub-language=eng,en",$"--freetype-rel-fontsize={store.State.SubtitleSize}",$"--freetype-color={store.State.SubtitleColor}",$"--freetype-background-opacity={(store.State.SubtitleBackground?180:0)}"];
+    // Prepare VLC while the library is idle so the first video opens immediately.
+    void WarmPlayer()
+    {
+        if(closing||validationMode||player!=null||warmEngine!=null) return;
+        warmStyle=EngineStyle();var options=EngineOptions();
+        StartupTrace.Mark("Player warm-up started");
+        warmEngine=Task.Run(()=>{var engine=PlayerWarmup.CreateEngine(options);StartupTrace.Mark("Player warm-up finished");PlayerWarmup.PreloadCommonPlugins();return engine;});
+    }
+    async Task<LibVLC?> TakeWarmEngine(string style)
+    {
+        var pending=warmEngine;warmEngine=null;if(pending==null) return null;
+        if(warmStyle==style) {try{return await pending;}catch(Exception e){store.Log(e);return null;}}
+        _=pending.ContinueWith(t=>{if(t.IsCompletedSuccessfully)t.Result.Dispose();},TaskScheduler.Default);
+        return null;
+    }
     async Task<bool> EnsurePlayer()
     {
-        var style=$"{store.State.SubtitleSize}:{store.State.SubtitleColor}:{store.State.SubtitleBackground}";
+        var style=EngineStyle();
         if(player!=null&&playerTextStyle==style) return true;
         if(player!=null)
         {
@@ -64,23 +83,19 @@ public partial class MainWindow
             if(closing)return false;
         }
         playerTextStyle=style;
-        var options=new[]{"--no-video-title-show","--quiet","--avcodec-hw=any",store.State.Subtitles=="Arabic"?"--sub-language=ara,ar":"--sub-language=eng,en",$"--freetype-rel-fontsize={store.State.SubtitleSize}",$"--freetype-color={store.State.SubtitleColor}",$"--freetype-background-opacity={(store.State.SubtitleBackground?180:0)}"};
-        var engine=await Task.Run(()=>
+        var options=EngineOptions();
+        StartupTrace.Mark("Player: creating VLC engine");var engine=await TakeWarmEngine(style)??await Task.Run(()=>
         {
 #if NOIR_VALIDATE
             File.AppendAllText(Path.Combine(store.DataDirectory,"engine-startup.txt"),"Core initialization started\n");
 #endif
-            Core.Initialize();
-#if NOIR_VALIDATE
-            File.AppendAllText(Path.Combine(store.DataDirectory,"engine-startup.txt"),"Core initialized; creating VLC\n");
-#endif
-            var native=new LibVLC(options);
+            var native=PlayerWarmup.CreateEngine(options);
 #if NOIR_VALIDATE
             File.AppendAllText(Path.Combine(store.DataDirectory,"engine-startup.txt"),"VLC engine ready\n");
 #endif
             return native;
         });
-        if(closing) {engine.Dispose();return false;}
+        StartupTrace.Mark("Player: VLC engine ready");if(closing) {engine.Dispose();return false;}
         vlc=engine;
 #if NOIR_VALIDATE
         File.AppendAllText(Path.Combine(store.DataDirectory,"engine-startup.txt"),"Creating native player on UI\n");
@@ -113,16 +128,16 @@ public partial class MainWindow
         if(!File.Exists(item.Path)) { Status.Text="This video is unavailable. Reconnect its drive or scan the library.";return; }
         try
         {
-            openingVideo=true;Status.Text="Opening "+item.Label+"…";
+            openingVideo=true;Status.Text="Opening "+item.Label+"…";StartupTrace.Mark("Play requested");
             if(PlayerRoot.Visibility!=Visibility.Visible){libraryScroll=ContentScroll.VerticalOffset;libraryFocus=Keyboard.FocusedElement;libraryFocusName=libraryFocus is FrameworkElement focused?System.Windows.Automation.AutomationProperties.GetName(focused):"";restoreLibraryView=true;}
             if(!await EnsurePlayer()||closing||!IsVisible) return;
             SavePlayback();CancelNext();DetachEvents();
             HidePreview();
             tick?.Stop();serial++;var thisSerial=serial;var native=player!;
-            await StopPlayer(native);if(closing||serial!=thisSerial)return;media?.Dispose();media=null;
+            StartupTrace.Mark("Player ensured");await StopPlayer(native);StartupTrace.Mark("Previous stopped");if(closing||serial!=thisSerial)return;media?.Dispose();media=null;
             current=item;ended=false;tracksSelected=false;pictureConfigured=false;appliedCrop=null;
             introHandled=creditsReached=chaptersChecked=false;saveAfterSeek=false;
-            creditsPromptDismissed=creditsExpanded=false;
+            creditsPromptDismissed=creditsExpanded=false;endAction=null;
             store.State.HiddenContinue.Remove(item.GroupKey);
             var bookmark=store.GetProgress(item);
             lastPlaybackRevision=bookmark?.UpdatedAt??DateTimeOffset.MinValue;
@@ -149,13 +164,13 @@ public partial class MainWindow
             SeekBar.Maximum=Math.Max(1,currentDuration);SeekBar.Value=Math.Min(resume,SeekBar.Maximum);
             endedHandler=(_,_)=>Dispatcher.BeginInvoke(()=> { if(thisSerial==serial && !closing) PlaybackEnded(); });
             errorHandler=(_,_)=>Dispatcher.BeginInvoke(()=> { if(thisSerial==serial && !closing) { PlayerMessage.Text="VLC could not play this file. Return to the library and try another episode.";PlayerMessage.Visibility=Visibility.Visible;SavePlayback();tick?.Stop(); } });
-            playingHandler=(_,_)=>Dispatcher.BeginInvoke(()=> { if(thisSerial==serial && !closing) { store.ConsumeQueue(item);if(pendingTarget==null) PlayerMessage.Visibility=Visibility.Collapsed;PauseButton.Content="Pause";ApplyPictureMode(true); } });
+            playingHandler=(_,_)=>Dispatcher.BeginInvoke(()=> { if(thisSerial==serial && !closing) { StartupTrace.Mark("VLC Playing");store.ConsumeQueue(item);if(pendingTarget==null) PlayerMessage.Visibility=Visibility.Collapsed;PauseButton.Content="Pause";ApplyPictureMode(true); } });
             native.EndReached+=endedHandler;native.EncounteredError+=errorHandler;native.Playing+=playingHandler;
             media=new Media(vlc!,new Uri(item.Path));
             media.AddOption($":freetype-rel-fontsize={store.State.SubtitleSize}");media.AddOption($":freetype-color={store.State.SubtitleColor}");media.AddOption($":freetype-background-opacity={(store.State.SubtitleBackground?180:0)}");
             native.Volume=(int)VolumeBar.Value;native.Mute=muted;
-            if(!native.Play(media)) throw new InvalidOperationException("VLC did not accept the video.");
-            tick!.Start();Focus();
+            StartupTrace.Mark("Calling Play");if(!native.Play(media)) throw new InvalidOperationException("VLC did not accept the video.");
+            StartupTrace.Mark("Play returned");tick!.Start();Focus();
             if(fullscreen) ShowControls();
         }
         catch(Exception e) { store.Log(e);PlayerMessage.Text="Could not open video: "+e.Message;PlayerMessage.Visibility=Visibility.Visible; }
@@ -202,7 +217,7 @@ public partial class MainWindow
             }
             if(seekSent && Math.Abs(time-target)<2.5)
             {
-                pendingTarget=null;lastPosition=time;PlayerMessage.Visibility=Visibility.Collapsed;
+                pendingTarget=null;lastPosition=time;PlayerMessage.Visibility=Visibility.Collapsed;StartupTrace.Mark("Resume position reached");
                 if(saveAfterSeek){saveAfterSeek=false;SavePlayback();_ = FlushPlayback();}
             }
             else if((DateTime.UtcNow-seekStarted).TotalSeconds>15)
@@ -237,6 +252,7 @@ public partial class MainWindow
             if(nextItem!=null)
             {
                 NextTitle.Text=nextItem.EpisodeLabel+(nextItem.EpisodeTitle.Length>0?" · "+nextItem.EpisodeTitle:"");
+                NextLabel.Text="UP NEXT";NextPlay.Content="Play now";endAction=null;
                 NextCountdown.Text="Watched · Credits are still playing";CreditsChip.Content="Up next · "+nextItem.EpisodeLabel+"  ›";
             }
         }
@@ -301,7 +317,8 @@ public partial class MainWindow
         if(sleepPlan?.EpisodeEnded()==true) {StopForSleep();return;}
         nextItem=store.QueuedNext(current,items)??LibraryStore.Next(current,items,store.State);
         PlayerMessage.Text="Episode finished";PlayerMessage.Visibility=Visibility.Visible;
-        if(nextItem==null) { PlayerMessage.Text=current.IsMovie?"Movie finished":"You're caught up with your local episodes.";return; }
+        if(nextItem==null) { ShowFinishedOptions(current);return; }
+        NextLabel.Text="UP NEXT";NextPlay.Content="Play now";endAction=null;
         NextTitle.Text=nextItem.EpisodeLabel+(nextItem.EpisodeTitle.Length>0?" · "+nextItem.EpisodeTitle:"");
         NextPanel.Visibility=Visibility.Visible;PlayerMessage.Visibility=Visibility.Collapsed;
         if(!store.State.AutoNext) { NextCountdown.Text="Ready when you are.";return; }
@@ -317,7 +334,34 @@ public partial class MainWindow
     void CancelNext() { nextTimer?.Stop();NextPanel.Visibility=CreditsChip.Visibility=Visibility.Collapsed; }
     void CreditsChip_Click(object sender,RoutedEventArgs e){creditsExpanded=true;CreditsChip.Visibility=Visibility.Collapsed;NextPanel.Visibility=Visibility.Visible;ShowControls();}
     void CancelNext_Click(object sender,RoutedEventArgs e) { creditsPromptDismissed=true;CancelNext();if(ended) {PlayerMessage.Text="Episode finished. Your place is saved.";PlayerMessage.Visibility=Visibility.Visible;} }
-    void NextNow_Click(object sender,RoutedEventArgs e) { var next=nextItem;if(next!=null) _ = PlayVideo(next); }
+    Action? endAction;
+    // Nothing local to play next: offer the useful step instead of a dead end.
+    void ShowFinishedOptions(VideoItem finished)
+    {
+        var up=finished.IsMovie?null:store.UpNextFor(store.EpisodesFor(finished.GroupKey));
+        NextPanel.Visibility=Visibility.Visible;PlayerMessage.Visibility=Visibility.Collapsed;
+        if(up is {Kind:UpNextKind.NotOnPc} missing)
+        {
+            var job=ActiveDownload(missing.Item);
+            NextLabel.Text="UP NEXT · NOT ON THIS PC";NextTitle.Text=missing.Item.EpisodeLabel+(missing.Item.EpisodeTitle.Length>0&&!store.State.HideSpoilers?" · "+missing.Item.EpisodeTitle:"");
+            NextCountdown.Text=job!=null?"Already downloading. It will appear in your library when ready.":"Find a release and download it to this PC.";
+            NextPlay.Content=job!=null?"View download":"Download";var item=missing.Item;
+            endAction=job!=null?()=>{ReturnToLibrary();Navigate("Downloads");}:()=>FindDownloads(item);
+        }
+        else if(up is {Kind:UpNextKind.Upcoming} soon)
+        {
+            NextLabel.Text="YOU'RE CAUGHT UP";NextTitle.Text=soon.Item.EpisodeLabel+" airs "+(soon.AirsAt?.ToLocalTime().ToString("dddd, d MMM")??"soon");
+            NextCountdown.Text="It will wait for you on Home under Waiting for new episodes.";NextPlay.Content="Back to library";endAction=ReturnToLibrary;
+        }
+        else
+        {
+            NextLabel.Text=finished.IsMovie?"MOVIE FINISHED":"SERIES FINISHED";NextTitle.Text=finished.Title;
+            var rated=store.State.PersonalReviews.GetValueOrDefault(finished.Id)?.Rating??0;
+            NextCountdown.Text=rated>0?"You rated it "+new string('★',rated)+".":"How was it? Your rating and note stay private on this PC.";
+            NextPlay.Content=rated>0?"View diary":"Rate it";endAction=()=>OpenDiary(finished);
+        }
+    }
+    void NextNow_Click(object sender,RoutedEventArgs e) { if(endAction!=null&&ended){endAction();return;}var next=nextItem;if(next!=null) _ = PlayVideo(next); }
     void Pause_Click(object sender,RoutedEventArgs e)=>TogglePause();
     void TogglePause()
     {

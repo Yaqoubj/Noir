@@ -179,6 +179,7 @@ public sealed class MobileSyncServer : IAsyncDisposable
             });
             host.MapGet("/v1/media/{id}",(string id)=>
             {
+                LastMediaRequest=DateTime.UtcNow;
                 var item=store.Archive.FirstOrDefault(i=>i.Id==id);
                 return item!=null&&File.Exists(item.Path)?Results.File(item.Path,"application/octet-stream",lastModified:File.GetLastWriteTimeUtc(item.Path),entityTag:new Microsoft.Net.Http.Headers.EntityTagHeaderValue("\""+new FileInfo(item.Path).Length+"-"+File.GetLastWriteTimeUtc(item.Path).Ticks+"\""),enableRangeProcessing:true):Results.NotFound();
             });
@@ -208,5 +209,7 @@ public sealed class MobileSyncServer : IAsyncDisposable
     sealed class PairInput {public string Code {get;set;}="";public string Name {get;set;}="Android";}
     sealed class DownloadControl {public string Id {get;set;}="";public string Action {get;set;}="";}
     public event Action? Discovered;
+    // Phones stream with repeated range requests; used to keep the PC awake while one is watching.
+    public DateTime LastMediaRequest {get;private set;}=DateTime.MinValue;
     sealed class DiscoverInput {public string Id {get;set;}="";public string Type {get;set;}="movie";public int Season {get;set;}=1;public int Episode {get;set;}=1;public bool Watchlist {get;set;}}
 }

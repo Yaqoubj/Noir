@@ -7,9 +7,11 @@ public partial class App : Application
     void Window_Loaded(object sender,RoutedEventArgs e){if(sender is Window window){WindowAppearance.Apply(window);WindowAppearance.Fit(window);}}
     void Scroll_Wheel(object sender,System.Windows.Input.MouseWheelEventArgs e)=>SmoothScrolling.Wheel(sender,e);
     Mutex? single;
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(int processId);
     protected override void OnStartup(StartupEventArgs e)
     {
-        base.OnStartup(e);
+        StartupTrace.Mark("App startup");base.OnStartup(e);
+        if(e.Args.Contains("--build-vlc-cache")) { Shutdown(PlayerWarmup.BuildPluginCache()?0:1);return; }
         DispatcherUnhandledException += (_, args) =>
         {
             var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Noir");
@@ -34,11 +36,14 @@ public partial class App : Application
         if(validate && dataDirectory==null) { Shutdown(2);return; }
         var instanceSuffix=dataDirectory==null?"":Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(dataDirectory).ToUpperInvariant())))[..16];
         single = new Mutex(true, "Local\\NoirPlayer_" + Environment.UserName + instanceSuffix, out var first);
-        if (!first) { Shutdown(); return; }
+        // Launching again while Noir runs in the background brings the existing window forward.
+        var showSignal=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\NoirPlayerShow_" + Environment.UserName + instanceSuffix);
+        if (!first) { if(!e.Args.Contains("--minimized")) {AllowSetForegroundWindow(-1);showSignal.Set();} Shutdown(); return; }
         var window = new MainWindow(dataDirectory,playPath,validate,initialPage);
         if(validate) { window.ShowActivated=false;window.Title="Noir validation"; }
         MainWindow = window;
-        if(e.Args.Contains("--minimized")) { window.ShowActivated=false;window.WindowState=WindowState.Minimized; }
+        if(e.Args.Contains("--minimized")) { window.ShowActivated=false;window.WindowState=WindowState.Minimized;window.StartHidden=true; }
+        new Thread(()=>{while(showSignal.WaitOne())Dispatcher.BeginInvoke(()=>window.ShowFromTray());}){IsBackground=true,Name="Noir activation"}.Start();
         window.Show();
     }
     protected override void OnExit(ExitEventArgs e) { single?.Dispose(); base.OnExit(e); }

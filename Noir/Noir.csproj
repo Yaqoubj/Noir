@@ -6,10 +6,16 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <!-- Only for the notification-area icon; WinForms names stay out of the global usings. -->
+    <UseWindowsForms>true</UseWindowsForms>
     <PlatformTarget>x64</PlatformTarget>
-    <Version>0.12.2</Version>
+    <Version>0.13.0</Version>
     <ApplicationIcon>Assets\noir.ico</ApplicationIcon>
   </PropertyGroup>
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
   <ItemGroup>
     <Content Include="../work/subtitle-runtime/**/*" Link="Tools/subtitle-sync/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="Allow-Noir-Phone.ps1" CopyToOutputDirectory="PreserveNewest" />
@@ -20,5 +26,13 @@
     <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.24" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
   </ItemGroup>
+  <!-- VLC otherwise probes all 300+ plugin DLLs on every launch (about 13 s on a cold disk). -->
+  <Target Name="NoirVlcPluginCache" AfterTargets="Build" Condition="'$(OS)'=='Windows_NT'">
+    <Exec Command="&quot;$(TargetDir)Noir.exe&quot; --build-vlc-cache" ContinueOnError="true" />
+  </Target>
+  <Target Name="NoirVlcPluginCachePublish" AfterTargets="Publish" Condition="'$(OS)'=='Windows_NT'">
+    <Exec Command="&quot;$(PublishDir)Noir.exe&quot; --build-vlc-cache" />
+    <Error Condition="!Exists('$(PublishDir)libvlc\win-x64\plugins\plugins.dat')" Text="VLC plugin cache was not generated." />
+  </Target>
 </Project>
 

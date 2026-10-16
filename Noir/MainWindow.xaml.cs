@@ -21,17 +21,19 @@ public partial class MainWindow : Window
     bool metadataRefreshRequested;
     readonly CancellationTokenSource metadataCancellation=new();
     readonly bool validationMode;
+    internal bool StartHidden {get;set;}
     readonly Dictionary<string, BitmapImage> images = new(StringComparer.OrdinalIgnoreCase);
     long imageBytes;
     string renderedContext="";
     public MainWindow(string? dataDirectory=null,string? playPath=null,bool validate=false,string? initialPage=null)
     {
+        StartupTrace.Mark("MainWindow constructor");StartupTrace.WatchDispatcher(Dispatcher);
         InitializeComponent();
         ApplyNavigationIcons();
-        SourceInitialized+=(_,_)=>WindowAppearance.Apply(this);
+        SourceInitialized+=(_,_)=>{WindowAppearance.Apply(this);WindowAppearance.Restore(this,store.DataDirectory);};
         PlayerOverlay.Visibility=Visibility.Collapsed;
         Video.Content=null;
-        store = new LibraryStore(dataDirectory);
+        StartupTrace.Mark("UI built");store = new LibraryStore(dataDirectory);StartupTrace.Mark("Library loaded");
         store.PersistenceFailed+=_=>Dispatcher.BeginInvoke(()=>{if(!closing){SavedLabel.Text="Couldn't save progress";SavedLabel.Visibility=Visibility.Visible;Status.Text="Couldn't save the latest progress. Check your library storage.";}});
         validationMode=validate;
         if(!validate) watchSync=new CommunitySync(store,Dispatcher,()=>{if(!closing&&page=="Settings")Status.Text="Community sync updated. Reopen the Community section to see details.";});
@@ -40,10 +42,11 @@ public partial class MainWindow : Window
         Loaded += async (_, _) =>
         {
             foreach(Window overlay in OwnedWindows) if(overlay.Title=="LibVLCSharp.WPF") overlay.Hide();
-            await ScanLibrary();
-            if(!validate) {StartDownloads();await StartMobileSync();}
+            StartupTrace.Mark("Window loaded");await ScanLibrary();StartupTrace.Mark("Scan finished + first render");
+            if(!validate) {StartDownloads();StartupTrace.Mark("Downloads ready");await StartMobileSync();StartupTrace.Mark("Phone sync ready");StartBackgroundServices();if(StartHidden&&store.State.RunInBackground)HideToTray(true);}
             if(initialPage is "Home" or "History" or "Movies" or "Shows" or "My List" or "Settings" or "Discover" or "Downloads") Navigate(initialPage);
             if(!validate) watchSync?.Wake();
+            if(!validate&&playPath==null) _=Dispatcher.InvokeAsync(async()=>{await Task.Delay(1500);WarmPlayer();},DispatcherPriority.ApplicationIdle);
 #if NOIR_VALIDATE
             if(validate) { await ValidatePlayback();return; }
 #endif
@@ -75,7 +78,7 @@ public partial class MainWindow : Window
             if (!string.IsNullOrEmpty(store.LoadWarning)) Status.Text = store.LoadWarning;
             if(current==null) Render();
             if(!validationMode) WatchLibraryFolders();
-            if(!validationMode&&refreshMetadata) _=RefreshMetadata();
+            if(!validationMode&&refreshMetadata) _=RefreshMetadata();StartupTrace.Mark("Scan applied");
         }
         catch (Exception e) { store.Log(e); Status.Text = "Could not scan your library: " + e.Message; }
         finally { scanning = false; }
@@ -107,6 +110,7 @@ public partial class MainWindow : Window
     }
     void Render()
     {
+        if(hiddenInTray){renderWhenShown=true;return;}
         var context=page+"|"+detailKey+"|"+SearchBox.Text;
         var offset=context==renderedContext?ContentScroll.VerticalOffset:0;renderedContext=context;
         var focused=Keyboard.FocusedElement as FrameworkElement;var focusName=focused!=null?System.Windows.Automation.AutomationProperties.GetName(focused):"";
@@ -151,16 +155,26 @@ public partial class MainWindow : Window
         groups=(librarySort=="Recently watched"?groups.OrderByDescending(g=>g.Max(i=>store.GetProgress(i)?.UpdatedAt??DateTimeOffset.MinValue)):librarySort=="Year"?groups.OrderByDescending(g=>g[0].Year):groups.OrderBy(g=>g[0].Title)).ToList();
         if (query.Length == 0 && page == "Home" && groups.Count > 0)
         {
-            var continuations = groups.Select(g => (Group:g, Item:store.ContinueFor(g)))
-                .Where(x => x.Item != null && CanPlay(x.Item) && store.TitleStatus(x.Group)!="Dropped" && !store.State.HiddenContinue.Contains(x.Group[0].GroupKey)).OrderByDescending(x => x.Group.Max(i => store.GetProgress(i)?.UpdatedAt ?? DateTimeOffset.MinValue)).ToList();
-            var hero = continuations.Count > 0 ? continuations[0].Item! : ChoiceFor(groups.FirstOrDefault(g => g.Any(CanPlay)) ?? groups[0]);
-            ContentPanel.Children.Add(Hero(hero, groups.First(g=>g[0].GroupKey==hero.GroupKey), continuations.Count>0));
+            // Titles stay here after their last local episode: the next one can be downloaded,
+            // or is shown with its air date, so finishing something never means hunting in History.
+            var recent=DateTimeOffset.UtcNow.AddDays(-120);
+            var continuations = groups.Where(g=>store.TitleStatus(g)!="Dropped" && !store.State.HiddenContinue.Contains(g[0].GroupKey))
+                .Select(g=>store.UpNextFor(g)).OfType<UpNext>()
+                .Where(x=>x.Kind is UpNextKind.Resume or UpNextKind.Ready || x.Activity>recent)
+                .OrderByDescending(x=>x.Activity).ToList();
+            var latest=groups.Where(g=>g.Any(store.EverWatched)).OrderByDescending(g=>g.Max(HistoryDate)).FirstOrDefault();
+            var justFinished=latest!=null && store.UpNextFor(latest)==null && latest.Max(HistoryDate)>DateTimeOffset.UtcNow.AddDays(-3) && (continuations.Count==0||latest.Max(HistoryDate)>continuations[0].Activity);
+            var heroNext=continuations.FirstOrDefault(x=>x.Kind!=UpNextKind.Upcoming);
+            var hero = justFinished ? latest!.OrderByDescending(HistoryDate).First() : heroNext?.Item ?? ChoiceFor(groups.FirstOrDefault(g => g.Any(CanPlay)) ?? groups[0]);
+            ContentPanel.Children.Add(Hero(hero, groups.First(g=>g[0].GroupKey==hero.GroupKey), heroNext!=null&&!justFinished, justFinished));
             if (continuations.Count > 0)
             {
-                var resume=continuations.Select(c=>c.Item!).Where(i=>store.GetProgress(i) is {Completed:false,Position:>0}).ToList();
-                var next=continuations.Select(c=>c.Item!).Except(resume).ToList();
+                var resume=continuations.Where(x=>store.GetProgress(x.Item) is {Completed:false,Position:>0}).ToList();
+                var next=continuations.Where(x=>x.Kind!=UpNextKind.Upcoming).Except(resume).ToList();
+                var waiting=continuations.Where(x=>x.Kind==UpNextKind.Upcoming).ToList();
                 if(resume.Count>0)ContentPanel.Children.Add(ContinueShelf(resume,"Resume","Your exact saved positions."));
-                if(next.Count>0)ContentPanel.Children.Add(ContinueShelf(next,"Next episode","Continue after the episodes you finished."));
+                if(next.Count>0)ContentPanel.Children.Add(ContinueShelf(next,"Next episode",next.Any(x=>x.Kind==UpNextKind.NotOnPc)?"Continue after the episodes you finished. Episodes not on this PC can be downloaded in one click.":"Continue after the episodes you finished."));
+                if(waiting.Count>0)ContentPanel.Children.Add(ContinueShelf(waiting,"Waiting for new episodes","You're caught up. These return here when the next episode airs."));
             }
             else ContentPanel.Children.Add(Heading("Continue Watching","Start a movie or episode. It will appear here when you return."));
         }
@@ -264,12 +278,15 @@ public partial class MainWindow : Window
     {
         if(closeReady)return;
         e.Cancel=true;if(closing)return;
+        if(!quitting&&tray!=null&&store.State.RunInBackground){HideToTray();return;}
         closing=true;
+        WindowAppearance.Remember(store.DataDirectory,fullscreen?oldWindowBounds:RestoreBounds,fullscreen?oldWindowState==WindowState.Maximized:WindowState==WindowState.Maximized);
         StopWatchingFolders();
         metadataCancellation.Cancel();CancelDiscover();SmoothScrolling.Stop(ContentScroll);downloadPageUpdate=null;
         HidePreview();
         if(previews!=null)await previews.DisposeAsync();
         SavePlayback();
+        DisposeBackgroundServices();
         watchSync?.Dispose();
         downloads?.Dispose();
         if(mobileSync!=null) _=mobileSync.DisposeAsync();
@@ -282,6 +299,7 @@ public partial class MainWindow : Window
             var native=player;player=null;await nativeTransition.WaitAsync();
             try{await Task.Run(()=>{native.Stop();native.Dispose();media?.Dispose();vlc?.Dispose();});}finally{nativeTransition.Release();}
         }
+        if(warmEngine is {} warm){warmEngine=null;try{(await warm).Dispose();}catch{}}
         store.State.Volume=(int)VolumeBar.Value;
         try{await Task.Run(store.Save);await store.FlushPendingAsync();}catch(Exception error){try{store.Log(error);}catch{}}
         Video.Dispose();

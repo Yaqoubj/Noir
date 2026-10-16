@@ -5,7 +5,7 @@ using System.Windows.Media;
 namespace Noir;
 public partial class MainWindow
 {
-    FrameworkElement Hero(VideoItem item,List<VideoItem> group,bool continuing)
+    FrameworkElement Hero(VideoItem item,List<VideoItem> group,bool continuing,bool justFinished=false)
     {
         var grid=new Grid { MinHeight=detailKey==null?315:200,ClipToBounds=true };
         var source=ImageSource(item.Backdrop)??ImageSource(item.Poster);
@@ -15,7 +15,7 @@ public partial class MainWindow
         shade.GradientStops.Add(new(Brush("#FA0D0D0F").Color,0));shade.GradientStops.Add(new(Brush("#D80D0D0F").Color,.5));shade.GradientStops.Add(new(Brush("#280D0D0F").Color,1));
         grid.Children.Add(new Border { Background=shade });
         var panel=new StackPanel { Margin=new(30,24,30,22),MaxWidth=610,HorizontalAlignment=HorizontalAlignment.Left };
-        panel.Children.Add(Text(continuing?"RIGHT WHERE YOU LEFT OFF":"TONIGHT'S PICK",10,"#E4C084",FontWeights.SemiBold));
+        panel.Children.Add(Text(justFinished?(item.IsMovie?"YOU JUST WATCHED":"YOU FINISHED THIS SHOW"):continuing&&!CanPlay(item)?"UP NEXT · NOT ON THIS PC YET":continuing?"RIGHT WHERE YOU LEFT OFF":"TONIGHT'S PICK",10,"#E4C084",FontWeights.SemiBold));
         var name=Text(item.Title,40,weight:FontWeights.Bold);name.Margin=new(0,8,0,3);panel.Children.Add(name);
         var pro=store.GetProgress(item);
         var info=item.IsMovie?(store.EverWatched(item)?"✓ Watched":"Movie"):item.EpisodeLabel+"  ·  "+EpisodeCountText(group,false);
@@ -25,30 +25,65 @@ public partial class MainWindow
         var summary=Text(item.Summary.Length>0?item.Summary:"A little less browsing. A little more watching.",13,"#CBC6BF");
         summary.MaxHeight=56;summary.TextTrimming=TextTrimming.CharacterEllipsis;summary.Margin=new(0,12,0,20);if(detailKey==null) panel.Children.Add(summary);
         var actions=new WrapPanel();
-        var play=ActionButton(!CanPlay(item)?"↓ Download":pro is {Completed:false,Position:>0}?"▶  Resume · "+LibraryStore.Time(pro.Position):continuing?"▶  Play next episode":"▶  Play",()=>{if(CanPlay(item))_=PlayVideo(item);else FindDownloads(item);},true);
-        actions.Children.Add(play);
-        var details=ActionButton(detailKey!=null?"Reviews":item.IsMovie?"Details":"Episodes",()=>{if(detailKey!=null) OpenReviews(item);else OpenDetails(group);});details.Margin=new(10,0,0,0);actions.Children.Add(details);
+        if(justFinished)
+        {
+            var rated=store.State.PersonalReviews.GetValueOrDefault(item.Id)?.Rating??0;
+            var rate=ActionButton(rated>0?new string('★',rated)+"  Your rating":"★  Rate & add a note",()=>OpenDiary(item),true);actions.Children.Add(rate);
+        }
+        if(!justFinished)actions.Children.Add(ActionButton(!CanPlay(item)?"↓ Download":pro is {Completed:false,Position:>0}?"▶  Resume · "+LibraryStore.Time(pro.Position):continuing?"▶  Play next episode":"▶  Play",()=>{if(CanPlay(item))_=PlayVideo(item);else FindDownloads(item);},true));
+        else if(item.IsMovie&&CanPlay(item)){var again=ActionButton("↻  Watch again",()=>_=PlayVideo(item,true));again.Margin=new(10,0,0,0);actions.Children.Add(again);}
+        var details=ActionButton(detailKey!=null?"Reviews":item.IsMovie?"Details":"Episodes",()=>{if(detailKey!=null) OpenReviews(item);else OpenDetails(group);});details.Margin=new(actions.Children.Count>0?10:0,0,0,0);actions.Children.Add(details);
         var saved=ActionButton(store.State.Watchlist.Contains(item.GroupKey)?"✓ My List":"+ My List",()=>ToggleWatchlist(item));saved.Margin=new(10,0,0,0);actions.Children.Add(saved);
         panel.Children.Add(actions);grid.Children.Add(panel);
         return new Border { CornerRadius=new(13),Child=grid,ClipToBounds=true };
     }
-    FrameworkElement ContinueCard(VideoItem item)
+    PcDownloadJob? ActiveDownload(VideoItem item)=>downloads?.Jobs().FirstOrDefault(j=>j.Target.GroupKey==item.GroupKey&&j.Target.Season==item.Season&&j.Target.Episode==item.Episode&&j.Status is "Queued" or "Preparing" or "Downloading" or "Subtitles" or "Paused");
+    FrameworkElement ContinueCard(VideoItem item,UpNext? next=null)
     {
         var panel=new StackPanel {Width=270,Margin=new(0,0,18,12)};
         var picture=new Grid {Height=152,ClipToBounds=true};
-        var play=ActionButton("",()=>_ = PlayVideo(item));play.Content=Art(System.IO.File.Exists(item.Backdrop)?item.Backdrop:item.Poster,item.Title,152);play.Padding=new(0);play.HorizontalAlignment=HorizontalAlignment.Stretch;
-        play.ToolTip="Resume "+item.Label;System.Windows.Automation.AutomationProperties.SetName(play,"Continue "+item.Label);picture.Children.Add(play);
-        picture.Children.Add(new Border {IsHitTestVisible=false,Background=new LinearGradientBrush(Brush("#00000000").Color,Brush("#77000000").Color,90)});
-        var icon=PlayCircle();icon.IsHitTestVisible=false;picture.Children.Add(icon);picture.Children.Add(CardMenu(item));
+        var kind=next?.Kind??UpNextKind.Ready;var job=kind==UpNextKind.NotOnPc?ActiveDownload(item):null;
+        Action open=kind switch
+        {
+            UpNextKind.Upcoming=>()=>OpenDetails(store.EpisodesFor(item.GroupKey)),
+            UpNextKind.NotOnPc when job!=null=>()=>Navigate("Downloads"),
+            UpNextKind.NotOnPc=>()=>FindDownloads(item),
+            _=>()=>_ = PlayVideo(item)
+        };
+        var image=item.EpisodeImage.Length>0&&System.IO.File.Exists(item.EpisodeImage)&&kind!=UpNextKind.Resume&&!store.State.HideSpoilers?item.EpisodeImage:System.IO.File.Exists(item.Backdrop)?item.Backdrop:item.Poster;
+        var play=ActionButton("",open);play.Content=Art(image,item.Title,152);play.Padding=new(0);play.HorizontalAlignment=HorizontalAlignment.Stretch;
+        var verb=kind switch{UpNextKind.Upcoming=>"Details for ",UpNextKind.NotOnPc=>job!=null?"Download progress for ":"Download ",UpNextKind.Resume=>"Resume ",_=>"Play "};
+        play.ToolTip=verb+item.Label;System.Windows.Automation.AutomationProperties.SetName(play,"Continue "+item.Label);picture.Children.Add(play);
+        picture.Children.Add(new Border {IsHitTestVisible=false,Background=new LinearGradientBrush(Brush("#00000000").Color,Brush(kind is UpNextKind.Upcoming or UpNextKind.NotOnPc?"#A0000000":"#77000000").Color,90)});
+        FrameworkElement icon=kind switch
+        {
+            UpNextKind.Upcoming=>Badge("NEW EPISODE SOON"),
+            UpNextKind.NotOnPc=>Badge(job!=null?"DOWNLOADING":"↓  GET IT ON THIS PC"),
+            _=>PlayCircle()
+        };
+        icon.IsHitTestVisible=false;picture.Children.Add(icon);picture.Children.Add(CardMenu(item));
         panel.Children.Add(new Border {CornerRadius=new(10),Child=picture,ClipToBounds=true});
         var bookmark=store.GetProgress(item);
         var progress=bookmark?.Duration>0?Math.Clamp(bookmark.Position/bookmark.Duration,0,1):0;
         panel.Children.Add(new ProgressBar { Value=progress*100,Maximum=100,Height=3,Background=Brush("#37332E"),Foreground=Brush("#E4C084"),BorderThickness=new(0) });
         var title=ActionButton(item.Title,()=>OpenDetails(store.EpisodesFor(item.GroupKey)));title.FontWeight=FontWeights.SemiBold;title.FontSize=15;title.Padding=new(0);title.Background=Brush("Transparent");title.Margin=new(0,10,0,5);title.ToolTip="Details & episodes";panel.Children.Add(title);
         var episode=Text(item.IsMovie?"Movie":item.EpisodeLabel+(item.EpisodeTitle.Length>0?" · "+item.EpisodeTitle:""),12,"#C7C2BC");episode.TextWrapping=TextWrapping.NoWrap;episode.TextTrimming=TextTrimming.CharacterEllipsis;panel.Children.Add(episode);
-        panel.Children.Add(Body(bookmark is {Completed:false,Position:>0}?"Resume · "+LibraryStore.Time(bookmark.Position)+(bookmark.Duration>0?"  ·  "+Math.Max(1,(int)Math.Ceiling((bookmark.Duration-bookmark.Position)/60))+" min left":""):"Up next · Ready to play",11));
+        var status=kind switch
+        {
+            UpNextKind.Upcoming=>next?.AirsAt is {} airs?"Airs "+airs.ToLocalTime().ToString("ddd, d MMM")+" · You're caught up":"You're caught up",
+            UpNextKind.NotOnPc when job!=null=>job.Status=="Paused"?"Download paused · Open Downloads":job.Size>0?$"Downloading · {Math.Clamp(job.Bytes*100/job.Size,0,100)}%":"Download queued",
+            UpNextKind.NotOnPc=>bookmark is {Completed:false,Position:>0}?"Saved at "+LibraryStore.Time(bookmark.Position)+" · File not on this PC":"Not on this PC · Click to find a download",
+            _=>bookmark is {Completed:false,Position:>0}?"Resume · "+LibraryStore.Time(bookmark.Position)+(bookmark.Duration>0?"  ·  "+Math.Max(1,(int)Math.Ceiling((bookmark.Duration-bookmark.Position)/60))+" min left":""):"Up next · Ready to play"
+        };
+        panel.Children.Add(Body(status,11));
         panel.ContextMenu=ItemMenu(item);return panel;
     }
+    FrameworkElement Badge(string text)=>new Border
+    {
+        Background=Brush("#E6101012"),BorderBrush=Brush("#80E4C084"),BorderThickness=new(1),CornerRadius=new(14),Padding=new(14,6,14,6),
+        HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center,
+        Child=Text(text,11,"#E4C084",FontWeights.SemiBold)
+    };
     void Catalog(List<List<VideoItem>> groups,string title)
     {
         if(groups.Count==0) return;
@@ -235,12 +270,23 @@ public partial class MainWindow
         switch(settingsSection)
         {
             case "Library":RenderLibrarySettings();break;
-            case "Downloads":RenderDownloadSettings();break;
-            case "Phone Sync":RenderMobileSettings();break;
+            case "Downloads":RenderDownloadSettings();RenderBackgroundSettings();break;
+            case "Phone Sync":RenderMobileSettings();RenderBackgroundSettings();break;
             case "Community":RenderCommunitySettings();break;
             case "Advanced":RenderAdvancedSettings();break;
             default:RenderPlaybackSettings();break;
         }
+    }
+    void RenderBackgroundSettings()
+    {
+        ContentPanel.Children.Add(Heading("Running in the background","Phone sync, streaming to your phone and PC downloads need Noir running on this PC."));
+        var background=new CheckBox{Content="Keep Noir running in the notification area when I close the window",IsChecked=store.State.RunInBackground,Margin=new(0,6,0,6)};
+        background.Click+=(_,_)=>{store.State.RunInBackground=background.IsChecked==true;store.Save();};ContentPanel.Children.Add(background);
+        var awake=new CheckBox{Content="Keep the PC from sleeping while downloading or streaming to my phone",IsChecked=store.State.KeepAwakeWhileBusy,Margin=new(0,6,0,6)};
+        awake.Click+=(_,_)=>{store.State.KeepAwakeWhileBusy=awake.IsChecked==true;store.Save();UpdateBackgroundState();};ContentPanel.Children.Add(awake);
+        var startup=new CheckBox{Content="Start Noir in the background when I sign in to Windows",IsChecked=StartsWithWindows(),Margin=new(0,6,0,6)};
+        startup.Click+=(_,_)=>{try{SetStartWithWindows(startup.IsChecked==true);}catch(Exception e){store.Log(e);startup.IsChecked=StartsWithWindows();Status.Text="Windows didn't allow changing the startup setting.";}};ContentPanel.Children.Add(startup);
+        ContentPanel.Children.Add(Body("Right-click the Noir icon near the clock to open or quit it. The screen can still turn off; only sleep is postponed while work is in progress.",12));
     }
     void RenderPlaybackSettings()
     {

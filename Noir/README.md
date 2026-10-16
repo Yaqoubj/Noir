@@ -1,4 +1,12 @@
-# Noir 0.12.2 / Android 0.4.1
+# Noir 0.13.0 / Android 0.4.1
+
+**What's new in 0.13.0**
+
+- **Videos open instantly.** Noir now ships VLC's plugin cache and prepares the player in the background a moment after launch. Opening the first video after starting Noir took about 13 seconds on a cold disk; it now starts in well under a second.
+- **The window fits your screen.** The first launch sizes Noir to the monitor's usable area (maximized on small or highly scaled screens), so the title bar is always reachable. Noir remembers its size, position and maximized state.
+- **Smarter Continue Watching.** Finishing the last episode on your PC no longer drops a show from Home. The next episode stays under *Next episode* with a one-click download (or its live download progress), and caught-up shows wait under *Waiting for new episodes* with the air date. After a movie or a finished series, Home offers to rate it.
+- **Smarter end of episode.** When the next episode isn't on this PC, the end screen offers *Download* (or *View download*); when it hasn't aired, it shows the date; after a movie it offers *Rate it*.
+- **Runs in the background.** Closing the window keeps Noir in the notification area so phone sync, streaming to your phone and PC downloads continue. A notification appears when a download is ready. Noir keeps the PC from sleeping only while downloading or streaming to your phone. Optional: start in the background when you sign in. Right-click the tray icon → **Quit Noir** to exit; Settings → Phone Sync or Downloads → *Running in the background* controls all of this.
 
 Android's Subtitles menu downloads English/Arabic files to the phone and can request a smart timing check from this PC. The PC verifies the video fingerprint, processes the subtitle in a temporary local workspace, and returns a correction only when confident. Your original PC subtitle files stay intact. Both language choices and manual timing remain saved on the phone.
 
@@ -28,7 +36,7 @@ Review windows remember their last tab and sign-ins. Compact/embed mode has been
 
 A Windows movie and TV library with a black interface and embedded VLC playback.
 
-## Android companion (Windows 0.12.2 / Android 0.4.1)
+## Android companion (Windows 0.13.0 / Android 0.4.1)
 
 Review windows open the original community websites. Noir remembers the chosen Reddit discussion per episode/movie on that device and disposes the browser on close. Compact/embed mode was removed in 0.8.0. These websites require an internet connection.
 
@@ -38,9 +46,9 @@ Install `Noir-Android.apk` on an Android 8+ phone (ARM64). The `Noir-Android-All
 
 Noir syncs exact resume positions, individual viewing dates, ratings, private notes and My List. Android caches the full known episode list, descriptions and artwork, including watched titles whose PC files are deleted. Newer playback positions win over older offline positions, while earlier completed viewings still join the diary. Operations have durable receipts and viewing IDs to prevent duplicate completions. Phone completions also enter the PC's existing Trakt/Serializd queue if those integrations are enabled.
 
-Windows preserves its last successful sync time across restarts and displays it in Settings. Closing an older paused PC playback session cannot overwrite newer phone progress. New video files are detected automatically while browsing; rescans wait while an episode is open. The first VLC initialization runs in the background so opening an episode does not block the interface. Closing Noir still quits it; the phone queues changes while the PC is unavailable.
+Windows preserves its last successful sync time across restarts and displays it in Settings. Closing an older paused PC playback session cannot overwrite newer phone progress. New video files are detected automatically while browsing; rescans wait while an episode is open. The VLC engine is prepared in the background shortly after launch, so opening an episode does not block the interface. Closing the window keeps Noir running in the notification area (configurable); the phone queues changes while the PC is unavailable.
 
-Windows Noir must remain open and the PC awake for sync and streaming. Android syncs on opening, every 15 seconds while open, and periodically in the background when Android's scheduler permits it (not guaranteed at an exact interval). Offline playback saves changes and retries when the PC is reachable. This version syncs with one PC over local networks; internet/cloud sync is not implemented. Videos stream directly from the PC without upload or transcoding. For offline viewing, choose **Link a video on my phone** in an episode/movie's options and select its local copy. Android uses VLC for playback, supports embedded audio/subtitle tracks, known intro skipping, watched-at-credits and an optional countdown to the next available episode. It does not yet include all Windows features such as preview thumbnails, manual marker editing or a sleep timer.
+Windows Noir must be running (it stays in the notification area when the window is closed) and the PC awake for sync and streaming; Noir postpones sleep while a phone is streaming. Android syncs on opening, every 15 seconds while open, and periodically in the background when Android's scheduler permits it (not guaranteed at an exact interval). Offline playback saves changes and retries when the PC is reachable. This version syncs with one PC over local networks; internet/cloud sync is not implemented. Videos stream directly from the PC without upload or transcoding. For offline viewing, choose **Link a video on my phone** in an episode/movie's options and select its local copy. Android uses VLC for playback, supports embedded audio/subtitle tracks, known intro skipping, watched-at-credits and an optional countdown to the next available episode. It does not yet include all Windows features such as preview thumbnails, manual marker editing or a sleep timer.
 
 Connections use HTTPS with the PC certificate fingerprint embedded in the pairing link and pinned by Android. The PC stores only hashes of phone tokens, protects its certificate key with Windows user encryption, serves videos by catalog IDs, and excludes folder paths, Windows browser sessions and third-party account settings from the mobile projection. Android's private data directory stores the paired token; app backups are disabled. Pairing another PC over an existing phone library is refused to protect its saved history. **Disconnect all paired phones** revokes their access immediately.
 
@@ -116,7 +124,7 @@ Core regression tests live in the neighboring `Noir.Checks` project. They cover 
 
 ## Third-party components
 
-Playback uses [VideoLAN LibVLC](https://www.videolan.org/vlc/libvlc.html) and [LibVLCSharp](https://code.videolan.org/videolan/LibVLCSharp); review pages use [Microsoft WebView2](https://learn.microsoft.com/en-us/microsoft-edge/webview2/). Their licenses are preserved with the installed binaries and license files. Metadata sources: [Cinemeta](https://github.com/Stremio/stremio-official-addons/blob/master/index.json), [TVmaze](https://www.tvmaze.com/api) (CC BY-SA), [Wikipedia](https://en.wikipedia.org/wiki/Wikipedia:Copyrights) (CC BY-SA), and [IMDb's personal-use episode index](https://data.imdb.com/non-commercial-datasets/). Links to matching metadata source pages are preserved in title details. UI choices draw on [HBO Max's browsing, My List and Continue Watching guidance](https://help.hbomax.com/tk-en/answer/detail/000002559) and [Netflix's subtitle appearance guidance](https://help.netflix.com/en/node/100267). Windows version 0.12.2.
+Playback uses [VideoLAN LibVLC](https://www.videolan.org/vlc/libvlc.html) and [LibVLCSharp](https://code.videolan.org/videolan/LibVLCSharp); review pages use [Microsoft WebView2](https://learn.microsoft.com/en-us/microsoft-edge/webview2/). Their licenses are preserved with the installed binaries and license files. Metadata sources: [Cinemeta](https://github.com/Stremio/stremio-official-addons/blob/master/index.json), [TVmaze](https://www.tvmaze.com/api) (CC BY-SA), [Wikipedia](https://en.wikipedia.org/wiki/Wikipedia:Copyrights) (CC BY-SA), and [IMDb's personal-use episode index](https://data.imdb.com/non-commercial-datasets/). Links to matching metadata source pages are preserved in title details. UI choices draw on [HBO Max's browsing, My List and Continue Watching guidance](https://help.hbomax.com/tk-en/answer/detail/000002559) and [Netflix's subtitle appearance guidance](https://help.netflix.com/en/node/100267). Windows version 0.13.0.
 
 
 

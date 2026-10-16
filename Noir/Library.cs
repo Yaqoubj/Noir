@@ -59,6 +59,9 @@ public sealed class PlayerState
     public int SubtitleSize { get; set; } = 16;
     public int SubtitleColor { get; set; } = 0xFFFFFF;
     public bool SubtitleBackground { get; set; }
+    public bool RunInBackground { get; set; } = true;
+    public bool KeepAwakeWhileBusy { get; set; } = true;
+    public bool BackgroundHintShown { get; set; }
 }
 public sealed class ViewingRecord
 {

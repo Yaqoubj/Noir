@@ -16,6 +16,7 @@ MobileChecks.Run(root,Check);
 OrganizerChecks.Run(root,Check);
 ProfileChecks.Run(root,Check);
 PremiumChecks.Run(root,Check);
+UpNextChecks.Run(root,Check);
 await UxChecks.Run(root,Check);
 var post="https://old.reddit.com/r/television/comments/abc123/episode_discussion/comment42/?context=3";
 Check(RedditDiscussion.Reddit(post)=="https://www.reddit.com/r/television/comments/abc123/episode_discussion/comment42/","Reddit discussion links preserve the exact comment and remove tracking parameters");

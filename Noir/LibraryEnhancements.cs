@@ -33,12 +33,12 @@ public partial class MainWindow
         button.Click+=(_,e)=>{e.Handled=true;var menu=ItemMenu(item);menu.PlacementTarget=button;menu.Placement=PlacementMode.Bottom;menu.IsOpen=true;};
         return button;
     }
-    FrameworkElement ContinueShelf(IEnumerable<VideoItem> videos,string label="Continue Watching",string subtitle="Pick up from your saved time, or play the next episode.")
+    FrameworkElement ContinueShelf(IEnumerable<UpNext> videos,string label="Continue Watching",string subtitle="Pick up from your saved time, or play the next episode.")
     {
         var container=new StackPanel();var title=new DockPanel{Margin=new(0,24,0,15)};
         var arrows=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right};DockPanel.SetDock(arrows,Dock.Right);title.Children.Add(arrows);
         var heading=new StackPanel();heading.Children.Add(Text(label,21,weight:FontWeights.SemiBold));heading.Children.Add(Body(subtitle,12));title.Children.Add(heading);
-        var row=new StackPanel{Orientation=Orientation.Horizontal};foreach(var item in videos) row.Children.Add(ContinueCard(item));
+        var row=new StackPanel{Orientation=Orientation.Horizontal};foreach(var entry in videos) row.Children.Add(ContinueCard(entry.Item,entry));
         var scroll=new ScrollViewer {Content=row,HorizontalScrollBarVisibility=ScrollBarVisibility.Hidden,VerticalScrollBarVisibility=ScrollBarVisibility.Disabled,PanningMode=PanningMode.HorizontalOnly};
         var previous=ActionButton("‹",()=>scroll.ScrollToHorizontalOffset(Math.Max(0,scroll.HorizontalOffset-576)));previous.ToolTip="Previous titles";previous.FontSize=22;previous.Padding=new(14,3,14,3);
         var next=ActionButton("›",()=>scroll.ScrollToHorizontalOffset(Math.Min(scroll.ScrollableWidth,scroll.HorizontalOffset+576)));next.ToolTip="More titles";next.FontSize=22;next.Padding=new(14,3,14,3);next.Margin=new(8,0,0,0);arrows.Children.Add(previous);arrows.Children.Add(next);

@@ -35,7 +35,7 @@ public partial class MainWindow
             catch(System.ComponentModel.Win32Exception) {Status.Text="Windows network permission was cancelled. History is unchanged.";}
         });firewall.Margin=new(0,10,0,0);ContentPanel.Children.Add(firewall);
         ContentPanel.Children.Add(Body("Use this if Windows blocks the phone connection. It adds a rule for Noir on local networks; Windows requires administrator approval.",12));
-        ContentPanel.Children.Add(Body("Keep Noir open on the PC for sync or streaming. Offline phone playback queues your progress for the next connection. Pairing lasts 10 minutes and works once. No cloud account or upload is needed.",12));
+        ContentPanel.Children.Add(Body("Noir must be running on the PC for sync or streaming; closing the window keeps it running in the notification area. Offline phone playback queues your progress for the next connection. Pairing lasts 10 minutes and works once. No cloud account or upload is needed.",12));
     }
     void ShowPhonePairing()
     {

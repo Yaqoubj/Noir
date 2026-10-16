@@ -21,6 +21,6 @@ Noir is a local media app for **Windows and Android**. It brings the comfort of 
 2. Install the Android APK, then pair it from Windows **Settings → Phone Sync**.
 3. To use PC downloads, connect TorBox and optionally AIOStreams in **Settings → Downloads**.
 
-Phone sync and PC streaming use your local network; keep the PC awake and Noir open. Discover can browse the internet or its cached results. Downloads finish as local files.
+Phone sync and PC streaming use your local network. Closing the window keeps Noir running in the notification area, and it keeps the PC awake while downloading or streaming. Discover can browse the internet or its cached results. Downloads finish as local files.
 
 [Windows guide & building](Noir/README.md) · [Android guide & building](Noir.Android/README.md) · [MIT license](LICENSE)
