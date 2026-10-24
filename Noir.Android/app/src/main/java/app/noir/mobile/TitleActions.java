@@ -47,30 +47,40 @@ final class TitleActions {
         ScrollView scroll=new ScrollView(a);scroll.setFillViewport(false);scroll.setVerticalScrollBarEnabled(false);
         LinearLayout body=a.column();body.addView(top,new LinearLayout.LayoutParams(-1,a.dp(164)));
         LinearLayout actions=a.column();actions.setPadding(a.dp(18),0,a.dp(18),a.dp(24));body.addView(actions);
-        if(a.playable(item)) {
+        if(!PhoneExperience.trackerOnly(a.data)){if(a.playable(item)) {
             Button play=a.button(MainActivity.position(item)>0&&!MainActivity.completed(item)?"▶ Resume · "+DataStore.time(MainActivity.position(item)):"▶ Watch now",()->choose(item,0),true);
             play.setContentDescription("Watch now or resume");actions.addView(play);
-        } else actions.addView(a.button("↓ Find a download on PC",()->choose(item,14),true));
+        } else if(PhoneStream.available(a)&&item.optString("imdb").matches("tt\\d+")){
+            Button stream=a.button("▶ Stream now",()->{dismiss();PhoneStream.start(a,item,false);},true);stream.setContentDescription("Stream now");actions.addView(stream);
+            actions.addView(a.button("Choose a stream…",()->{dismiss();PhoneStream.start(a,item,true);},false));
+            if(a.data.paired())actions.addView(a.button("↓ Find a download on PC",()->choose(item,14),false));
+        } else actions.addView(a.button("▶ Set up streaming",()->{dismiss();PhoneStream.start(a,item,false);},true));
+        if(item.optString("imdb").matches("tt\\d+")){Button stream=a.button("▶ Stream in Stremio",()->{dismiss();a.stremio(item);},false);stream.setContentDescription("Stream in Stremio");actions.addView(stream);
+            Button nuvio=a.button("▶ Stream in Nuvio",()->{dismiss();a.nuvio(item);},false);nuvio.setContentDescription("Stream in Nuvio");actions.addView(nuvio);}
 
+        }
         section(actions,"WATCH & ORGANIZE");
-        tiles(actions,List.of(
+        List<Tile> organize=new ArrayList<>(List.of(
             action(MainActivity.completed(item)?"↶":"✓",MainActivity.completed(item)?"Mark unwatched":"Mark watched",()->choose(item,2)),
-            action(item.optBoolean("listed")?"✓":"＋","My List",()->{dismiss();JSONObject op=a.data.operation(item.optString("id"),"list");DataStore.put(op,"value",!item.optBoolean("listed"));a.data.queue(op);a.data.syncSoon();a.render();}),
+            listTile(item),
             action("▤","Play queue",()->choose(item,7)),
             action("◉","Viewing status",()->choose(item,8)),
             action("▦","Collections",()->choose(item,9)),
-            action("↺","Start over",()->choose(item,1),a.playable(item))));
-        section(actions,"DOWNLOADS");
+            action("↺","Start over",()->choose(item,1),a.playable(item))));if(PhoneExperience.trackerOnly(a.data))organize.removeIf(t->t.label.equals("Play queue")||t.label.equals("Start over"));tiles(actions,organize);
+        if(!PhoneExperience.trackerOnly(a.data)){section(actions,"DOWNLOADS");
         List<Tile> downloads=new ArrayList<>();
-        downloads.add(action("↓",item.optBoolean("movie")?"Movie to PC":"Episode to PC",()->choose(item,14)));
-        if(!item.optBoolean("movie"))downloads.add(action("⇊","Season to PC",()->choose(item,15)));
+        if(a.data.paired())downloads.add(action("↓",item.optBoolean("movie")?"Movie to PC":"Episode to PC",()->choose(item,14)));
+        downloads.add(action("↓",item.optBoolean("movie")?"Movie to phone":"Episode to phone",()->{dismiss();PhoneDownloadsActivity.open(a,item,false);}));
+        if(a.data.paired()&&!item.optBoolean("movie"))downloads.add(action("⇊","Season to PC",()->choose(item,15)));
+        if(!item.optBoolean("movie"))downloads.add(action("⇊","Season to phone",()->{dismiss();PhoneDownloadsActivity.open(a,item,true);}));
         downloads.add(action("⇩","Save on phone",()->choose(item,12),item.optBoolean("available")));
         downloads.add(action("▶","Watch & save",()->choose(item,10),item.optBoolean("available")));
         downloads.add(action("⌁","Link phone file",()->choose(item,3)));
-        tiles(actions,downloads);
+        tiles(actions,downloads);}
         section(actions,"YOUR ACTIVITY & DETAILS");
         tiles(actions,List.of(
-            action("☆","Rating & note",()->choose(item,5)),
+            action("☆","Rating & note",()->{dismiss();PhoneTracker.quickRate(a,item);}),
+            action(a.data.liked(item.optString("group"))?"♥":"♡","Like this title",()->{a.data.like(item.optString("group"),!a.data.liked(item.optString("group")));a.data.syncSoon();dismiss();a.renderKeep();}),
             action("◷","Viewing dates",()->choose(item,6)),
             action("💬","Comments",()->choose(item,4)),
             action("ⓘ","Description",()->choose(item,13)),
@@ -88,9 +98,10 @@ final class TitleActions {
 
     void choose(JSONObject item,int option){dismiss();a.option(item,option);}
     static final class Tile {
-        final String icon,label;final Runnable run;final boolean enabled;
+        java.util.function.BooleanSupplier state;final String icon,label;final Runnable run;final boolean enabled;
         Tile(String icon,String label,Runnable run,boolean enabled){this.icon=icon;this.label=label;this.run=run;this.enabled=enabled;}
     }
+    Tile listTile(JSONObject item){Tile t=action(item.optBoolean("listed")?"✓":"＋","My List",()->{JSONObject fresh=a.data.item(item.optString("id"));boolean listed=fresh!=null&&fresh.optBoolean("listed");JSONObject op=a.data.operation(item.optString("id"),"list");DataStore.put(op,"value",!listed);a.data.queue(op);a.data.syncSoon();a.listBadges(item.optString("group"),!listed);a.updateStatus();});t.state=()->{JSONObject fresh=a.data.item(item.optString("id"));return fresh!=null&&fresh.optBoolean("listed");};return t;}
     Tile action(String icon,String label,Runnable run){return action(icon,label,run,true);}
     Tile action(String icon,String label,Runnable run,boolean enabled){return new Tile(icon,label,run,enabled);}
     void section(LinearLayout host,String label){TextView title=a.text(label,10,MainActivity.MUTED);title.setLetterSpacing(.12f);title.setTypeface(null,Typeface.BOLD);title.setPadding(a.dp(4),a.dp(24),0,a.dp(10));host.addView(title);}
@@ -105,23 +116,10 @@ final class TitleActions {
                 tile.setPadding(a.dp(6),a.dp(12),a.dp(6),a.dp(12));tile.setMinimumHeight(a.dp(88));tile.setBackground(MainActivity.bg(MainActivity.PANEL,a.dp(16)));
                 TextView glyph=a.text(action.icon,24,MainActivity.GOLD);glyph.setGravity(Gravity.CENTER);tile.addView(glyph);
                 TextView label=a.text(action.label,12,MainActivity.WHITE);label.setGravity(Gravity.CENTER);label.setPadding(0,a.dp(6),0,0);tile.addView(label);
-                tile.setEnabled(action.enabled);tile.setAlpha(action.enabled?1:.4f);tile.setFocusable(action.enabled);tile.setContentDescription(action.label);tile.setOnClickListener(v->action.run.run());row.addView(tile,p);
+                tile.setEnabled(action.enabled);tile.setAlpha(action.enabled?1:.4f);tile.setFocusable(action.enabled);tile.setContentDescription(action.label);tile.setOnClickListener(v->{action.run.run();if(action.state!=null){glyph.setText(action.state.getAsBoolean()?"✓":"＋");Motion.haptic(tile);}Motion.pop(tile);});Motion.card(tile);row.addView(tile,p);
             }
         }
     }
 
-    void more() {
-        a.heading("Your space");a.paragraph("Downloads, your PC and the way you watch.");
-        LinearLayout connection=a.column();connection.setPadding(a.dp(18),a.dp(18),a.dp(18),a.dp(18));connection.setBackground(MainActivity.bg(MainActivity.PANEL,a.dp(18)));
-        TextView label=a.text(a.data.paired()?"YOUR PAIRED PC":"BRING YOUR LIBRARY",11,MainActivity.GOLD);label.setLetterSpacing(.1f);connection.addView(label);
-        TextView state=a.text(a.data.paired()?a.data.connection:"Connect to Windows Noir",20,MainActivity.WHITE);state.setTypeface(null,Typeface.BOLD);state.setPadding(0,a.dp(7),0,a.dp(6));connection.addView(state);
-        connection.addView(a.text(a.data.paired()?(a.data.lastSync()>0?"Last synced "+NoirUi.ago(a.data.lastSync()):"Ready for your first sync")+" · "+a.data.pendingCount()+" pending changes":"Your posters and viewing history stay on your phone.",12,MainActivity.MUTED));
-        connection.addView(a.button(a.data.paired()?"Sync now":"Pair with my PC",()->{if(a.data.paired())a.sync(true);else a.pairInput();},true));a.body.addView(connection);
-        section(a.body,"QUICK ACCESS");
-        tiles(a.body,List.of(
-            action("↓","Downloads",()->a.startActivity(new Intent(a,DownloadHubActivity.class))),
-            action("⇩","On this phone",()->a.startActivity(new Intent(a,DownloadsActivity.class))),
-            action("⚙","Settings",()->{a.page="Settings";a.detail="";a.render();})));
-        a.paragraph("Noir for Android · Your library, remembered.");
-    }
+    void more(){PhoneExperience.settings(a);}
 }

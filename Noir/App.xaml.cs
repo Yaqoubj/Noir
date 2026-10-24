@@ -34,11 +34,31 @@ public partial class App : Application
             else if(e.Args[i]=="--page" && i+1<e.Args.Length) initialPage=e.Args[++i];
         }
         if(validate && dataDirectory==null) { Shutdown(2);return; }
-        var instanceSuffix=dataDirectory==null?"":Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(dataDirectory).ToUpperInvariant())))[..16];
+        if(validate)Profiles.RootOverride=Path.GetFullPath(dataDirectory!);
+        // Profiles share one running instance: a folder given on the command line is a separate
+        // instance only when it isn't one of the profile folders (tests and validation copies).
+        var instanceSuffix=dataDirectory==null||!validate&&Profiles.IsProfileFolder(dataDirectory)?"":Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(dataDirectory).ToUpperInvariant())))[..16];
         single = new Mutex(true, "Local\\NoirPlayer_" + Environment.UserName + instanceSuffix, out var first);
         // Launching again while Noir runs in the background brings the existing window forward.
         var showSignal=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\NoirPlayerShow_" + Environment.UserName + instanceSuffix);
+        // After "Replace & restart" the old window may still be closing; wait for it.
+        if(!first&&e.Args.Contains("--restarted"))try{first=single.WaitOne(TimeSpan.FromSeconds(30));}catch(AbandonedMutexException){first=true;}
         if (!first) { if(!e.Args.Contains("--minimized")) {AllowSetForegroundWindow(-1);showSignal.Set();} Shutdown(); return; }
+        if(dataDirectory==null&&!validate)
+        {
+            var profiles=Profiles.Load();var current=profiles.Profiles.First(p=>p.Id==profiles.Current);
+            var ask=!e.Args.Contains("--minimized")&&!e.Args.Contains("--restarted")&&(profiles.Profiles.Count>1&&profiles.AskOnStart||current.PinHash.Length>0);
+            if(ask)
+            {
+                ShutdownMode=ShutdownMode.OnExplicitShutdown;
+                var picked=Profiles.Pick(profiles);
+                if(picked==null){Shutdown();return;}
+                ShutdownMode=ShutdownMode.OnMainWindowClose;current=picked;
+            }
+            current.LastUsed=DateTimeOffset.UtcNow;profiles.Current=current.Id;try{Profiles.Save(profiles);}catch(IOException){}
+            dataDirectory=Profiles.Folder(current);
+            if(dataDirectory!=null)Directory.CreateDirectory(dataDirectory);
+        }
         var window = new MainWindow(dataDirectory,playPath,validate,initialPage);
         if(validate) { window.ShowActivated=false;window.Title="Noir validation"; }
         MainWindow = window;

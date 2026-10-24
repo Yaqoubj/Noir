@@ -19,10 +19,11 @@ final class SubtitleClient {
     static final int MAX=4*1024*1024;
     interface Transport{byte[] read(String url,int maximum)throws Exception;}
     final DataStore data;final JSONObject item;final String id;final Transport internet;
-    String videoHash="",release="";boolean identityRead=false;
+    String videoHash="",release="",streamRelease=null;boolean identityRead=false;
+    void streaming(String name){streamRelease=name==null?"":name;if(!streamRelease.isEmpty())release=streamRelease;videoHash="";identityRead=true;}
     SubtitleClient(DataStore data,JSONObject item){this(data,item,SubtitleClient::fetch);}
     SubtitleClient(DataStore data,JSONObject item,Transport internet){this.data=data;this.item=item;this.internet=internet;id=item.optString("id");release=item.optString("title")+(item.optBoolean("movie")?"":" S"+String.format(Locale.ROOT,"%02dE%02d",item.optInt("season"),item.optInt("episode")));}
-    static String language(String value){String s=value.toLowerCase(Locale.ROOT);return Arrays.asList("en","eng","english").contains(s)?"en":Arrays.asList("ar","ara","arabic").contains(s)?"ar":"";}
+    static String language(String value){String s=value.trim().toLowerCase(Locale.ROOT);return Arrays.asList("en","eng","english").contains(s)?"en":Arrays.asList("ar","ara","arabic").contains(s)?"ar":"";}
     static String label(String language){return language.equals("ar")?"Arabic":"English";}
     static String hashBytes(long size,byte[] first,byte[] last){if(size<131072||first.length!=65536||last.length!=65536)return "";long hash=size;for(byte[] chunk:new byte[][]{first,last}){ByteBuffer bytes=ByteBuffer.wrap(chunk).order(ByteOrder.LITTLE_ENDIAN);while(bytes.hasRemaining())hash+=bytes.getLong();}return String.format(Locale.ROOT,"%016x",hash);}
     void identity()throws Exception{
@@ -47,32 +48,63 @@ final class SubtitleClient {
     List<JSONObject> search(String lang)throws Exception{
         String imdb=item.optString("imdb");if(!imdb.matches("tt\\d+"))throw new IOException("Correct this title's match in Noir before searching for subtitles.");
         try{identity();}catch(Exception ignored){}
-        String title=item.optBoolean("movie")?imdb:imdb+":"+item.optInt("season")+":"+item.optInt("episode");String extra="filename="+Uri.encode(release);if(!videoHash.isEmpty())extra+="&videoHash="+videoHash;
-        String url="https://opensubtitles-v3.strem.io/subtitles/"+(item.optBoolean("movie")?"movie/":"series/")+Uri.encode(title)+"/"+extra+".json";
-        JSONObject response=new JSONObject(new String(internet.read(url,MAX),StandardCharsets.UTF_8));List<JSONObject> found=new ArrayList<>();Set<String> seen=new HashSet<>();
-        for(JSONObject candidate:DataStore.objects(response.optJSONArray("subtitles"))){if(found.size()>=100)break;if(!language(candidate.optString("lang")).equals(lang))continue;
-            if(!item.optBoolean("movie")&&(candidate.has("season")&&candidate.optInt("season")!=item.optInt("season")||candidate.has("episode")&&candidate.optInt("episode")!=item.optInt("episode")))continue;
-            String link=candidate.optString("url");if(!validUrl(link)||!seen.add(link))continue;DataStore.put(candidate,"language",lang);DataStore.put(candidate,"score",(candidate.optString("m").equals("h")?1000:0)+releaseScore(candidate.optString("movieReleaseName")+" "+candidate.optString("subtitleFileName"),release));found.add(candidate);
-        }found.sort(Comparator.comparingInt((JSONObject c)->c.optInt("score")).reversed());return found;
+        JSONObject settings=new PhoneDownloadSettings(data.context).load();
+        List<String> urls=searchUrls(settings.optString("subtitleAddonUrl"),settings.optBoolean("subtitleAddonOnly",true),imdb,item.optBoolean("movie"),item.optInt("season"),item.optInt("episode"),release,videoHash);
+        List<JSONObject> found=new ArrayList<>();Set<String> seen=new HashSet<>();boolean succeeded=false;
+        for(String url:urls)try{
+            JSONObject response=new JSONObject(new String(internet.read(url,MAX),StandardCharsets.UTF_8));succeeded=true;JSONArray all=response.optJSONArray("subtitles");if(all==null)continue;
+            for(int n=0;n<Math.min(500,all.length());n++){JSONObject candidate=all.optJSONObject(n);if(candidate==null||!language(candidate.optString("lang")).equals(lang))continue;
+                if(!item.optBoolean("movie")&&(candidate.opt("season") instanceof Number&&candidate.optInt("season")!=item.optInt("season")||candidate.opt("episode") instanceof Number&&candidate.optInt("episode")!=item.optInt("episode")))continue;
+                String link=candidate.optString("url");if(!validUrl(link)||!seen.add(link))continue;DataStore.put(candidate,"language",lang);DataStore.put(candidate,"score",(candidate.optString("m").equals("h")?1000:0)+releaseScore(candidate.optString("movieReleaseName")+" "+candidate.optString("subtitleFileName"),release));found.add(candidate);
+            }
+        }catch(Exception e){if(Thread.currentThread().isInterrupted())throw new IOException("Subtitle lookup cancelled.");if(urls.size()==1)throw new IOException("Subtitle lookup unavailable.");}
+        if(!succeeded)throw new IOException("Subtitle lookup unavailable.");found.sort(Comparator.comparingInt((JSONObject c)->c.optInt("score")).reversed());return new ArrayList<>(found.subList(0,Math.min(500,found.size())));
+    }
+    static final String DEFAULT_SOURCE="https://opensubtitles-v3.strem.io";
+    static String normalizeAddon(String value)throws IOException{
+        String text=value.trim();if(text.isEmpty())return "";if(text.regionMatches(true,0,"stremio://",0,10))text="https://"+text.substring(10);
+        try{URI u=new URI(text);String host=u.getHost();if(!"https".equalsIgnoreCase(u.getScheme())||host==null||u.getRawUserInfo()!=null||(u.getPort()!=-1&&u.getPort()!=443)||u.getRawQuery()!=null||u.getRawFragment()!=null||host.equalsIgnoreCase("localhost")||host.equals("127.0.0.1")||host.equals("[::1]"))throw new IOException();
+            String path=u.getRawPath();while(path.endsWith("/"))path=path.substring(0,path.length()-1);if(path.toLowerCase(Locale.ROOT).endsWith("/manifest.json"))path=path.substring(0,path.length()-14);
+            return "https://"+host.toLowerCase(Locale.ROOT)+path;
+        }catch(Exception e){throw new IOException("Paste an HTTPS Stremio subtitle addon link without credentials or a custom port.");}
+    }
+    static List<String> searchUrls(String link,boolean only,String imdb,boolean movie,int season,int episode,String release,String hash)throws IOException{
+        String base=normalizeAddon(link);List<String> sources=new ArrayList<>();if(!base.isEmpty())sources.add(base);if(base.isEmpty()||!only&&!base.equals(DEFAULT_SOURCE))sources.add(DEFAULT_SOURCE);
+        String title=movie?imdb:imdb+":"+season+":"+episode,extra="filename="+encode(release);if(!hash.isEmpty())extra+="&videoHash="+encode(hash);
+        List<String> urls=new ArrayList<>();for(String source:sources)urls.add(source+"/subtitles/"+(movie?"movie/":"series/")+encode(title)+"/"+extra+".json");return urls;
+    }
+    static String encode(String value){try{return URLEncoder.encode(value,"UTF-8").replace("+","%20").replace("%7E","~").replace("*","%2A");}catch(UnsupportedEncodingException e){throw new IllegalStateException(e);}}
+    static String manifestName(byte[] bytes)throws Exception{
+        JSONObject manifest=new JSONObject(new String(bytes,StandardCharsets.UTF_8));JSONArray resources=manifest.optJSONArray("resources");boolean subtitles=false;
+        if(resources!=null)for(int i=0;i<resources.length();i++){Object r=resources.opt(i);if("subtitles".equals(r)||r instanceof JSONObject&&"subtitles".equals(((JSONObject)r).optString("name")))subtitles=true;}
+        if(!subtitles)throw new IOException("This addon does not provide subtitles.");String name=manifest.optString("name","Subtitle addon").replace('\r',' ').replace('\n',' ');return name.isEmpty()?"Subtitle addon":name.substring(0,Math.min(120,name.length()));
+    }
+    static String checkAddon(String link)throws Exception{
+        String base=normalizeAddon(link);if(base.isEmpty())throw new IOException("Paste a subtitle addon link first.");
+        HttpsURLConnection c=(HttpsURLConnection)new URL(base+"/manifest.json").openConnection();c.setConnectTimeout(7000);c.setReadTimeout(8000);c.setInstanceFollowRedirects(false);
+        try{if(c.getResponseCode()!=200)throw new IOException();try(InputStream input=c.getInputStream()){return manifestName(DataStore.read(input,256*1024));}}
+        catch(Exception e){if(e instanceof IOException&&"This addon does not provide subtitles.".equals(e.getMessage()))throw e;throw new IOException("Couldn't check the subtitle addon. Check the link and connection.");}finally{c.disconnect();}
     }
     static int releaseScore(String subtitle,String release){Set<String> a=new HashSet<>(Arrays.asList(subtitle.toLowerCase(Locale.ROOT).split("[^a-z0-9]+"))),b=new HashSet<>(Arrays.asList(release.toLowerCase(Locale.ROOT).split("[^a-z0-9]+")));b.removeAll(Arrays.asList("","mkv","mp4","srt","eng","ara","en","ar"));a.retainAll(b);return b.isEmpty()?0:100*a.size()/b.size();}
     JSONObject download(JSONObject candidate)throws Exception{
         String lang=candidate.optString("language"),extension=extension(candidate.optString("subtitleFileName"));byte[] bytes=internet.read(candidate.getString("url"),MAX);
         if(bytes.length>2&&(bytes[0]&255)==31&&(bytes[1]&255)==139)try(InputStream gzip=new GZIPInputStream(new ByteArrayInputStream(bytes))){bytes=DataStore.read(gzip,MAX);}
         String content=decode(bytes);if(!validText(content,extension))throw new IOException("This provider returned an invalid subtitle. Try another release.");
-        JSONObject sub=new JSONObject();DataStore.put(sub,"sourceKey",candidate.getString("url"));DataStore.put(sub,"language",lang);DataStore.put(sub,"name",label(lang)+" · "+candidate.optString("movieReleaseName",release));DataStore.put(sub,"extension",extension);DataStore.put(sub,"hashMatch",candidate.optString("m").equals("h"));return save(sub,content);
+        JSONObject sub=new JSONObject();DataStore.put(sub,"sourceKey",candidate.getString("url"));DataStore.put(sub,"language",lang);DataStore.put(sub,"name",label(lang)+" · "+candidate.optString("movieReleaseName",release));DataStore.put(sub,"extension",extension);DataStore.put(sub,"hashMatch",candidate.optString("m").equals("h"));if(streamRelease!=null)DataStore.put(sub,"streamRelease",streamRelease);return save(sub,content);
     }
     JSONObject save(JSONObject sub,String content)throws Exception{
-        String originalId=sub.optString("id");DataStore.put(sub,"id",DataStore.hex(MessageDigest.getInstance("SHA-256").digest((id+":"+sub.optString("sourceKey")+":"+content).getBytes(StandardCharsets.UTF_8))).substring(0,24));File target=data.subtitle(sub);if(target==null)throw new IOException("Unsupported subtitle file.");
+        String originalId=sub.optString("id");DataStore.put(sub,"id",DataStore.hex(MessageDigest.getInstance("SHA-256").digest((id+":"+sub.optString("sourceKey")+":"+sub.optString("streamRelease")+":"+content).getBytes(StandardCharsets.UTF_8))).substring(0,24));File target=data.subtitle(sub);if(target==null)throw new IOException("Unsupported subtitle file.");
         DiscoveryClient.write(target,content.getBytes(StandardCharsets.UTF_8));if(!originalId.isEmpty()&&!originalId.equals(sub.optString("id")))DataStore.put(sub,"originalId",sub.optString("originalId",originalId));data.phoneSubtitle(id,sub);return sub;
     }
     JSONObject sync(JSONObject sub)throws Exception{
+        if(streamRelease!=null)throw new IOException("Use Adjust timing while streaming. Automatic timing needs a verified local video.");
         if(!data.paired())throw new IOException("Pair with your PC for automatic timing. Manual timing also works offline.");identity();if(videoHash.isEmpty())throw new IOException("Couldn't verify this video's identity. Use manual timing.");File file=data.subtitle(sub);if(file==null||!file.exists())throw new IOException("Save a subtitle first.");String text=decode(read(file));
         JSONObject request=new JSONObject();DataStore.put(request,"hash",videoHash);DataStore.put(request,"text",text);DataStore.put(request,"extension",sub.optString("extension"));JSONObject response=data.pcRequest("/v1/subtitle-tools/"+id+"/sync",request);
         if(!response.optBoolean("accepted"))throw new IOException(response.optString("message","Timing was uncertain. The original subtitle is kept."));String corrected=response.getString("text");if(!validText(corrected,sub.optString("extension")))throw new IOException("Timing result was invalid. The original is kept.");JSONObject next=DataStore.copy(sub);if(next.optString("sourceKey").isEmpty())DataStore.put(next,"sourceKey","pc:"+sub.optString("id"));DataStore.put(next,"aligned",true);DataStore.put(next,"originalId",sub.optString("originalId",sub.optString("id")));return save(next,corrected);
     }
-    List<JSONObject> files(){List<JSONObject> all=new ArrayList<>();JSONObject latest=data.item(id);for(JSONObject sub:DataStore.objects(latest==null?null:latest.optJSONArray("subtitleFiles")))if(data.subtitle(sub)!=null&&data.subtitle(sub).exists())all.add(sub);for(JSONObject sub:DataStore.objects(data.phoneSubtitles(id)))if(data.subtitle(sub)!=null&&data.subtitle(sub).exists())all.add(sub);return all;}
-    void refreshFiles(){try{JSONObject response=data.pcRequest("/v1/subtitle-tools/"+id,null);data.subtitleFiles(id,response.getJSONArray("files"));}catch(Exception ignored){}JSONObject latest=data.item(id);try{if(latest!=null)data.cacheSubtitles(latest);}catch(Exception ignored){}}
+    boolean matchesPlayback(JSONObject sub){return streamRelease==null?!sub.has("streamRelease"):sub.has("streamRelease")&&streamRelease.equals(sub.optString("streamRelease"));}
+    List<JSONObject> files(){List<JSONObject> all=new ArrayList<>();JSONObject latest=data.item(id);for(JSONObject sub:DataStore.objects(latest==null?null:latest.optJSONArray("subtitleFiles")))if(matchesPlayback(sub)&&data.subtitle(sub)!=null&&data.subtitle(sub).exists())all.add(sub);for(JSONObject sub:DataStore.objects(data.phoneSubtitles(id)))if(matchesPlayback(sub)&&data.subtitle(sub)!=null&&data.subtitle(sub).exists())all.add(sub);return all;}
+    void refreshFiles(){if(streamRelease!=null)return;try{JSONObject response=data.pcRequest("/v1/subtitle-tools/"+id,null);data.subtitleFiles(id,response.getJSONArray("files"));}catch(Exception ignored){}JSONObject latest=data.item(id);try{if(latest!=null)data.cacheSubtitles(latest);}catch(Exception ignored){}}
     static String extension(String name){int dot=name.lastIndexOf('.');String ext=dot<0?".srt":name.substring(dot).toLowerCase(Locale.ROOT);return Arrays.asList(".srt",".ass",".ssa",".vtt").contains(ext)?ext:".srt";}
     static boolean validText(String text,String ext){String value=text.trim();return value.length()>10&&value.length()<MAX&&!value.toLowerCase(Locale.ROOT).startsWith("<!doctype")&&!value.toLowerCase(Locale.ROOT).startsWith("<html")&&(ext.equals(".ass")||ext.equals(".ssa")?value.contains("[Events]"):java.util.regex.Pattern.compile("\\d{1,2}:\\d{2}(?::\\d{2})?[,.]\\d{3}\\s+-->\\s+\\d{1,2}:\\d{2}").matcher(value).find());}
     static String decode(byte[] bytes)throws Exception{if(bytes.length>=2&&(bytes[0]&255)==255&&(bytes[1]&255)==254)return new String(bytes,2,bytes.length-2,StandardCharsets.UTF_16LE);if(bytes.length>=2&&(bytes[0]&255)==254&&(bytes[1]&255)==255)return new String(bytes,2,bytes.length-2,StandardCharsets.UTF_16BE);try{return StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString().replaceFirst("^\\uFEFF","");}catch(CharacterCodingException e){return new String(bytes,Charset.forName("windows-1256"));}}

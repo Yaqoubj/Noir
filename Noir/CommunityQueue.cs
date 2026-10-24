@@ -14,11 +14,11 @@ public sealed class WatchSyncJob
 public static class CommunityQueue
 {
     public static string SeasonKey(VideoItem item)=>item.GroupKey+":season:"+item.Season;
-    public static bool Enabled(PlayerState state,string provider)=>provider switch {"Trakt"=>state.SyncTrakt,"Serializd"=>state.SyncSerializd,_=>false};
+    public static bool Enabled(PlayerState state,string provider)=>provider switch {"Trakt"=>state.SyncTrakt,"Serializd"=>state.SyncSerializd,"Nuvio"=>state.SyncNuvio&&state.NuvioConnected,_=>false};
     public static void Enqueue(PlayerState state,VideoItem item,DateTimeOffset watchedAt)
     {
         if(item.Id.Length==0) return;
-        foreach(var provider in new[]{"Trakt","Serializd"})
+        foreach(var provider in new[]{"Trakt","Serializd","Nuvio"})
         {
             if(!Enabled(state,provider) || (provider=="Serializd"&&item.IsMovie)) continue;
             var key=provider+":"+item.Id;

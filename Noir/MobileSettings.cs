@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media.Imaging;
@@ -12,7 +12,10 @@ public partial class MainWindow
     {
         try
         {
-            mobileSync=new(store,store.MobileSnapshot,ops=>Dispatcher.Invoke(()=>{var ack=store.MergeMobile(ops);if(ops.Count>0&&current==null&&!closing&&page!="Settings") Render();return ack;}),port,downloads);
+            // Read fresh from profiles.json: snapshots are built on the server's threads.
+            store.ProfileTitle=()=>{try{return Profiles.ForDirectory(Profiles.Load(),store.DataDirectory)?.Name??"";}catch(IOException){return "";}};
+            mobileSync=new(store,store.MobileSnapshot,ops=>Dispatcher.Invoke(()=>{var ack=store.MergeMobile(ops);if(ops.Count>0&&current==null&&!closing&&page!="Settings") Render();return ack;}),port,downloads,ConfirmPhoneSettingsShare);
+            mobileSync.PreviewFrame=PhonePreviewFrame;
             mobileSync.Discovered+=()=>Dispatcher.BeginInvoke(()=>{if(current==null&&!closing&&page is not ("Settings" or "Downloads" or "Discover"))Render();});
             await mobileSync.SetEnabled(mobileSync.Config.Enabled);
         }

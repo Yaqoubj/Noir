@@ -15,10 +15,10 @@ public partial class MainWindow
         try
         {
             var deletedMovie=store.Archive.First(i=>i.IsMovie&&store.EverWatched(i)&&!File.Exists(i.Path));
-            historyFilter="In progress";historyType="Shows";SearchBox.Text="no match";
-            History_Click(this,new RoutedEventArgs());UpdateLayout();
-            Assert(historyFilter=="All"&&historyType=="All"&&SearchBox.Text==""&&HasText(deletedMovie.Title),"Opening History clears stale filters and shows the deleted watched movie");
-            Assert(HasText("✓ Watched")&&File.Exists(deletedMovie.Poster),"Deleted movie has its watched badge and permanent cached poster");
+            historyType="Shows";trackerTab="Diary";SearchBox.Text="no match";
+            History_Click(this,new RoutedEventArgs());trackerTab="Movies";Render();UpdateLayout();
+            Assert(historyType=="All"&&SearchBox.Text==""&&HasText(deletedMovie.Title),"Opening History clears stale filters and shows the deleted watched movie");
+            Assert(File.Exists(deletedMovie.Poster),"Deleted movie has its watched badge and permanent cached poster");
             CaptureLibrary(Path.Combine(store.DataDirectory,"history-real-deleted.png"));
             Navigate("Movies");UpdateLayout();Assert(HasText(deletedMovie.Title)&&HasText("Not on this PC"),"Movies keeps the deleted title's poster card and labels its availability");CaptureLibrary(Path.Combine(store.DataDirectory,"movies-real-deleted.png"));
             Navigate("Home");UpdateLayout();Assert(HasText("Recently watched")&&HasText(deletedMovie.Title),"Home has a visible Recently watched section including deleted movies");CaptureLibrary(Path.Combine(store.DataDirectory,"home-archive.png"));

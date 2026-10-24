@@ -24,6 +24,7 @@ public sealed class IntroSegment
 }
 public sealed class PlayerState
 {
+    public Dictionary<string,ShowDownloadPreference> ShowDownloads {get;set;}=new();
     public Dictionary<string,string> TitleStatuses {get;set;}=new();
     public Dictionary<string,HashSet<string>> Collections {get;set;}=new();
     public Dictionary<string,string> ReviewTabs {get;set;}=new();
@@ -34,6 +35,10 @@ public sealed class PlayerState
     public Dictionary<string,long> MobileFieldTimes { get; set; } = new();
     public Dictionary<string,List<ViewingRecord>> Viewings { get; set; } = new();
     public Dictionary<string,PersonalReview> PersonalReviews { get; set; } = new();
+    public List<string> Favorites { get; set; } = [];
+    public HashSet<string> Likes { get; set; } = [];
+    public Dictionary<string,int> SeasonRatings { get; set; } = new();
+    public Dictionary<string,string> Reactions { get; set; } = new();
     public Dictionary<string,PlaybackPreference> PlaybackPreferences { get; set; } = new();
     public Dictionary<string,List<KnownEpisode>> EpisodeSchedules { get; set; } = new();
     public bool SyncTrakt { get; set; }
@@ -45,6 +50,10 @@ public sealed class PlayerState
     public bool OnlineMetadata { get; set; } = true;
     public bool MarkWatchedAtCredits { get; set; } = true;
     public bool HideSpoilers { get; set; } = true;
+    // "en" or "ar"; Arabic also mirrors the library layout right-to-left.
+    public string Language { get; set; } = "en";
+    // Side rail: "Auto" (icons only below 1100 px), "Labels" or "Icons".
+    public string RailMode { get; set; } = "Auto";
     public HashSet<string> Watchlist { get; set; } = [];
     public HashSet<string> HiddenContinue { get; set; } = [];
     public List<LibraryRoot> Roots { get; set; } = [];
@@ -63,14 +72,74 @@ public sealed class PlayerState
     public bool KeepAwakeWhileBusy { get; set; } = true;
     public bool BackgroundHintShown { get; set; }
     public HashSet<string> NewEpisodeAlerts { get; set; } = [];
+    public bool EpisodeAlerts { get; set; } = true;
+    // TVmaze show state ("Ended", "Running", …) and typical episode minutes, by group.
+    public Dictionary<string,string> ShowStates { get; set; } = new();
+    public Dictionary<string,int> ShowRuntimes { get; set; } = new();
+    // Personal ratings for a whole show (groupKey) or season (groupKey:S2).
+    public Dictionary<string,int> ShowRatings { get; set; } = new();
+    // "Still watching?" was answered Keep: hide the nudge until this date.
+    public Dictionary<string,DateTimeOffset> TrackerSnoozes { get; set; } = new();
+    public HashSet<string> IncludeSpecials { get; set; } = [];
+    // "" until chosen on first run; "Tracker" hides the file library and opens on History.
+    public string AppMode { get; set; } = "";
+    public HashSet<string> HiddenTitles { get; set; } = [];
+    // Titles added to the library on purpose (Discover's "+ Library", a started download) without a file yet.
+    public HashSet<string> LibraryAdds { get; set; } = [];
+    // Upper-cased paths of files left on disk when their title's history was forgotten.
+    public HashSet<string> RemovedFiles { get; set; } = [];
+    public bool StremioAutoImport { get; set; } = true;
+    public DateTimeOffset? StremioImportedAt { get; set; }
+    // Nuvio: pull its watched list on a timer, and send Noir's watches back.
+    public bool SyncNuvio { get; set; } = true;
+    public bool NuvioConnected { get; set; }
+    public bool NuvioAutoImport { get; set; } = true;
+    public DateTimeOffset? NuvioImportedAt { get; set; }
+    // Un-checks waiting to reach Nuvio: "imdb:season:episode" keys.
+    public HashSet<string> NuvioDeletes { get; set; } = [];
+    // Items Noir sent to or received from Nuvio; only these are ever deleted there.
+    public HashSet<string> NuvioKnown { get; set; } = [];
+    // Recent imports, newest last, so each can be undone.
+    public List<ImportBatch> ImportBatches { get; set; } = [];
+    public bool AutoBackup { get; set; } = true;
+    public string BackupFolder { get; set; } = "";
+    public DateTimeOffset? LastBackupAt { get; set; }
+}
+public sealed class ImportBatch
+{
+    public string Id { get; set; } = "";
+    public string Service { get; set; } = "";
+    public DateTimeOffset At { get; set; }
+    public int Added { get; set; }
+    // Ratings this import created; undo removes only these.
+    public List<string> RatedItemIds { get; set; } = [];
+    // Undated guesses a dated import replaced; undo puts them back.
+    public List<DisplacedViewing> Displaced { get; set; } = [];
+}
+public sealed class DisplacedViewing { public string ItemId { get; set; } = ""; public ViewingRecord Viewing { get; set; } = new(); }
+public sealed class ShowDownloadPreference
+{
+    public string Resolution {get;set;}="Any";
+    public string Language {get;set;}="All";
+    public long MaxEpisodeBytes {get;set;}
+    public bool AutoDownload {get;set;}
 }
 public sealed class ViewingRecord
 {
     public string Id { get; set; } = "";
     public DateTimeOffset WatchedAt { get; set; }
     public string Source { get; set; } = "Playback";
+    // Logged from memory or imported without a date; WatchedAt then holds the air date or log time.
+    public bool DateUnknown { get; set; }
+    // A guessed date: "when it aired", "around 2019", or spread across a range.
+    public bool Approximate { get; set; }
+    // When Noir recorded it. Entered more than a week after it was watched = logged history.
+    public DateTimeOffset? LoggedAt { get; set; }
+    // The import that added it, so that import can be undone.
+    public string Batch { get; set; } = "";
+    [System.Text.Json.Serialization.JsonIgnore] public bool Backfill=>DateUnknown||LoggedAt is {} at&&(at-WatchedAt).TotalDays>7;
 }
-public sealed class PersonalReview { public int Rating { get; set; } public string Note { get; set; } = ""; }
+public sealed class PersonalReview { int rating,rating10;public int Rating {get=>rating;set{rating=Math.Clamp(value,0,5);if((rating10+1)/2!=rating)rating10=0;}}public int Rating10 {get=>rating10>0?rating10:rating*2;set{rating10=Math.Clamp(value,0,10);rating=(rating10+1)/2;}}public string Note {get;set;}=""; }
 public sealed class PlaybackPreference
 {
     public string SubtitleTrack { get; set; } = "";
@@ -84,6 +153,7 @@ public sealed class KnownEpisode
     public int Episode { get; set; }
     public string Title { get; set; } = "";
     public DateTimeOffset? AirsAt { get; set; }
+    public int Runtime { get; set; }
 }
 public sealed class SleepPlan
 {
@@ -183,6 +253,7 @@ public sealed partial class LibraryStore
         DataDirectory = directory ?? ProfileLocation.Prepare();
         Directory.CreateDirectory(DataDirectory);
         statePath = System.IO.Path.Combine(DataDirectory, "library.json");
+        ApplyPendingRestore();
         metadata = new(StringComparer.OrdinalIgnoreCase);
         var metaPath = System.IO.Path.Combine(DataDirectory, "metadata.json");
         if (File.Exists(metaPath))
@@ -198,10 +269,15 @@ public sealed partial class LibraryStore
         State.Volume = Math.Clamp(State.Volume, 0, 100);
         ReconcileCatalog();
         RecoverOrganization();
+        // Older records have no LoggedAt: anything logged by hand counts as entered now, playback as live.
+        foreach(var list in State.Viewings.Values)foreach(var v in list)
+            v.LoggedAt??=v.Source is "Playback" or "Android playback" or "Earlier record"?v.WatchedAt:DateTimeOffset.UtcNow;
+        var rebased=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
         foreach(var entry in State.Catalog.Values)
         {
             SeedViewing(entry);
-            string Rebase(string path) {var local=System.IO.Path.Combine(DataDirectory,"art",System.IO.Path.GetFileName(path));return !File.Exists(path)&&File.Exists(local)?local:path;}
+            // Episodes share artwork paths, so each distinct path is checked once.
+            string Rebase(string path) {if(rebased.TryGetValue(path,out var known))return known;var local=System.IO.Path.Combine(DataDirectory,"art",System.IO.Path.GetFileName(path));return rebased[path]=!File.Exists(path)&&File.Exists(local)?local:path;}
             entry.Item.Poster=Rebase(entry.Item.Poster);entry.Item.Backdrop=Rebase(entry.Item.Backdrop);
         }
         if (!existing && State.Roots.Count == 0)
@@ -221,6 +297,7 @@ public sealed partial class LibraryStore
             }
             Save();
         }
+        CaptureMobileChanges();
     }
     PlayerState? Load(string path)
     {
@@ -234,17 +311,18 @@ public sealed partial class LibraryStore
         }
         catch (Exception e) { LoadWarning = "Recovered library settings from the last backup."; Log(e); return null; }
     }
-    public void Log(Exception e) => File.AppendAllText(System.IO.Path.Combine(DataDirectory, "errors.log"), $"{DateTimeOffset.Now:o} {e}\n");
+    // Links are dropped: stream, debrid and AIOStreams URLs carry account tokens.
+    public void Log(Exception e) => File.AppendAllText(System.IO.Path.Combine(DataDirectory, "errors.log"), $"{DateTimeOffset.Now:o} {Regex.Replace(e.ToString(),@"(?i)\b[a-z][a-z0-9+.-]*://\S+","[link]")}\n");
     public void Save()
     {
         (long Revision,byte[] Data) snapshot;
-        lock(gate)snapshot=(++saveRevision,JsonSerializer.SerializeToUtf8Bytes(State,JsonOptions));
+        lock(gate){TrackMobileChanges();CatalogChanged();if(batchDepth>0){batchDirty=true;return;}snapshot=(++saveRevision,JsonSerializer.SerializeToUtf8Bytes(State,JsonOptions));}
         WriteSnapshot(snapshot);
     }
     public void SaveDeferred()
     {
         (long Revision,byte[] Data) snapshot;
-        lock(gate)snapshot=(++saveRevision,JsonSerializer.SerializeToUtf8Bytes(State,JsonOptions));
+        lock(gate){TrackMobileChanges();CatalogChanged();if(batchDepth>0){batchDirty=true;return;}snapshot=(++saveRevision,JsonSerializer.SerializeToUtf8Bytes(State,JsonOptions));}
         lock(saveQueueGate)
         {
             queuedSnapshot=snapshot;
@@ -291,28 +369,13 @@ public sealed partial class LibraryStore
             }
         }
     }
-    public void ExportBackup(string path)
-    {
-        lock(gate)
-        {
-            Save();
-            using var file=File.Create(path);using var archive=new ZipArchive(file,ZipArchiveMode.Create);
-            archive.CreateEntryFromFile(statePath,"library.json");
-            var seed=System.IO.Path.Combine(DataDirectory,"metadata.json");if(File.Exists(seed)) archive.CreateEntryFromFile(seed,"metadata.json");
-            var art=System.IO.Path.Combine(DataDirectory,"art");
-            if(Directory.Exists(art)) foreach(var image in Directory.EnumerateFiles(art).Where(f=>!f.EndsWith(".tmp")))
-                archive.CreateEntryFromFile(image,"art/"+System.IO.Path.GetFileName(image));
-            var entry=archive.CreateEntry("RESTORE.txt");using var writer=new StreamWriter(entry.Open());
-            writer.Write("Close Noir. Extract library.json, metadata.json and art into %LOCALAPPDATA%\\Noir to restore this backup. Video files and browser cookies are not included.");
-        }
-    }
     public static Bookmark? ProgressFor(PlayerState state, VideoItem item) =>
         state.Catalog.GetValueOrDefault(item.Id)?.Progress ?? (item.Path.Length>0?state.Progress.GetValueOrDefault(item.Path):null);
     public Bookmark? GetProgress(VideoItem item) {lock(gate) return ProgressFor(State,item);}
     void SeedViewing(CatalogEntry entry)
     {
         if(entry.Progress is not {Completed:true} b || State.Viewings.ContainsKey(entry.Item.Id)) return;
-        State.Viewings[entry.Item.Id]=[new(){Id=b.ViewingId.Length>0?b.ViewingId:Guid.NewGuid().ToString("N"),WatchedAt=b.UpdatedAt,Source="Earlier record"}];
+        State.Viewings[entry.Item.Id]=[new(){Id=b.ViewingId.Length>0?b.ViewingId:Guid.NewGuid().ToString("N"),WatchedAt=b.UpdatedAt,Source="Earlier record",LoggedAt=b.UpdatedAt}];
     }
     public List<ViewingRecord> ViewingHistory(VideoItem item) {lock(gate) return State.Viewings.GetValueOrDefault(item.Id)?.OrderByDescending(v=>v.WatchedAt).ToList()??[];}
     public bool EverWatched(VideoItem item) => ViewingHistory(item).Count>0 || GetProgress(item)?.Completed==true;
@@ -327,13 +390,13 @@ public sealed partial class LibraryStore
     void AddViewing(VideoItem item,string id,DateTimeOffset at,string source)
     {
         if(!State.Viewings.TryGetValue(item.Id,out var list)) State.Viewings[item.Id]=list=[];
-        if(!list.Any(v=>v.Id==id)) list.Add(new(){Id=id,WatchedAt=at,Source=source});
+        if(!list.Any(v=>v.Id==id)) list.Add(new(){Id=id,WatchedAt=at,Source=source,LoggedAt=DateTimeOffset.UtcNow});
     }
     public List<KnownEpisode> MissingEpisodes(string groupKey,DateTimeOffset now)
     {
         lock(gate)
         {
-            var available=State.Catalog.Values.Where(e=>e.Item.GroupKey==groupKey&&e.Item.Available).Select(e=>(e.Item.Season,e.Item.Episode)).ToHashSet();
+            var available=EntriesFor(groupKey).Where(e=>e.Item.Available).Select(e=>(e.Item.Season,e.Item.Episode)).ToHashSet();
             return (State.EpisodeSchedules.GetValueOrDefault(groupKey)??[]).Where(e=>e.Season>0&&e.AirsAt<=now&&!available.Contains((e.Season,e.Episode))).OrderBy(e=>e.Season).ThenBy(e=>e.Episode).ToList();
         }
     }
@@ -445,6 +508,8 @@ public sealed partial class LibraryStore
         lock(gate)
         {
         foreach(var entry in State.Catalog.Values) entry.Item.Available=false;
+        // A forgotten title's leftover files stay out until they are deleted or replaced.
+        State.RemovedFiles.RemoveWhere(f=>!File.Exists(f));
         var items = new Dictionary<string, VideoItem>(StringComparer.OrdinalIgnoreCase);
         warnings = [];
         foreach (var root in State.Roots.ToList())
@@ -454,7 +519,7 @@ public sealed partial class LibraryStore
             {
                 foreach (var file in Directory.EnumerateFiles(root.Path, "*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true }))
                 {
-                    if (!Extensions.Contains(System.IO.Path.GetExtension(file))) continue;
+                    if (!Extensions.Contains(System.IO.Path.GetExtension(file))||State.RemovedFiles.Contains(file.ToUpperInvariant())) continue;
                     var rel = System.IO.Path.GetRelativePath(root.Path, file);
                     var parts = rel.Split(System.IO.Path.DirectorySeparatorChar);
                     if (parts.Any(p => Regex.IsMatch(p, @"(?i)^(extras?|samples?|trailers?|screens|NC)$"))) continue;
@@ -523,7 +588,7 @@ public sealed partial class LibraryStore
     {
         lock(gate)
         {
-            var saved=State.Catalog.Values.Where(e=>e.Item.GroupKey==groupKey).Select(e=>e.Item).ToList();
+            var saved=EntriesFor(groupKey).Select(e=>e.Item).ToList();
             if(saved.Count==0||saved[0].IsMovie) return saved;
             var representative=saved[0];
             foreach(var episode in State.EpisodeSchedules.GetValueOrDefault(groupKey)??[])
@@ -541,7 +606,9 @@ public sealed partial class LibraryStore
         lock(gate)
         {
             if(details is {Schedule.Count:>0}) State.EpisodeSchedules[groupKey]=details.Schedule;
-            foreach(var entry in State.Catalog.Values.Where(x=>x.Item.GroupKey==groupKey))
+            if(details is {Status.Length:>0}) State.ShowStates[groupKey]=details.Status;
+            if(details is {Runtime:>0}) State.ShowRuntimes[groupKey]=details.Runtime;
+            foreach(var entry in EntriesFor(groupKey))
             {
                 entry.MetadataCheckedAt=DateTimeOffset.UtcNow;
                 if(details==null) continue;
@@ -589,6 +656,8 @@ public sealed partial class LibraryStore
         var previousGroupKey=item.GroupKey;
         var id=old?.Id??(item.Id.Length>0?item.Id:Guid.NewGuid().ToString("N"));
         var collection=old?.CollectionKey;
+        // Schedule placeholders and logged titles already know their show; keep them in it.
+        if(string.IsNullOrEmpty(collection)&&item.CollectionKey.Length>0&&EntriesFor(item.CollectionKey).Count>0) collection=item.CollectionKey;
         if(string.IsNullOrEmpty(collection))
         {
             var existingShows=item.IsMovie?[]:State.Catalog.Values.Where(e=>!e.Item.IsMovie&&MatchTitle(CleanShowTitle(e.Item.Title))==MatchTitle(CleanShowTitle(item.Title))&&
@@ -604,6 +673,8 @@ public sealed partial class LibraryStore
             Genres=old?.Genres??item.Genres,SourceName=old?.SourceName??item.SourceName,SourceUrl=old?.SourceUrl??item.SourceUrl,EpisodeSummary=old?.EpisodeSummary??item.EpisodeSummary,
             ImdbId=old?.ImdbId is {Length:>0}?old.ImdbId:seed?.ImdbId??item.ImdbId,EpisodeImdbId=old?.EpisodeImdbId is {Length:>0}?old.EpisodeImdbId:seed?.EpisodeImdbId??item.EpisodeImdbId,ReviewTitle=old?.ReviewTitle??item.ReviewTitle};
         entry ??= new();entry.Item=item;
+        // A new file for a removed title brings it back to the library.
+        if(old==null&&item.Available&&File.Exists(item.Path)) State.HiddenTitles.Remove(item.GroupKey);
         if(seed!=null && seed.IntroEnd>seed.IntroStart)
             entry.ImportedIntro ??= new(){Start=seed.IntroStart,End=seed.IntroEnd};
         if(seed!=null && seed.OutroEnd>seed.OutroStart) entry.ImportedOutro ??= new(){Start=seed.OutroStart,End=seed.OutroEnd};
@@ -611,7 +682,7 @@ public sealed partial class LibraryStore
         if(fingerprint.Length>0) entry.Fingerprint=fingerprint;
         var legacy=entry.Paths.Select(p=>State.Progress.GetValueOrDefault(p)).Where(p=>p!=null).OrderByDescending(p=>p!.UpdatedAt).FirstOrDefault();
         if(legacy!=null && (entry.Progress==null || legacy.UpdatedAt>entry.Progress.UpdatedAt)) entry.Progress=legacy;
-        State.Catalog[id]=entry;
+        State.Catalog[id]=entry;CatalogChanged();
         var oldIntroKey=previousGroupKey+":season:"+item.Season;
         var newIntroKey=item.GroupKey+":season:"+item.Season;
         if(State.Intros.TryGetValue(oldIntroKey,out var seasonIntro) && !State.Intros.ContainsKey(newIntroKey)) State.Intros[newIntroKey]=seasonIntro;

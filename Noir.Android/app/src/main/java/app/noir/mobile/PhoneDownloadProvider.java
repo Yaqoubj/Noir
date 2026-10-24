@@ -1,0 +1,93 @@
+package app.noir.mobile;
+
+import org.json.*;
+import java.io.*;
+import java.net.*;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+import java.util.regex.*;
+
+/** AIOStreams and cloud preparation run entirely on the phone. No pairing is used here. */
+final class PhoneDownloadProvider {
+    interface Transport {Object request(String url,String key,Map<String,String> form,boolean multipart)throws Exception;}
+    final JSONObject config;final Transport transport;
+    PhoneDownloadProvider(JSONObject settings){this(settings,PhoneDownloadProvider::json);}
+    PhoneDownloadProvider(JSONObject settings,Transport transport){config=settings;this.transport=transport;}
+    static String encode(String value)throws Exception{return URLEncoder.encode(value,"UTF-8").replace("+","%20");}
+    static String streamUri(String manifest,String imdb,boolean movie,int season,int episode)throws Exception{
+        String value=manifest.trim().replaceFirst("(?i)^stremio://","https://");URI uri=new URI(value);
+        if(!"https".equalsIgnoreCase(uri.getScheme())||uri.getHost()==null||uri.getUserInfo()!=null||!uri.getPath().endsWith("/manifest.json")||uri.getFragment()!=null)throw new IOException("Enter the full HTTPS AIOStreams manifest URL ending in /manifest.json.");
+        if(!imdb.matches("tt[0-9]+"))throw new IOException("This title needs an IMDb match before searching.");
+        String path=uri.getRawPath();return uri.getScheme()+"://"+uri.getRawAuthority()+path.substring(0,path.length()-13)+"stream/"+(movie?"movie/":"series/")+encode(movie?imdb:imdb+":"+season+":"+episode)+".json"+(uri.getRawQuery()==null?"":"?"+uri.getRawQuery());
+    }
+    static boolean validUrl(String value){try{URI u=new URI(value);return u.getHost()!=null&&u.getUserInfo()==null&&(u.getScheme().equalsIgnoreCase("https")||u.getScheme().equalsIgnoreCase("http")&&(u.getHost().equals("127.0.0.1")||u.getHost().equals("localhost")));}catch(Exception e){return false;}}
+    static JSONObject headers(JSONObject stream){JSONObject hints=stream.optJSONObject("behaviorHints"),proxy=hints==null?null:hints.optJSONObject("proxyHeaders");JSONObject source=proxy==null?null:proxy.optJSONObject("request"),result=new JSONObject();if(source!=null)for(Iterator<String> it=source.keys();it.hasNext();){String name=it.next(),value=source.optString(name);if(name.matches("[A-Za-z0-9!#$%&'*+.^_`|~-]+")&&!value.contains("\r")&&!value.contains("\n")&&!Arrays.asList("host","range","if-range","content-length","connection","transfer-encoding").contains(name.toLowerCase(Locale.ROOT)))DataStore.put(result,name,value);}return result;}
+    static String hash(JSONObject s){String text=s.optString("infoHash")+" "+s.optString("magnet")+" "+s.optString("url")+" "+s.optString("description")+" "+s.optString("title");JSONObject data=s.optJSONObject("streamData"),torrent=data==null?s.optJSONObject("torrent"):data.optJSONObject("torrent");if(torrent!=null)text+=" "+torrent.optString("infoHash");JSONObject hints=s.optJSONObject("behaviorHints");if(hints!=null)text+=" "+hints.optString("bingeGroup");Matcher m=Pattern.compile("(?i)(?<![a-z0-9])([a-f0-9]{40})(?![a-z0-9])").matcher(text);return m.find()?m.group(1).toLowerCase(Locale.ROOT):"";}
+    static List<JSONObject> parse(JSONObject response,JSONObject item,JSONObject settings){
+        List<JSONObject> result=new ArrayList<>();Set<String> seen=new HashSet<>();
+        for(JSONObject stream:DataStore.objects(response.optJSONArray("streams"))){JSONObject data=stream.optJSONObject("streamData");if(data!=null&&data.optString("type").equals("error"))continue;
+            JSONObject hints=stream.optJSONObject("behaviorHints");String detail=stream.optString("description",stream.optString("title")),name=hints==null?"":hints.optString("filename",hints.optString("name"));if(name.isEmpty())name=stream.optString("name","Release")+" "+detail;
+            String identity=hash(stream),url=stream.optString("url");long size=hints==null?0:hints.optLong("videoSize");
+            if(size<=0){Matcher bytes=Pattern.compile("(?i)([0-9]+(?:\\.[0-9]+)?)\\s*(GiB|GB|MiB|MB)").matcher(detail);if(bytes.find())size=(long)(Double.parseDouble(bytes.group(1))*(bytes.group(2).toLowerCase(Locale.ROOT).startsWith("g")?1073741824d:1048576d));}
+            Matcher audio=Pattern.compile("\\[NOIR_AUDIO:([^\\]]+)\\]").matcher(detail);String language=audio.find()?audio.group(1):name+" "+detail;
+            Matcher resolution=Pattern.compile("(?i)(2160p|1080p|720p|480p|4k)").matcher(name+" "+detail);String quality=resolution.find()?resolution.group(1).toLowerCase(Locale.ROOT).replace("4k","2160p"):"";
+            JSONObject base=new JSONObject();DataStore.put(base,"movie",item.optBoolean("movie"));DataStore.put(base,"name",PhoneDownloadSettings.safe(name,settings));DataStore.put(base,"size",Math.max(0,size));DataStore.put(base,"resolution",quality);DataStore.put(base,"language",PhoneDownloadSettings.safe(language,settings));DataStore.put(base,"hash",identity);
+            // Ready on the user's service: AIOStreams' own flag when present, else its ⚡ / [TB+] style markers.
+            JSONObject provider=data==null?null:data.optJSONObject("service");String label=stream.optString("name")+" "+detail;DataStore.put(base,"cached",provider!=null&&provider.has("cached")?provider.optBoolean("cached"):label.contains("⚡")||Pattern.compile("(?i)\\[(?:TB|RD|AD|PM|DL|ED|OC|PKP|TRB)\\+\\]|\\bcached\\b").matcher(label).find()||data!=null&&(data.optString("type").equals("http")||data.optString("type").equals("usenet"))&&!label.contains("⏳"));DataStore.put(base,"streamType",data==null?"":data.optString("type"));
+            if(validUrl(url)&&seen.add("url:"+url)){JSONObject direct=DataStore.copy(base);DataStore.put(direct,"service","direct");DataStore.put(direct,"url",url);DataStore.put(direct,"headers",headers(stream));result.add(direct);}
+            if(!identity.isEmpty())for(String service:new String[]{"torbox","rd"})if(!settings.optString(service.equals("rd")?"realDebridKey":"torBoxKey").isEmpty()&&seen.add(service+identity)){JSONObject pack=DataStore.copy(base);DataStore.put(pack,"service",service);DataStore.put(pack,"pack",true);result.add(pack);}
+        }return result;
+    }
+    List<JSONObject> search(JSONObject item)throws Exception{String manifest=config.optString("manifest");if(manifest.isEmpty())throw new IOException("Add an AIOStreams manifest in phone Download settings first.");String url=streamUri(manifest,item.optString("imdb"),item.optBoolean("movie"),item.optInt("season"),item.optInt("episode"));return parse((JSONObject)transport.request(url,"",null,false),item,config);}
+    static boolean eligible(JSONObject c,JSONObject settings){long limit=settings.optLong("maxEpisodeBytes");if(limit>0&&!c.optBoolean("movie")&&(c.optLong("size")<=0||c.optLong("size")>limit))return false;String language=settings.optString("language","Any");String text=c.optString("language").toLowerCase(Locale.ROOT);return language.equals("Any")||language.isEmpty()||Pattern.compile(language.equalsIgnoreCase("English")?"(?i)\\b(english|eng|en)\\b":language.equalsIgnoreCase("Arabic")?"(?i)\\b(arabic|ara|ar)\\b":"(?i)"+Pattern.quote(language)).matcher(text).find();}
+    static List<JSONObject> ranked(List<JSONObject> candidates,JSONObject settings,String preferred){List<JSONObject> result=new ArrayList<>();for(JSONObject c:candidates)if(!c.optBoolean("pack")&&eligible(c,settings))result.add(c);result.sort(Comparator.comparingInt((JSONObject c)->!preferred.isEmpty()&&(c.optString("hash").equals(preferred)||c.optString("name").equals(preferred))?0:1).thenComparingInt(c->c.optString("resolution").equals(settings.optString("preferredResolution","1080p"))?0:1).thenComparingInt(c->c.optString("service").equals("direct")?0:1).thenComparingLong(c->c.optLong("size")>0?c.optLong("size"):Long.MAX_VALUE));return result;}
+    static boolean video(String name){return name.toLowerCase(Locale.ROOT).matches(".*\\.(mkv|mp4|avi|webm|m4v|mov|ts)$")&&!name.toLowerCase(Locale.ROOT).matches(".*(?:^|[/\\\\ ._-])sample(?:[/\\\\ ._-]|$).*");}
+    static int[] episode(String name,int fallback){Matcher m=Pattern.compile("(?i)(?:s(\\d{1,2})[ ._-]*e(\\d{1,3})|(\\d{1,2})x(\\d{1,3}))").matcher(name);if(m.find())return m.group(1)!=null?new int[]{Integer.parseInt(m.group(1)),Integer.parseInt(m.group(2))}:new int[]{Integer.parseInt(m.group(3)),Integer.parseInt(m.group(4))};m=Pattern.compile("(?i)(?:^|[ ._-])(?:e|ep|episode)[ ._-]*(\\d{1,3})(?:[ ._-]|$)").matcher(name);return new int[]{fallback,m.find()?Integer.parseInt(m.group(1)):0};}
+    Object api(String service,String path,Map<String,String> form)throws Exception{String key=config.optString(service.equals("rd")?"realDebridKey":"torBoxKey");if(key.isEmpty())throw new IOException("Add the service API key in phone Download settings.");Object value=transport.request((service.equals("rd")?"https://api.real-debrid.com/rest/1.0/":"https://api.torbox.app/v1/api/")+path,key,form,service.equals("torbox"));if(service.equals("torbox")){JSONObject root=(JSONObject)value;if(!root.optBoolean("success",true)||!root.has("data"))throw new IOException("TorBox couldn't prepare this release. Check your account limits.");return root.get("data");}return value;}
+    static JSONObject object(Object value){if(value instanceof JSONObject)return (JSONObject)value;if(value instanceof JSONArray&&((JSONArray)value).length()>0)return ((JSONArray)value).optJSONObject(0);return new JSONObject();}
+    JSONObject torrent(JSONObject release,boolean prepare)throws Exception{
+        String service=release.optString("service"),hash=release.optString("hash");if(!hash.matches("[a-f0-9]{40}"))throw new IOException("Release has no valid torrent hash.");
+        String id=release.optString("torrentId");JSONObject info;
+        if(service.equals("torbox")){
+            if(id.isEmpty()&&!prepare){Object cached=api(service,"torrents/checkcached?hash="+hash+"&format=list&list_files=true",null);JSONObject hit=object(cached);if(hit!=null&&hit.optJSONArray("files")!=null)return hit;}
+            if(id.isEmpty()){for(JSONObject existing:DataStore.objects((JSONArray)api(service,"torrents/mylist?bypass_cache=true",null)))if(existing.optString("hash").equalsIgnoreCase(hash)){id=existing.optString("id");break;}}
+            if(id.isEmpty()){JSONObject added=object(api(service,"torrents/createtorrent",Map.of("magnet","magnet:?xt=urn:btih:"+hash,"seed","0","allow_zip","false")));id=added.optString("torrent_id",added.optString("id"));}
+            if(!id.matches("[0-9]+"))throw new IOException("TorBox did not return a torrent identity.");DataStore.put(release,"torrentId",id);info=object(api(service,"torrents/mylist?id="+encode(id)+"&bypass_cache=true",null));
+        }else{
+            if(id.isEmpty()){for(int page=1;page<=100;page++){JSONArray batch=(JSONArray)api(service,"torrents?limit=100&page="+page,null);for(JSONObject existing:DataStore.objects(batch))if(existing.optString("hash").equalsIgnoreCase(hash)){id=existing.optString("id");break;}if(!id.isEmpty()||batch.length()<100)break;}}
+            if(id.isEmpty())id=object(api(service,"torrents/addMagnet",Map.of("magnet","magnet:?xt=urn:btih:"+hash))).optString("id");
+            if(!id.matches("[A-Za-z0-9]+"))throw new IOException("Real-Debrid did not return a torrent identity.");DataStore.put(release,"torrentId",id);info=object(api(service,"torrents/info/"+id,null));
+            if(prepare&&info.optString("status").equals("waiting_files_selection")){List<String> selected=new ArrayList<>();for(JSONObject f:DataStore.objects(info.optJSONArray("files")))if(video(f.optString("path")))selected.add(f.optString("id"));if(selected.isEmpty())throw new IOException("This torrent has no video files.");api(service,"torrents/selectFiles/"+id,Map.of("files",String.join(",",selected)));info=object(api(service,"torrents/info/"+id,null));}
+        }
+        if(info==null||!info.optString("hash",hash).equalsIgnoreCase(hash))throw new IOException("The service returned a different torrent.");return info;
+    }
+    List<JSONObject> files(JSONObject release,JSONObject item)throws Exception{
+        JSONObject info=torrent(release,false);List<JSONObject> result=new ArrayList<>();boolean rd=release.optString("service").equals("rd");
+        for(JSONObject file:DataStore.objects(info.optJSONArray("files"))){String name=rd?file.optString("path"):file.optString("short_name",file.optString("shortName",file.optString("name")));if(!video(name)||name.matches("(?i).*S\\d{1,2}E\\d{1,3}(?:E|-E|-)\\d{1,3}(?![\\dp]).*"))continue;int[] number=episode(name,item.optInt("season"));JSONObject choice=DataStore.copy(release);DataStore.put(choice,"pack",false);DataStore.put(choice,"fileId",file.optString("id"));DataStore.put(choice,"fileName",PhoneDownloadSettings.safe(name,config));DataStore.put(choice,"size",file.optLong(rd?"bytes":"size"));DataStore.put(choice,"season",number[0]);DataStore.put(choice,"episode",number[1]);result.add(choice);}
+        if(result.size()==1&&result.get(0).optInt("episode")==0){DataStore.put(result.get(0),"season",item.optInt("season"));DataStore.put(result.get(0),"episode",item.optInt("episode"));}return result;
+    }
+    JSONObject resolve(JSONObject choice,JSONObject item,java.util.function.BooleanSupplier cancelled)throws Exception{
+        if(choice.optString("service").equals("direct"))return choice;
+        String service=choice.optString("service");JSONObject info=null;
+        for(int attempt=0;attempt<120;attempt++){if(cancelled.getAsBoolean()||Thread.currentThread().isInterrupted())throw new InterruptedIOException();info=torrent(choice,true);if(service.equals("rd")?info.optString("status").equals("downloaded"):info.optBoolean("download_present"))break;if(Arrays.asList("error","magnet_error","virus","dead").contains(info.optString("status")))throw new IOException("Cloud fetch failed. Choose another release.");if(attempt==119)throw new IOException("Cloud file is still preparing. Resume shortly.");Thread.sleep(5000);}
+        String url;
+        if(service.equals("torbox")){
+            // Cached file IDs and owned-torrent file IDs can differ: match the chosen name and size again.
+            String fileId=choice.optString("fileId");if(!choice.optString("fileName").isEmpty()){List<String> same=new ArrayList<>();for(JSONObject f:DataStore.objects(info.optJSONArray("files"))){String name=f.optString("short_name",f.optString("shortName",f.optString("name")));if(PhoneDownloadSettings.safe(name,config).equals(choice.optString("fileName"))&&(choice.optLong("size")<=0||f.optLong("size")==choice.optLong("size")))same.add(f.optString("id"));}
+                if(same.size()!=1)throw new IOException("The service's file list changed. Search again.");fileId=same.get(0);}
+            Object link=api(service,"torrents/requestdl?token="+encode(config.optString("torBoxKey"))+"&torrent_id="+encode(choice.optString("torrentId"))+"&file_id="+encode(fileId)+"&redirect=false",null);url=link instanceof String?(String)link:object(link).optString("url");}
+        else{int index=0,wanted=-1;for(JSONObject f:DataStore.objects(info.optJSONArray("files")))if(f.optInt("selected")==1||f.optBoolean("selected")){if(f.optString("id").equals(choice.optString("fileId")))wanted=index;index++;}JSONArray links=info.optJSONArray("links");if(wanted<0||links==null||wanted>=links.length())throw new IOException("Cloud selection changed. Search again.");url=object(api(service,"unrestrict/link",Map.of("link",links.optString(wanted)))).optString("download");}
+        if(!validUrl(url))throw new IOException("Service returned an invalid download URL.");JSONObject resolved=DataStore.copy(choice);DataStore.put(resolved,"url",url);DataStore.put(resolved,"headers",new JSONObject());return resolved;
+    }
+    JSONObject refresh(JSONObject item,JSONObject previous,java.util.function.BooleanSupplier cancelled)throws Exception{
+        if(!previous.optString("service").equals("direct")){try{return resolve(previous,item,cancelled);}catch(IOException ignored){}}
+        List<JSONObject> candidates=search(item),expanded=new ArrayList<>();for(JSONObject c:candidates)if(!c.optBoolean("pack"))expanded.add(c);else if(c.optString("hash").equals(previous.optString("hash")))try{for(JSONObject f:files(c,item))if(item.optBoolean("movie")||f.optInt("season")==item.optInt("season")&&f.optInt("episode")==item.optInt("episode"))expanded.add(f);}catch(IOException ignored){}List<JSONObject> ranked=ranked(expanded,config,previous.optString("hash").isEmpty()?previous.optString("name"):previous.optString("hash"));if(ranked.isEmpty())throw new IOException("No replacement links match your phone preferences. Search again.");return resolve(ranked.get(0),item,cancelled);
+    }
+    static Object json(String url,String key,Map<String,String> form,boolean multipart)throws Exception{
+        HttpURLConnection c=null;
+        try{c=(HttpURLConnection)new URL(url).openConnection();c.setConnectTimeout(10000);c.setReadTimeout(45000);c.setInstanceFollowRedirects(false);c.setRequestProperty("User-Agent","AIO-Noir/0.11.0");c.setRequestProperty("Accept","application/json");if(!key.isEmpty())c.setRequestProperty("Authorization","Bearer "+key);
+            if(form!=null){c.setRequestMethod("POST");c.setDoOutput(true);String boundary="noir"+UUID.randomUUID().toString().replace("-","");StringBuilder body=new StringBuilder();if(multipart){c.setRequestProperty("Content-Type","multipart/form-data; boundary="+boundary);for(Map.Entry<String,String> f:form.entrySet())body.append("--").append(boundary).append("\r\nContent-Disposition: form-data; name=\"").append(f.getKey()).append("\"\r\n\r\n").append(f.getValue()).append("\r\n");body.append("--").append(boundary).append("--\r\n");}else{c.setRequestProperty("Content-Type","application/x-www-form-urlencoded");for(Map.Entry<String,String> f:form.entrySet()){if(body.length()>0)body.append('&');body.append(encode(f.getKey())).append('=').append(encode(f.getValue()));}}try(OutputStream out=c.getOutputStream()){out.write(body.toString().getBytes(StandardCharsets.UTF_8));}}
+            int status=c.getResponseCode();if(status<200||status>=300)throw new IOException("Source request failed ("+status+"). Check settings, account limits and connection.");if(status==204)return new JSONObject();try(InputStream input=c.getInputStream()){return new JSONTokener(new String(DataStore.read(input,8*1024*1024),StandardCharsets.UTF_8)).nextValue();}
+        }catch(IOException e){throw new IOException("Source request failed. Check phone download settings, account limits and internet connection.");}finally{if(c!=null)c.disconnect();}
+    }
+}

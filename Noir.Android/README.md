@@ -1,21 +1,26 @@
 # Noir for Android 0.5.0
 
-**What's new in 0.5.0:** a redesigned app. Home opens on a full-width hero and browses in sideways rows. One Continue Watching row holds resumes, next episodes, shows waiting for their next air date (with the date) and released episodes that aren't on your PC yet: tap **Get it on your PC** to request the download from the paired PC. New episodes are tagged. History opens with **Latest** (your recent episodes and movies with resume, play next, get next, rate and comments on each card), then **Stats** (watch time, streaks, viewing on this phone, time of day, top shows, genres and milestones), Collection and Diary. Title pages have a hero with the main action, a row of action chips, season chips and compact episode rows with thumbnails and progress; tap an episode to play it or ⋯ for options. Coming up uses artwork calendar cards. Episode options open in a rounded artwork sheet with grouped icon tiles; More has its own screen for downloads, sync and settings. The bottom bar has icons, and the launch screen is dark. Works with Windows Noir 0.12.2 or later; 0.13.0 is recommended.
+**Current package: `Noir-Android-0.5.0-Standalone.apk`.** Settings and More show **Standalone · 2026-10-21** so you can identify this build. The old 0.4.1 APKs have been removed from the output folder.
+
+**Use the phone on its own.** Discover, My List, collections, watch history, ratings, imports, backups, streaming, subtitles and phone downloads do not require pairing. Add your AIOStreams connection in phone download settings to play online. Continue Watching uses phone-discovered episodes, and playback preferences are saved on the phone. PC sync and PC-file playback are optional. PC-managed Trakt/Serializd sync, Kodi import through the PC, and automatic subtitle timing analysis still need the relevant PC connection.
+**Unreleased improvements:** Direct AIOStreams playback is available from Discover's movie and released-episode pages as well as library actions. The player automatically looks for English or Arabic subtitles when the preferred language is missing from the stream. Download either language from Subtitles without downloading the video or connecting to the PC. Saved streaming subtitles are kept per release, and Off and manual timing persist. Tap **Stream** in the player to choose another release if playback fails.
+
+**What's new in 0.5.0:** a redesigned app. Home opens on a full-width hero and browses in sideways rows. One Continue Watching row holds resumes, next episodes, shows waiting for their next air date (with the date) and released episodes that are not saved locally: stream or download them using the phone connection. New episodes are tagged. History opens with **Latest** (your recent episodes and movies with resume, play next, get next, rate and comments on each card), then **Stats** (watch time, streaks, viewing on this phone, time of day, top shows, genres and milestones), Collection and Diary. Title pages have a hero with the main action, a row of action chips, season chips and compact episode rows with thumbnails and progress; tap an episode to play it or ⋯ for options. Coming up uses artwork calendar cards. Episode options open in a rounded artwork sheet with grouped icon tiles; More has its own screen for downloads, sync and settings. The bottom bar has icons, and the launch screen is dark. Works with Windows Noir 0.12.2 or later; 0.13.0 is recommended.
 
 The player renders embedded subtitles on a separate VLC surface. Open **Subtitles** to download English or Arabic, choose a saved file, or adjust its timing. Downloads are matched to the exact video when possible and stay on the phone for offline use. Smart sync uses Windows Noir 0.12.2 to compare against the same video's dialogue; it checks the video fingerprint first and keeps the original subtitle when timing is uncertain. Manual timing and your language choice persist after closing the player.
 
-Discover searches movies and TV shows, caches posters and episode schedules, and sends episode or season download requests to your paired PC. **More → Downloads** opens the live PC queue and your phone's offline downloads. Browse Discover without a PC connection; saving My List or requesting a PC download requires Windows Noir to be open and reachable.
+Discover searches movies and TV shows and caches posters and schedules. Save My List and library titles locally, stream, or download movies, episodes and seasons to this phone. When paired, PC download actions also appear; only those PC actions need Windows Noir to be reachable.
 
-A native Java Android companion to Windows Noir 0.12.2, using VideoLAN LibVLC for playback. Android 8+ is required.
+A native Java Android app with optional Windows Noir synchronization, using VideoLAN LibVLC for playback. Android 8+ is required.
 
-## Install and pair
+## Install and get started
 
-1. Transfer `outputs/Android/Noir-Android.apk` to your phone and install it. Android may ask to allow installation from the app you use to open the APK. This is a signed personal app, not a Play Store release.
-2. Keep Noir open on the PC and connect both devices to your home Wi-Fi.
-3. Windows Noir → Settings → Phone Sync → Pair a phone. Scan the QR code using your camera and open it with Noir, or paste its complete pairing link into Android Noir.
-4. If Windows blocks the connection, use its **Allow phone access through Windows** button and approve the Windows administrator prompt.
+1. Transfer `outputs/Android/Noir-Android-0.5.0-Standalone.apk` to your phone and install it. Android may ask to allow installation from the app you use to open the APK. This is a signed personal app, not a Play Store release.
+2. Use Discover and Track what I watch immediately. For streaming, save your AIOStreams link in phone download settings. No pairing is required.
+3. Optional PC sync: Windows Noir → Settings → Phone Sync → Pair a phone. Scan the QR code using your camera and open it with Noir, or paste its complete pairing link into Android Noir.
+4. If you chose PC sync and Windows blocks the connection, use its **Allow phone access through Windows** button and approve the Windows administrator prompt.
 
-The ARM64 package is about 26 MB. `Noir-Android-All.apk` includes older ARM and x86 devices. No video upload or cloud account is needed. The PC must be awake and Noir open to stream and sync. The phone retains the cached library and can play completed downloads or linked local copies offline. Home Wi-Fi sync is implemented; remote/cloud sync is not.
+`Noir-Android-0.5.0-Standalone.apk` is the ARM64 phone package; `Noir-Android-0.5.0-Standalone-All.apk` also includes older ARM and x86 devices. The PC must be awake and Noir open for PC-file streaming and phone sync. Direct AIOStreams playback and phone downloads use the phone's own connection and settings, so the PC can be off. The phone retains the cached library and can play completed downloads or linked local copies offline. Home Wi-Fi sync is implemented; remote/cloud sync is not.
 
 ## Included
 
@@ -27,7 +32,7 @@ Reviews opens the original community websites. The chosen Reddit discussion is s
 
 Use JDK 17 or later, Gradle 8.11.1 and Android SDK 36. From the repository root, run `gradle -p Noir.Android assembleDebug`. Set `ANDROID_HOME` to your SDK directory; the APK appears in `Noir.Android/app/build/outputs/apk/debug/`. Android Gradle Plugin 8.10.1 and target SDK 35 are pinned. LibVLC Android 3.7.7 is fetched unchanged from Maven Central.
 
-The release signing key and password are kept in `.signing/`, excluded from source exports. Keep that directory private and preserve it for future update compatibility. Android never receives the Windows browser profile or provider credentials.
+The release signing key and password are kept in `.signing/`, excluded from source exports. Keep that directory private and preserve it for future update compatibility. Android does not receive the Windows browser profile. Phone download credentials are encrypted on the phone; you can enter them there or explicitly transfer settings through the paired connection.
 
 ## Validation
 

@@ -14,7 +14,7 @@ public partial class MainWindow
         var row=new StackPanel{Orientation=Orientation.Horizontal};bar.Children.Add(row);
         foreach(var tab in tabs)
         {
-            var b=new Button{Content=tab,Style=(Style)FindResource("TopNav"),FontSize=18,Padding=new(4,10,4,12),Margin=new(0,0,30,0),Tag=tab==selected?"Selected":null};
+            var b=new Button{Content=T(tab),Style=(Style)FindResource("TopNav"),FontSize=18,Padding=new(4,10,4,12),Margin=new(0,0,30,0),Tag=tab==selected?"Selected":null};
             var value=tab;b.Click+=(_,_)=>choose(value);row.Children.Add(b);
         }
         return bar;
@@ -32,14 +32,22 @@ public partial class MainWindow
         var season=group.Where(i=>i.Season==(detailSeason??item.Season)).ToList();
         if(item.IsMovie)
         {
-            if(!CanPlay(item))Tile("↓","Download",()=>FindDownloads(item));
-            Tile(store.EverWatched(item)?"✓":"○",store.EverWatched(item)?"Watched":"Mark watched",()=>{store.Mark(item,!store.EverWatched(item));Render();});
+            if(!CanPlay(item)){if(StreamOffered)Tile("▶","Stream",()=>StreamItem(item),"Stream it now through AIOStreams");Tile("↓","Download",()=>FindDownloads(item));}
+            Tile(store.EverWatched(item)?"✓":"○",store.EverWatched(item)?"Watched":"Mark watched",()=>{if(store.EverWatched(item))SmartWatchedClick(item);else SmartCheckOff(item,item.Title+" watched");});
         }
         else
         {
+            // Streams the season's next aired episode that isn't on this PC, the first unwatched one if possible.
+            var toStream=season.Where(e=>e.Season>0&&!CanPlay(e)&&store.Aired(e,DateTimeOffset.UtcNow)).OrderBy(e=>store.EverWatched(e)).ThenBy(e=>e.Episode).FirstOrDefault();
+            if(StreamOffered&&toStream!=null)Tile("▶","Stream "+toStream.EpisodeLabel.Replace(" · "," "),()=>StreamItem(toStream),"Stream it now through AIOStreams");
             Tile("↓","Download season",()=>FindDownloads(season.FirstOrDefault()??item,true),"Find this season's episodes for TorBox");
-            var allSeen=season.Count>0&&season.All(store.EverWatched);
-            Tile(allSeen?"✓":"○",allSeen?"Season watched":"Mark season watched",()=>{foreach(var e in season.Where(e=>e.Available||store.EverWatched(e)||store.GetProgress(e)!=null))store.Mark(e,!allSeen);Render();});
+            var released=season.Where(e=>e.Season>0&&store.Aired(e,DateTimeOffset.UtcNow)).ToList();var allSeen=released.Count>0&&released.All(store.EverWatched);
+            if(released.Count>0)Tile(allSeen?"✓":"○",allSeen?"Season watched":"Mark season watched",()=>{if(allSeen)UncheckAll(released,$"Season {released[0].Season} unmarked");else BulkCheckOff(released,$"{item.Title} season {released[0].Season} marked watched");},"Every released episode in this season");
+            var whole=ShowEpisodes(item);var wholeSeen=whole.Count>0&&whole.All(store.EverWatched);
+            if(whole.Count>0&&!wholeSeen)Tile("✓","Mark show watched",()=>MarkWholeShow(item),"Every released episode of every season");
+            if(whole.Count>1)Tile("⇥","Watched up to…",()=>UpToPicker(item.Title,whole.Where(i=>i.Season>0).Select(i=>(i.Season,i.Episode)).Distinct().ToList(),(s,e)=>BulkCheckOff(whole.Where(i=>i.Season>0&&(i.Season<s||i.Season==s&&i.Episode<=e)).ToList(),$"{item.Title}: watched up to S{s:00}E{e:00}")),"Pick the last episode you reached");
+            var stars=ShowStars(item.GroupKey);
+            var rate=Tile("★",stars.Length>0?stars:"Rate show",()=>{},"Your rating for the whole show");rate.Click+=(_,_)=>{var body=SmartPopup(()=>{});body.Children.Add(Text("Rate "+item.Title,15,weight:FontWeights.SemiBold));body.Children.Add(RatingStrip("",item.GroupKey));};
         }
         var status=store.TitleStatus(group);
         var statusButton=Tile("◐",status,()=>{},"Viewing status");statusButton.Click+=(_,_)=>{var menu=new ContextMenu();foreach(var s in LibraryStore.Statuses){var v=s;var m=new MenuItem{Header=s,IsCheckable=true,IsChecked=store.State.TitleStatuses.GetValueOrDefault(item.GroupKey,"Automatic")==s};m.Click+=(_,_)=>{store.SetStatus(item,v);Render();};menu.Items.Add(m);}menu.PlacementTarget=statusButton;menu.Placement=PlacementMode.Bottom;menu.IsOpen=true;};
@@ -96,7 +104,7 @@ public partial class MainWindow
             picture.Children.Add(new Border{Background=Brush("#99000000")});
             var watched=store.EverWatched(item);
             picture.Children.Add(new Border{Background=Brush("#E6101012"),CornerRadius=new(6),Padding=new(8,3,8,3),Margin=new(10),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Top,Child=Text(watched?"✓ Watched · file gone":"Not on this PC",10,"#E4C084",FontWeights.SemiBold)});
-            var get=ActionButton(ActiveDownload(item)!=null?"Downloading…":"↓  Get",()=>{if(ActiveDownload(item)!=null)Navigate("Downloads");else FindDownloads(item);},true);get.HorizontalAlignment=HorizontalAlignment.Center;get.VerticalAlignment=VerticalAlignment.Center;picture.Children.Add(get);
+            var get=ActionButton(ActiveDownload(item)!=null?"Downloading…":"↓  Get",()=>{if(ActiveDownload(item)!=null)Navigate("Downloads");else FindDownloads(item);},true);get.HorizontalAlignment=HorizontalAlignment.Center;get.VerticalAlignment=VerticalAlignment.Center;var getRow=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};if(StreamOffered&&ActiveDownload(item)==null){var stream=ActionButton("▶  Stream",()=>StreamItem(item),true);stream.Margin=new(0,0,8,0);getRow.Children.Add(stream);}get.HorizontalAlignment=HorizontalAlignment.Left;getRow.Children.Add(get);picture.Children.Add(getRow);
             panel.Children.Add(new Border{CornerRadius=new(10),ClipToBounds=true,Child=picture});
             var label=Text($"S{ep.Season:00} · E{ep.Episode:00}"+(!store.State.HideSpoilers&&ep.Title.Length>0?" · "+ep.Title:""),12.5,"#E9E4DC",FontWeights.SemiBold);label.Margin=new(0,8,0,0);label.TextTrimming=TextTrimming.CharacterEllipsis;label.TextWrapping=TextWrapping.NoWrap;panel.Children.Add(label);
             if(ep.AirsAt is {} aired)panel.Children.Add(Text("Aired "+aired.ToLocalTime().ToString("d MMM yyyy"),11,"#9F9A93"));

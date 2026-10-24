@@ -15,9 +15,10 @@ public sealed class SubtitleDownloads
 {
     readonly HttpClient http;
     readonly string backupDirectory;
+    readonly Func<(string Url,bool Only)> source;
     readonly SemaphoreSlim work=new(1,1);
-    public SubtitleDownloads(string profile,HttpClient? http=null){this.http=http??new HttpClient{Timeout=TimeSpan.FromSeconds(35)};backupDirectory=Path.Combine(profile,"subtitle-originals");Directory.CreateDirectory(backupDirectory);}
-    public static string Language(string value)=>value.ToLowerInvariant() switch {"eng" or "en" or "english"=>"en","ara" or "ar" or "arabic"=>"ar",_=>""};
+    public SubtitleDownloads(string profile,HttpClient? http=null,Func<(string Url,bool Only)>? source=null){this.source=source??(()=> ("",true));this.http=http??new HttpClient{Timeout=TimeSpan.FromSeconds(35)};backupDirectory=Path.Combine(profile,"subtitle-originals");Directory.CreateDirectory(backupDirectory);}
+    public static string Language(string value)=>value.Trim().ToLowerInvariant() switch {"eng" or "en" or "english"=>"en","ara" or "ar" or "arabic"=>"ar",_=>""};
     public static string SidecarLanguage(string name)
     {
         var m=Regex.Match(name,@"(?i)(?:^|[./\\ _-])(eng|english|en|ara|arabic|ar)(?:[./\\ _-]|$)");return Language(m.Groups[1].Value);
@@ -35,51 +36,68 @@ public sealed class SubtitleDownloads
         static HashSet<string> Words(string s)=>Regex.Matches(s.ToLowerInvariant(),@"[a-z0-9]{2,}").Select(m=>m.Value).Where(s=>s is not ("mkv" or "mp4" or "srt" or "en" or "ar" or "eng" or "ara")).ToHashSet();
         var a=Words(subtitle);var b=Words(release);return b.Count==0?0:(int)(100d*a.Intersect(b).Count()/b.Count);
     }
-    public async Task<List<SubtitleCandidate>> Search(VideoItem item,string release,CancellationToken ct)
+    // A stable release key survives expiring stream links and keeps different encodes apart.
+    public static VideoItem StreamTarget(string profile,VideoItem item,string release)
+    {
+        var key=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(item.Id+":"+item.ImdbId+":"+item.Season+":"+item.Episode+":"+release)));
+        return new VideoItem{Id=item.Id,Path=Path.Combine(profile,"stream-subtitles",key,"video.mkv")};
+    }
+    public Task<List<SubtitleCandidate>> Search(VideoItem item,string release,CancellationToken ct,bool hashLocal=true)=>Search(item,release,ct,hashLocal,source());
+    async Task<List<SubtitleCandidate>> Search(VideoItem item,string release,CancellationToken ct,bool hashLocal,(string Url,bool Only) settings)
     {
         var imdb=item.ImdbId;if(!Regex.IsMatch(imdb,@"^tt\d+$"))return [];
-        var hash=File.Exists(item.Path)?await VideoHash(item.Path,ct):"";
+        var hash=hashLocal&&File.Exists(item.Path)?await VideoHash(item.Path,ct):"";
         var id=item.IsMovie?imdb:$"{imdb}:{item.Season}:{item.Episode}";
         var extra="filename="+Uri.EscapeDataString(Path.GetFileName(release));
         if(hash.Length>0)extra+="&videoHash="+hash+"&videoSize="+new FileInfo(item.Path).Length;
-        var url="https://opensubtitles-v3.strem.io/subtitles/"+(item.IsMovie?"movie/":"series/")+Uri.EscapeDataString(id)+"/"+extra+".json";
-        using var response=await http.GetAsync(url,ct);response.EnsureSuccessStatusCode();
-        var bytes=await Limited(response.Content,4*1024*1024,ct);using var doc=JsonDocument.Parse(bytes);
-        if(!doc.RootElement.TryGetProperty("subtitles",out var all)||all.ValueKind!=JsonValueKind.Array)return [];
-        var result=new List<SubtitleCandidate>();
+        var result=new List<SubtitleCandidate>();var seen=new HashSet<string>(StringComparer.Ordinal);var succeeded=false;var sources=SubtitleAddon.Sources(settings.Url,settings.Only);
+        foreach(var baseUrl in sources){
+        try{
+        var url=baseUrl+"/subtitles/"+(item.IsMovie?"movie/":"series/")+Uri.EscapeDataString(id)+"/"+extra+".json";
+        using var response=await http.GetAsync(url,HttpCompletionOption.ResponseHeadersRead,ct);response.EnsureSuccessStatusCode();
+        var bytes=await Limited(response.Content,4*1024*1024,ct);using var doc=JsonDocument.Parse(bytes);succeeded=true;
+        if(doc.RootElement.ValueKind!=JsonValueKind.Object||!doc.RootElement.TryGetProperty("subtitles",out var all)||all.ValueKind!=JsonValueKind.Array)continue;
         foreach(var s in all.EnumerateArray().Take(500)){
+            if(s.ValueKind!=JsonValueKind.Object)continue;
             string Text(string k)=>s.TryGetProperty(k,out var v)&&v.ValueKind==JsonValueKind.String?v.GetString()??"":"";
             var language=Language(Text("lang"));if(language.Length==0)continue;
-            if(!item.IsMovie&&((s.TryGetProperty("season",out var season)&&season.ValueKind==JsonValueKind.Number&&season.GetInt32()!=item.Season)||(s.TryGetProperty("episode",out var ep)&&ep.ValueKind==JsonValueKind.Number&&ep.GetInt32()!=item.Episode)))continue;
-            var link=Text("url");if(!ValidUrl(link))continue;var name=Text("subtitleFileName");var rel=Text("movieReleaseName");
+            if(!item.IsMovie&&((s.TryGetProperty("season",out var season)&&season.ValueKind==JsonValueKind.Number&&season.TryGetInt32(out var sn)&&sn!=item.Season)||(s.TryGetProperty("episode",out var ep)&&ep.ValueKind==JsonValueKind.Number&&ep.TryGetInt32(out var en)&&en!=item.Episode)))continue;
+            var link=Text("url");if(!ValidUrl(link)||!seen.Add(link))continue;var name=Text("subtitleFileName");var rel=Text("movieReleaseName");
             var exact=Text("m")=="h";result.Add(new(Text("id"),language,name,rel,link,exact,(exact?1000:0)+ReleaseScore(rel+" "+name,release)));
         }
-        return result.OrderByDescending(s=>s.Score).ToList();
+        }catch(Exception e)when(e is HttpRequestException or JsonException or IOException||e is OperationCanceledException&&!ct.IsCancellationRequested){if(sources.Count==1)throw new IOException("Subtitle lookup unavailable.");}
+        }
+        if(!succeeded)throw new IOException("Subtitle lookup unavailable.");
+        return result.OrderByDescending(s=>s.Score).Take(500).ToList();
     }
-    public async Task<string> Fetch(VideoItem item,string release,List<string> languages,bool autoSync,CancellationToken ct,List<SubtitleAsset>? pack=null)
+    public async Task<string> Fetch(VideoItem item,string release,List<string> languages,bool autoSync,CancellationToken ct,List<SubtitleAsset>? pack=null,bool skipEmbedded=false,VideoItem? streamTarget=null)
     {
         await work.WaitAsync(ct);
         try{
-            if(!File.Exists(item.Path))throw new IOException("The video must be saved locally first.");
-            var requested=languages.Select(Language).Where(l=>l.Length>0).Distinct().ToList();var messages=new List<string>();
+            if(streamTarget==null&&!File.Exists(item.Path))throw new IOException("Open a stream or save the video before downloading subtitles.");
+            var target=streamTarget??item;
+            if(streamTarget!=null)Directory.CreateDirectory(Path.GetDirectoryName(target.Path)!);
+            var settings=source();var requested=languages.Select(Language).Where(l=>l.Length>0).Distinct().ToList();var messages=new List<string>();
+            var embedded=streamTarget==null&&skipEmbedded&&requested.Count>0?await EmbeddedSubtitles.Probe(item.Path,ct):[];
             List<SubtitleCandidate>? found=null;
             foreach(var lang in requested){
                 ct.ThrowIfCancellationRequested();var label=lang=="ar"?"Arabic":"English";
-                var existing=MobileSubtitles.Find(item).FirstOrDefault(s=>SidecarLanguage(s.Path)==lang);
+                var existing=MobileSubtitles.Find(target,requireVideo:streamTarget==null).FirstOrDefault(s=>SidecarLanguage(s.Path)==lang);
                 if(existing.Path!=null){messages.Add(label+" already saved");continue;}
-                var bundled=pack?.FirstOrDefault(s=>s.Language==lang);string link,ext;bool exact;
+                if(embedded.Contains(lang)){messages.Add(label+" built into the video");continue;}
+                var bundled=settings.Url.Length>0&&settings.Only?null:pack?.FirstOrDefault(s=>s.Language==lang);string link,ext;bool exact;
                 if(bundled!=null){link=bundled.Url;ext=Path.GetExtension(bundled.Name).ToLowerInvariant();exact=true;}
                 else{
-                    try{found??=await Search(item,release,ct);}catch(Exception e)when(e is HttpRequestException or JsonException or IOException||e is OperationCanceledException&&!ct.IsCancellationRequested){messages.Add(label+" lookup unavailable");continue;}
+                    try{found??=await Search(item,release,ct,streamTarget==null,settings);}catch(Exception e)when(e is HttpRequestException or JsonException or IOException||e is OperationCanceledException&&!ct.IsCancellationRequested){messages.Add(label+" lookup unavailable");continue;}
                     var best=found.FirstOrDefault(s=>s.Language==lang);if(best==null){messages.Add(label+" not available");continue;}link=best.Url;ext=Path.GetExtension(best.Name).ToLowerInvariant();if(!TextSubtitle(best.Name))ext=".srt";exact=best.HashMatch;
                 }
                 try{
                     var data=await Download(link,ct);var text=Decode(data);if(!ValidText(text,ext))throw new IOException("Invalid subtitle response");
-                    var destination=Path.Combine(Path.GetDirectoryName(item.Path)!,Path.GetFileNameWithoutExtension(item.Path)+"."+lang+ext);
+                    var destination=Path.Combine(Path.GetDirectoryName(target.Path)!,Path.GetFileNameWithoutExtension(target.Path)+"."+lang+ext);
                     var temp=destination+"."+Guid.NewGuid().ToString("N")+".tmp";
                     await File.WriteAllTextAsync(temp,text,new UTF8Encoding(false),ct);
                     try{File.Move(temp,destination,false);}finally{if(File.Exists(temp))File.Delete(temp);}
-                    var timing=autoSync&&!exact?await Sync(item.Path,destination,ct):exact?"release matched":"timing unchanged";
+                    var timing=autoSync&&!exact&&streamTarget==null?await Sync(item.Path,destination,ct):exact?"release matched":"timing unchanged · adjust in Subtitles → Timing if needed";
                     messages.Add(label+" saved · "+timing);
                 }catch(Exception e)when(e is IOException or HttpRequestException or InvalidDataException||e is OperationCanceledException&&!ct.IsCancellationRequested){messages.Add(label+" download unavailable");}
             }

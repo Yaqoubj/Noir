@@ -290,6 +290,13 @@ public sealed class ReviewBrowser : Window
 
 public partial class MainWindow
 {
+    void OpenPersonalRating(VideoItem item)
+    {
+        var review=store.State.PersonalReviews.GetValueOrDefault(item.Id);var rating=review?.Rating10??0;var dialog=new Window{Owner=this,Title=T("Your rating & note","تقييمك وملاحظتك"),Width=520,Height=500,MinWidth=400,MinHeight=400,WindowStartupLocation=WindowStartupLocation.CenterOwner,Background=Brush("#111113"),Foreground=Brush("#F4F1EB")};var body=new StackPanel{Margin=new(26)};dialog.Content=new ScrollViewer{Content=body,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
+        body.Children.Add(Text(item.Title,23,"#E4C084",FontWeights.SemiBold));body.Children.Add(Text(T("Your rating is always optional","تقييمك اختياري دائماً"),12,"#B9AC97"));var stars=new Button{Content=HalfRating(rating,30),HorizontalAlignment=HorizontalAlignment.Left,Background=Brush("Transparent"),Padding=new(0),Margin=new(0,16,0,10),ToolTip=T("Click a half star to rate","انقر نصف نجمة للتقييم")};System.Windows.Automation.AutomationProperties.SetName(stars,T("Your rating · optional","تقييمك · اختياري"));body.Children.Add(stars);stars.PreviewMouseLeftButtonUp+=(_,e)=>{var score=Math.Clamp((int)Math.Ceiling(e.GetPosition(stars).X/32*2),1,10);rating=rating==score?0:score;stars.Content=HalfRating(rating,30);e.Handled=true;};
+        var options=new WrapPanel();for(int n=1;n<=10;n++){var score=n;var option=ActionButton((n/2.0).ToString("0.#",Loc.Culture),()=>{rating=score;stars.Content=HalfRating(rating,30);});option.Padding=new(7,3,7,3);option.Margin=new(0,0,4,4);option.ToolTip=T("{0:0.#} stars","{0:0.#} نجمة",n/2.0);options.Children.Add(option);}body.Children.Add(options);
+        var note=new TextBox{Text=review?.Note??"",AcceptsReturn=true,TextWrapping=TextWrapping.Wrap,Height=108,MaxLength=10000,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,Margin=new(0,12,0,14),Padding=new(10),Background=Brush("#222226"),Foreground=Brush("#F4F1EB")};System.Windows.Automation.AutomationProperties.SetName(note,T("Private note · optional","ملاحظة خاصة · اختيارية"));body.Children.Add(note);var actions=new WrapPanel();actions.Children.Add(ActionButton(T("Save","حفظ"),()=>{store.SetReview10(item,rating,note.Text);dialog.Close();RenderQuiet();},true));var clear=ActionButton(T("Clear rating","مسح التقييم"),()=>{rating=0;stars.Content=HalfRating(0,30);});clear.Margin=new(10,0,0,0);actions.Children.Add(clear);body.Children.Add(actions);dialog.Show();
+    }
     Task? episodeLookup;
     async Task RefreshEpisodeLinks()
     {

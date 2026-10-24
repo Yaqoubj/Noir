@@ -18,7 +18,7 @@ public partial class MainWindow
         LibraryHeader.Visibility=cinematic?Visibility.Collapsed:Visibility.Visible;
         LibraryHeader.Margin=new Thickness(sidePad,TopBar.Height+30,sidePad,10);
         ContentPanel.Margin=new Thickness(sidePad,cinematic?0:6,sidePad,64);
-        UpdateTopBar();
+        if(!cinematic)PageAmbient.Background=null;UpdateTopBar();
     }
     // Lets an element span the full window width from inside the padded content column.
     FrameworkElement Bleed(FrameworkElement element,double bottom=0){element.Margin=new Thickness(-sidePad,0,-sidePad,bottom);return element;}
@@ -32,22 +32,27 @@ public partial class MainWindow
     void Logo_Click(object sender,System.Windows.Input.MouseButtonEventArgs e)=>Navigate("Home");
     void PageEntrance()
     {
-        var shift=new TranslateTransform(0,14);ContentPanel.RenderTransform=shift;
-        var ease=new CubicEase{EasingMode=EasingMode.EaseOut};
-        ContentPanel.BeginAnimation(OpacityProperty,new DoubleAnimation(0,1,TimeSpan.FromMilliseconds(260)){EasingFunction=ease});
-        shift.BeginAnimation(TranslateTransform.YProperty,new DoubleAnimation(14,0,TimeSpan.FromMilliseconds(320)){EasingFunction=ease});
+        Motion.RiseIn(ContentPanel);
+    }
+    double indicatorY=double.NaN;
+    void SlideNavIndicator()
+    {
+        var selected=NavLinks.Children.OfType<Button>().FirstOrDefault(b=>b.Tag as string=="Selected");if(selected==null||!selected.IsVisible||selected.ActualHeight==0){NavIndicator.Opacity=0;return;}
+        var y=selected.TransformToAncestor(NavSurface).Transform(new Point(0,(selected.ActualHeight-24)/2)).Y;
+        if(Math.Abs(y-indicatorY)<.5)return;var first=double.IsNaN(indicatorY);indicatorY=y;NavIndicator.Opacity=1;
+        Motion.To(NavIndicator,(TranslateTransform)NavIndicator.RenderTransform,TranslateTransform.YProperty,y,first?0:180);
     }
     DispatcherTimer? toastTimer;
     void WatchStatusText()=>DependencyPropertyDescriptor.FromProperty(TextBlock.TextProperty,typeof(TextBlock)).AddValueChanged(Status,(_,_)=>ShowToast());
     // Every Status.Text update appears as a short notice; longer messages stay a little longer.
     void ShowToast()
     {
-        if(string.IsNullOrWhiteSpace(Status.Text)){StatusToast.BeginAnimation(OpacityProperty,new DoubleAnimation(0,TimeSpan.FromMilliseconds(200)));return;}
-        StatusToast.BeginAnimation(OpacityProperty,new DoubleAnimation(1,TimeSpan.FromMilliseconds(180)));
+        if(string.IsNullOrWhiteSpace(Status.Text)){Motion.Opacity(StatusToast,0,200);return;}
+        Motion.Opacity(StatusToast,1,180);Motion.Pop(StatusToast);
         toastTimer??=new DispatcherTimer();toastTimer.Stop();toastTimer.Interval=TimeSpan.FromSeconds(Math.Clamp(Status.Text.Length/14.0,3,9));
         toastTimer.Tick-=HideToast;toastTimer.Tick+=HideToast;toastTimer.Start();
     }
-    void HideToast(object? sender,EventArgs e){toastTimer?.Stop();StatusToast.BeginAnimation(OpacityProperty,new DoubleAnimation(0,TimeSpan.FromMilliseconds(400)));}
+    void HideToast(object? sender,EventArgs e){toastTimer?.Stop();Motion.Opacity(StatusToast,0,400);}
     static new FrameworkElement Icon(string geometry,double size=20,string color="#E9E4DC")=>new System.Windows.Shapes.Path{Data=Geometry.Parse(geometry),Stroke=Brush(color),StrokeThickness=1.7,StrokeLineJoin=PenLineJoin.Round,StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round,Width=size,Height=size,Stretch=Stretch.Uniform};
     const string DownloadGlyph="M12,1 L12,16 M6,10 L12,16 L18,10 M2,17 L2,23 L22,23 L22,17",ScanGlyph="M3,8 A10,10 0 0 1 20,4 M20,1 L20,7 L14,7 M21,16 A10,10 0 0 1 4,20 M4,23 L4,17 L10,17",SettingsGlyph="M1,5 L23,5 M1,12 L23,12 M1,19 L23,19 M7,2 L7,8 M17,9 L17,15 M10,16 L10,22";
     FrameworkElement DownloadIcon(int active)

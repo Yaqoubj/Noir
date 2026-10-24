@@ -1,0 +1,37 @@
+package app.noir.mobile;
+
+import android.content.Intent;
+import android.os.Bundle;
+import android.view.WindowManager;
+import android.widget.*;
+import org.json.JSONObject;
+import java.util.concurrent.*;
+
+public final class PhoneDownloadSettingsActivity extends PhoneScreen {
+    final ExecutorService worker=Executors.newSingleThreadExecutor();PhoneDownloadSettings storage;JSONObject config;boolean copying,checking;EditText subtitleLink;Switch subtitleOnly;TextView subtitleStatus;
+    @Override public void onCreate(Bundle state){super.onCreate(state);getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);storage=new PhoneDownloadSettings(this);render();}
+    void render(){page("Phone download settings");try{config=storage.load();}catch(Exception e){feedback.setText("Couldn't decrypt settings on this installation.");return;}
+        body.addView(text("Stream and download using this phone's internet connection. No PC or pairing required. Saved credentials are encrypted on this phone.",14));
+        EditText manifest=input("AIOStreams manifest URL · required", "",true),torbox=input("TorBox API key · optional", "",true),rd=input("Real-Debrid API key · optional","",true);
+        manifest.setHint(config.optString("manifest").isEmpty()?"HTTPS installation URL":"Saved · leave blank to keep");torbox.setHint(config.optString("torBoxKey").isEmpty()?"Optional":"Saved · leave blank to keep");rd.setHint(config.optString("realDebridKey").isEmpty()?"Optional":"Saved · leave blank to keep");
+        Spinner resolution=spinner("Preferred resolution",new String[]{"1080p","720p","2160p","Any"},config.optString("preferredResolution","1080p"));Spinner language=spinner("Preferred audio language",new String[]{"Any","English","Arabic"},config.optString("language","Any"));EditText maximum=input("Maximum episode size in MB · 0 for no limit",Long.toString(config.optLong("maxEpisodeBytes")/1048576),false);maximum.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        subtitleLink=input("Stremio subtitle addon link · optional",config.optString("subtitleAddonUrl"),true);
+        subtitleOnly=new Switch(this);subtitleOnly.setText(Loc.t("Use only this source"));subtitleOnly.setTextColor(MainActivity.WHITE);subtitleOnly.setChecked(config.optBoolean("subtitleAddonOnly",true));subtitleOnly.setEnabled(!config.optString("subtitleAddonUrl").isEmpty());body.addView(subtitleOnly);subtitleStatus=text("",13);body.addView(subtitleStatus);
+        subtitleLink.addTextChangedListener(new android.text.TextWatcher(){boolean had=!config.optString("subtitleAddonUrl").isEmpty();public void beforeTextChanged(CharSequence s,int start,int count,int after){}public void onTextChanged(CharSequence s,int start,int before,int count){boolean has=s.toString().trim().length()>0;if(has&&!had)subtitleOnly.setChecked(true);had=has;subtitleOnly.setEnabled(has);subtitleStatus.setText("");}public void afterTextChanged(android.text.Editable s){}});
+        body.addView(button(Loc.t("Check link"),()->checkSubtitle(DataStore.copy(config),false),false));
+        body.addView(button(Loc.t("Save subtitle source"),()->checkSubtitle(DataStore.copy(config),true),false));
+        body.addView(button("Save on this phone",()->{try{JSONObject value=DataStore.copy(config);for(String[] entry:new String[][]{{"manifest",manifest.getText().toString().trim()},{"torBoxKey",torbox.getText().toString().trim()},{"realDebridKey",rd.getText().toString().trim()}})if(!entry[1].isEmpty())DataStore.put(value,entry[0],entry[1]);DataStore.put(value,"preferredResolution",resolution.getSelectedItem().toString());DataStore.put(value,"language",language.getSelectedItem().toString());DataStore.put(value,"maxEpisodeBytes",Math.multiplyExact(Long.parseLong(maximum.getText().toString()),1048576L));checkSubtitle(value,true);}catch(Exception e){feedback.setText("Couldn't save. Check the manifest URL and maximum size.");}},true));
+        if(NoirApp.data.paired())body.addView(button("Copy download settings from PC",()->{if(copying||checking)return;copying=true;feedback.setText("Waiting for confirmation on your PC · up to 2 minutes…");worker.execute(()->{try{JSONObject value=NoirApp.data.pcRequest("/v1/phone-downloads/settings",new JSONObject());storage.save(value);runOnUiThread(()->{copying=false;if(!isFinishing()){render();feedback.setText("Copied once and encrypted on this phone.");}});}catch(Exception e){runOnUiThread(()->{copying=false;if(!isFinishing())feedback.setText("Settings weren't shared. Keep the paired PC reachable and click Send there within 2 minutes.");});}});},false));
+        body.addView(button("Clear saved download credentials",()->{if(checking||copying)return;new android.app.AlertDialog.Builder(this).setTitle("Clear phone download settings?").setNegativeButton("Cancel",null).setPositiveButton("Clear",(d,w)->{try{storage.save(new JSONObject());render();}catch(Exception e){feedback.setText("Couldn't clear settings.");}}).show();},false));
+        body.addView(button("Phone downloads",()->startActivity(new Intent(this,DownloadsActivity.class)),false));
+    }
+    void checkSubtitle(JSONObject value,boolean save){
+        if(checking||copying)return;String link=subtitleLink.getText().toString();boolean only=subtitleOnly.isChecked();checking=true;subtitleStatus.setText(Loc.t("Checking subtitle addon…"));
+        worker.execute(()->{try{String normalized=SubtitleClient.normalizeAddon(link),name=normalized.isEmpty()?"":SubtitleClient.checkAddon(normalized);
+            runOnUiThread(()->{checking=false;if(isFinishing())return;if(!link.equals(subtitleLink.getText().toString())||only!=subtitleOnly.isChecked()){subtitleStatus.setText(Loc.t("Subtitle source changed. Check again."));return;}
+                try{if(save){DataStore.put(value,"subtitleAddonUrl",normalized);DataStore.put(value,"subtitleAddonOnly",only);storage.save(value);render();feedback.setText(Loc.t("Subtitle source saved securely."));}subtitleStatus.setText(name.isEmpty()?Loc.t("Default subtitle source"):Loc.t("Connected:")+" "+name);}catch(Exception e){subtitleStatus.setText(Loc.t("Couldn't save subtitle source."));}
+            });
+        }catch(Exception e){String message=e instanceof java.io.IOException?e.getMessage():"Couldn't check the subtitle addon. Check the link and connection.";runOnUiThread(()->{checking=false;if(!isFinishing())subtitleStatus.setText(Loc.t(message));});}});
+    }
+    @Override public void onDestroy(){worker.shutdownNow();super.onDestroy();}
+}

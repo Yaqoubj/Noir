@@ -44,6 +44,8 @@ public sealed class PcDownloadJob
     public string RequestId {get;set;}="";
     public string Name {get;set;}="";
     public string Hash {get;set;}="";
+    public string Service {get;set;}="TorBox";
+    public string ProtectedDirectSource {get;set;}="";
     public long TorrentId {get;set;}=-1;
     public long FileId {get;set;}=-1;
     public string RemoteName {get;set;}="";
@@ -69,7 +71,16 @@ public sealed class DownloadRequest
     public List<DownloadSelection> Selections {get;set;}=[];
 }
 public sealed class DownloadSelection {public string ReleaseId {get;set;}="";public List<string> FileIds {get;set;}=[];}
-public sealed class DownloadPlanRequest {public List<string> ReleaseIds {get;set;}=[];}
+public sealed class DownloadPlanRequest
+{
+    public List<string> ReleaseIds {get;set;}=[];
+    public string Scope {get;set;}="Missing episodes";
+    public List<int> Seasons {get;set;}=[];
+    public int FromEpisode {get;set;}=1;
+    public int NextCount {get;set;}=3;
+    public List<SeasonEpisode> SpecificEpisodes {get;set;}=[];
+    public ShowDownloadPreference? Preferences {get;set;}
+}
 public sealed class DownloadMappingRequest {public string FileId {get;set;}="";public int Episode {get;set;}}
 public sealed class DownloadSourceStatus
 {
@@ -97,6 +108,13 @@ public sealed class DownloadPlanEntry
 }
 public sealed class DownloadPlan
 {
+    public string Id {get;set;}="";
+    public List<PlannedEpisode> Episodes {get;set;}=[];
+    public List<DownloadSourceStatus> Sources {get;set;}=[];
+    public ShowDownloadPreference Preferences {get;set;}=new();
+    public string Folder {get;set;}="";
+    public long FreeBytes {get;set;}
+    public bool Fits {get;set;}
     public List<DownloadPlanEntry> Entries {get;set;}=[];
     public List<int> MissingEpisodes {get;set;}=[];
     public int ReleasedEpisodes {get;set;}

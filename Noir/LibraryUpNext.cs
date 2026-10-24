@@ -10,8 +10,9 @@ public sealed partial class LibraryStore
     public UpNext? UpNextFor(List<VideoItem> group)
     {
         var last=group.Where(x=>GetProgress(x) is {} b&&(b.Position>0||b.Completed))
-            .Select(x=>(Item:x,At:new[]{GetProgress(x)!.UpdatedAt,ViewingHistory(x).FirstOrDefault()?.WatchedAt??DateTimeOffset.MinValue}.Max()))
-            .OrderByDescending(x=>x.At).FirstOrDefault();
+            .Select(x=>(Item:x,At:LastActivity(x)))
+            // Undated catch-ups have no activity time; the furthest episode still decides what's next.
+            .OrderByDescending(x=>x.At).ThenByDescending(x=>x.Item.Season).ThenByDescending(x=>x.Item.Episode).FirstOrDefault();
         if(last.Item==null) return null;
         bool Playable(VideoItem i)=>i.Available&&System.IO.File.Exists(i.Path);
         var bookmark=GetProgress(last.Item)!;

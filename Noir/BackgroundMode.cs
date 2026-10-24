@@ -52,18 +52,34 @@ public partial class MainWindow
         return airs is {} at&&at<=DateTimeOffset.UtcNow&&at>DateTimeOffset.UtcNow.AddDays(-14);
     }
     // One notification per newly aired episode that is next up for a show you are watching.
-    void CheckNewEpisodes()
+    bool checkingNewEpisodes;
+    async void CheckNewEpisodes()
     {
-        if(tray==null||closing) return;
-        var fresh=store.Archive.GroupBy(i=>i.GroupKey).Where(g=>!g.First().IsMovie&&store.TitleStatus(g)!="Dropped"&&!store.State.HiddenContinue.Contains(g.Key))
+        if(tray==null||closing||checkingNewEpisodes) return;
+        checkingNewEpisodes=true;
+        try{
+        var followed=store.Archive.GroupBy(i=>i.GroupKey).Where(g=>!g.First().IsMovie&&store.TitleStatus(g)!="Dropped"&&!store.State.HiddenContinue.Contains(g.Key)&&!store.State.HiddenTitles.Contains(g.Key)).ToList();
+        var next=followed
             .Select(g=>store.UpNextFor(store.EpisodesFor(g.Key))).OfType<UpNext>()
-            .Where(u=>u.Kind is UpNextKind.Ready or UpNextKind.NotOnPc&&IsNewEpisode(u.Item)&&store.State.NewEpisodeAlerts.Add(u.Item.GroupKey+":"+u.Item.Season+":"+u.Item.Episode)).ToList();
+            .Where(u=>u.Kind is UpNextKind.Ready or UpNextKind.NotOnPc).Select(u=>u.Item);
+        var automatic=followed.Where(g=>store.State.ShowDownloads.GetValueOrDefault(g.Key)?.AutoDownload==true).SelectMany(g=>store.EpisodesFor(g.Key));
+        bool Following(VideoItem episode){var group=store.EpisodesFor(episode.GroupKey);return group.Max(store.LastActivity)>DateTimeOffset.UtcNow.AddDays(-180)||store.EarlierUnwatched(episode).Count==0;}
+        var fresh=next.Where(Following).Concat(automatic).DistinctBy(i=>(i.GroupKey,i.Season,i.Episode)).Where(i=>IsNewEpisode(i)&&store.State.NewEpisodeAlerts.Add(i.GroupKey+":"+i.Season+":"+i.Episode)).ToList();
         if(fresh.Count==0) return;
         store.Save();
-        var first=fresh[0].Item;var ready=fresh[0].Kind==UpNextKind.Ready;
-        var text=fresh.Count>1?$"{first.Title} {first.EpisodeLabel} and {fresh.Count-1} more are out.":$"{first.Title} {first.EpisodeLabel} is out."+(ready?" It's on this PC.":" Click to download it.");
-        Notify("New episode",text,"Home",fresh.Count==1&&!ready?()=>FindDownloads(first):null);
-        if(!hiddenInTray&&page=="Home"&&current==null) Render();
+        var notices=new List<VideoItem>();
+        foreach(var episode in fresh){
+            bool queued=false;
+            if(downloads!=null)try{queued=await downloads.TryAutoDownload(episode.Id);}catch(Exception){/* Fall back to the usual new-episode notice. */}
+            if(!queued)notices.Add(episode);
+        }
+        if(!hiddenInTray&&page is "Home" or "History"&&current==null) Render();
+        if(notices.Count==0||!store.State.EpisodeAlerts)return;
+        var first=notices[0];var ready=first.Available&&System.IO.File.Exists(first.Path);
+        var text=notices.Count>1?$"{first.Title} {first.EpisodeLabel} and {notices.Count-1} more are out.":$"{first.Title} {first.EpisodeLabel} is out."+(ready?" It's on this PC.":" Click to watch, get or check it off.");
+        // Opens the tracker's Upcoming tab, where "Out now" offers play, download, Stremio and the check-off.
+        Notify("New episode",text,"History",()=>{trackerTab="Upcoming";logging=false;Render();ContentScroll.ScrollToTop();});
+        }finally{checkingNewEpisodes=false;}
     }
     // Called on every download change and periodically: tooltip, finished-download notices, sleep prevention.
     void UpdateBackgroundState()
@@ -88,7 +104,7 @@ public partial class MainWindow
         foreach(var owned in OwnedWindows.Cast<Window>().ToList()) if(owned.Title!="LibVLCSharp.WPF") owned.Close();
         hiddenInTray=true;Hide();
         // Release what the library page holds; it is rebuilt when the window comes back.
-        ContentPanel.Children.Clear();images.Clear();imageBytes=0;renderWhenShown=true;
+        ContentPanel.Children.Clear();images.Clear();imageUse.Clear();imageBytes=0;renderWhenShown=true;
         if(!quiet&&!store.State.BackgroundHintShown)
         {
             store.State.BackgroundHintShown=true;store.Save();

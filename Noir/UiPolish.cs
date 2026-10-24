@@ -7,7 +7,7 @@ public partial class MainWindow
     readonly Dictionary<string,int> cardLimits=new();
     void PagedCards(List<List<VideoItem>> groups,string section,Func<List<VideoItem>,FrameworkElement> card)
     {
-        var key=page+"|"+SearchBox.Text+"|"+section+"|"+genreFilter+"|"+librarySort+"|"+historyType+"|"+statusFilter+"|"+historySort;
+        var key=page+"|"+SearchBox.Text+"|"+section+"|"+genreFilter+"|"+librarySort+"|"+historyType;
         if(cardLimits.Count>100)cardLimits.Clear();
         var limit=cardLimits.GetValueOrDefault(key,40);var wrap=new System.Windows.Controls.WrapPanel();ContentPanel.Children.Add(wrap);
         foreach(var group in groups.Take(limit))wrap.Children.Add(card(group));
@@ -25,8 +25,7 @@ public partial class MainWindow
     }
     void ApplyNavigationIcons()
     {
-        // Page links stay as text in the top bar; utilities are icon buttons with tooltips.
-        DownloadsNav.Content=DownloadIcon(0);ScanNav.Content=Icon(ScanGlyph,18);SettingsNav.Content=Icon(SettingsGlyph,18);
+        // The side rail's icons and labels are built by ApplyLanguage once the library has loaded.
         WatchStatusText();
     }
     static IEnumerable<FrameworkElement> ViewElements(DependencyObject root)

@@ -30,11 +30,11 @@ public static class ReleasePresentation
     }
     public static bool Matches(DownloadChoice c,string quality,string language,long maxBytes,bool ready)
         =>(quality=="All"||c.Resolution==quality)&&(language=="All"||c.Languages.Contains(language,StringComparison.OrdinalIgnoreCase))
-        &&(maxBytes<=0||c.Size<=0||c.SizeKind=="Pack"||c.Size<=maxBytes)&&(!ready||c.CacheStatus=="Ready");
+        &&(maxBytes<=0||c.Size<=0||c.SizeKind=="Pack"||c.Size<=maxBytes)&&(!ready||c.Cached||c.CacheStatus=="Ready");
     public static List<DownloadChoice> Recommend(IEnumerable<DownloadChoice> choices,string quality,long maxBytes,int count=3)
         =>choices.OrderByDescending(c=>quality=="Any"||c.Resolution==quality)
             .ThenByDescending(c=>maxBytes<=0||c.SizeKind=="Pack"||c.Size>0&&c.Size<=maxBytes)
             .ThenByDescending(c=>c.CacheStatus=="Ready").ThenBy(c=>c.Size>0?c.Size:long.MaxValue).Take(count).ToList();
     public static string Summary(DownloadChoice c)=>string.Join(" · ",new[]{Quality(c.Resolution),c.Languages=="Unknown"?"Audio unconfirmed":c.Languages,c.Picture,c.Codec,
-        c.SizeKind+": "+DownloadNaming.Size(c.Size),c.CacheStatus=="Ready"?"Ready on TorBox":c.CacheStatus=="Not cached"?"Needs fetching":"Availability unknown"}.Where(s=>s.Length>0));
+        c.SizeKind+": "+DownloadNaming.Size(c.Size),c.CacheStatus=="Ready"?"Ready to download":c.CacheStatus=="Not cached"?"Needs fetching":c.CacheStatus=="On your server"?"On your server":"Availability unknown"}.Where(s=>s.Length>0));
 }

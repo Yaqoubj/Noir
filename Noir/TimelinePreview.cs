@@ -69,6 +69,11 @@ public sealed class PreviewFrames : IAsyncDisposable
         }
         finally {gate.Release();}
     }
+    public async Task<string?> GetPath(VideoItem item,string fingerprint,double seconds,CancellationToken token)
+    {
+        if(await Get(item,fingerprint,seconds,token)==null) return null;
+        var path=CachePath(item,fingerprint,seconds);return File.Exists(path)?path:null;
+    }
     public async ValueTask DisposeAsync(){disposed=true;await gate.WaitAsync();try{if(previewEngine is {} engine)await Task.Run(engine.Dispose);previewEngine=null;}finally{gate.Release();}}
 }
 public partial class MainWindow
@@ -88,7 +93,7 @@ public partial class MainWindow
             var content=new StackPanel();previewImage=new Image{Width=240,Height=135,Stretch=Stretch.Uniform};previewTime=Text("",12);previewTime.TextAlignment=TextAlignment.Center;previewTime.Margin=new(8);content.Children.Add(previewImage);content.Children.Add(previewTime);
             previewPanel=new Border{Width=242,Background=Brush("#ED171719"),CornerRadius=new(8),BorderThickness=new(1),BorderBrush=Brush("#45413B"),Child=content,HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Bottom,IsHitTestVisible=false};PlayerOverlay.Children.Add(previewPanel);
         }
-        previewTime!.Text=LibraryStore.Time(seconds);var point=SeekBar.TranslatePoint(new Point(x,0),PlayerOverlay);
+        var chapter=ChapterAt(seconds);previewTime!.Text=LibraryStore.Time(seconds)+(chapter.Length>0?" · "+chapter:"");var point=SeekBar.TranslatePoint(new Point(x,0),PlayerOverlay);
         previewPanel.Margin=new(Math.Clamp(point.X-121,12,Math.Max(12,PlayerOverlay.ActualWidth-254)),0,0,PlayerFooter.ActualHeight+12);previewPanel.Visibility=Visibility.Visible;
         var slot=PreviewFrames.Slot(seconds);if(slot==previewSlot) return;previewSlot=slot;previewImage!.Source=null;previewImage.Visibility=Visibility.Collapsed;
         previewCancellation?.Cancel();var request=previewCancellation=new CancellationTokenSource();var item=current;var thisSerial=serial;
@@ -105,6 +110,12 @@ public partial class MainWindow
         catch(OperationCanceledException){}
         catch(Exception error){store.Log(error);}
         finally{if(ReferenceEquals(previewCancellation,request))previewCancellation=null;request.Dispose();}
+    }
+    // Runs on the sync server's threads; PreviewFrames is thread-safe behind its own gate.
+    async Task<string?> PhonePreviewFrame(VideoItem item,double seconds,CancellationToken token)
+    {
+        var fingerprint=store.State.Catalog.GetValueOrDefault(item.Id)?.Fingerprint;if(fingerprint==null) return null;
+        var frames=previews??=new PreviewFrames(store.DataDirectory);return await frames.GetPath(item,fingerprint,seconds,token);
     }
     void HidePreview() {previewCancellation?.Cancel();previewSlot=-1;if(previewPanel!=null) previewPanel.Visibility=Visibility.Collapsed;}
     void Seek_Leave(object sender,MouseEventArgs e)=>HidePreview();

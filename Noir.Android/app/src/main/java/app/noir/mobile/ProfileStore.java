@@ -1,0 +1,46 @@
+package app.noir.mobile;
+import android.content.*;
+import android.util.AtomicFile;
+import org.json.*;
+import java.io.*;
+import java.nio.charset.StandardCharsets;
+import java.security.*;
+import java.util.*;
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.PBEKeySpec;
+
+public final class ProfileStore {
+    public static final String DEFAULT="00000000-0000-0000-0000-000000000000";
+    static final Object GATE=new Object();
+    static {String[][] words={{"This phone profile belongs to another PC. Create a new phone profile to pair.","يتبع ملف الهاتف هذا كمبيوتر آخر. أنشئ ملف هاتف جديدًا للاقتران."},{"Link this phone profile to a PC profile first.","اربط ملف الهاتف بملف على الكمبيوتر أولاً."},{"Choose the PC profile that holds this phone's history.","اختر ملف الكمبيوتر الذي يحتوي على سجل هذا الهاتف."},{"Couldn't read existing phone history","تعذّرت قراءة سجل الهاتف الحالي"},{"Couldn't read phone profiles","تعذّرت قراءة ملفات الهاتف"},{"Couldn't save phone profiles","تعذّر حفظ ملفات الهاتف"},{"Unknown profile","ملف غير معروف"},{"Choose a name and color","اختر اسمًا ولونًا"},{"That PIN isn't right.","الرمز غير صحيح."},{"Switch to another profile before deleting this one.","انتقل إلى ملف آخر قبل حذف هذا الملف."},{"Couldn't read phone history","تعذّرت قراءة سجل الهاتف"},{"Couldn't finish saving phone history","تعذّر إكمال حفظ سجل الهاتف"},{"Couldn't save phone history","تعذّر حفظ سجل الهاتف"},{"The PC profile changed. Your offline history is kept.","تغيّر ملف الكمبيوتر. سجلّك محفوظ على الهاتف."},{"Choose a collection name","اختر اسم مجموعة"},{"Too many PIN attempts. Try again in five minutes.","محاولات رمز كثيرة. حاول بعد خمس دقائق."}};for(String[] pair:words)Loc.AR.put(pair[0],pair[1]);}
+    final Context base;
+    public ProfileStore(Context c){base=base(c);synchronized(GATE){if(!file().getBaseFile().exists()&&!new File(file().getBaseFile()+".bak").exists()){JSONObject root=new JSONObject(),p=profile(DEFAULT,"Default","#E4C084");DataStore.put(p,"legacy",true);try{JSONObject old=new JSONObject(new String(new AtomicFile(new File(base.getFilesDir(),"library.json")).readFully(),StandardCharsets.UTF_8));JSONObject l=old.optJSONObject("library");if(l!=null){if(!l.optString("profileName").isEmpty())DataStore.put(p,"name",l.optString("profileName"));DataStore.put(p,"pcProfileId",l.optString("profileId","").isEmpty()?JSONObject.NULL:l.optString("profileId"));DataStore.put(p,"pcProfileName",l.optString("profileName"));DataStore.put(p,"legacyInstance",l.optString("instance"));}}catch(FileNotFoundException ignored){}catch(Exception e){throw new IllegalStateException("Couldn't read existing phone history",e);}DataStore.put(root,"profiles",new JSONArray().put(p));DataStore.put(root,"current",DEFAULT);write(root);}}}
+    static Context base(Context c){while(c instanceof Namespace)c=((Namespace)c).base;Context app=c.getApplicationContext();return app instanceof NoirApp?((NoirApp)app).rootContext:app;}
+    AtomicFile file(){return new AtomicFile(new File(base.getFilesDir(),"phone-profiles.json"));}
+    JSONObject read(){try{JSONObject root=new JSONObject(new String(file().readFully(),StandardCharsets.UTF_8));for(JSONObject p:DataStore.objects(root.optJSONArray("profiles")))if(p.isNull("pcProfileId"))DataStore.put(p,"pcProfileId","");return root;}catch(Exception e){throw new IllegalStateException("Couldn't read phone profiles",e);}}
+    void write(JSONObject root){AtomicFile f=file();FileOutputStream out=null;try{out=f.startWrite();out.write(root.toString().getBytes(StandardCharsets.UTF_8));f.finishWrite(out);}catch(Exception e){if(out!=null)f.failWrite(out);throw new IllegalStateException("Couldn't save phone profiles",e);}}
+    static JSONObject profile(String id,String name,String color){JSONObject p=new JSONObject();DataStore.put(p,"id",id);DataStore.put(p,"name",name);DataStore.put(p,"color",color);DataStore.put(p,"pinHash","");DataStore.put(p,"pcProfileId","");DataStore.put(p,"createdAt",System.currentTimeMillis());return p;}
+    public String current(){synchronized(GATE){return read().optString("current",DEFAULT);}}
+    public JSONArray list(){synchronized(GATE){return DataStore.copyArray(read().optJSONArray("profiles"));}}
+    public JSONObject get(String id){for(JSONObject p:DataStore.objects(list()))if(p.optString("id").equals(id))return p;throw new IllegalArgumentException("Unknown profile");}
+    public JSONObject create(String name,String color){validate(name,color);synchronized(GATE){JSONObject root=read(),p=profile(UUID.randomUUID().toString(),name.trim(),color);root.optJSONArray("profiles").put(p);write(root);return DataStore.copy(p);}}
+    static void validate(String name,String color){if(name.trim().isEmpty()||name.trim().length()>80||!color.matches("#[A-Fa-f0-9]{6}"))throw new IllegalArgumentException("Choose a name and color");}
+    void update(String id,java.util.function.Consumer<JSONObject> edit){synchronized(GATE){JSONObject root=read();for(JSONObject p:DataStore.objects(root.optJSONArray("profiles")))if(p.optString("id").equals(id)){edit.accept(p);write(root);return;}throw new IllegalArgumentException("Unknown profile");}}
+    public void rename(String id,String name,String color){validate(name,color);update(id,p->{DataStore.put(p,"name",name.trim());DataStore.put(p,"color",color);});}
+    public void link(String id,String pcId,String name,String color,String host){update(id,p->{DataStore.put(p,"pcProfileId",pcId);DataStore.put(p,"pcProfileName",name);DataStore.put(p,"hostId",host);DataStore.put(p,"legacy",false);if(!color.isEmpty())DataStore.put(p,"color",color);});}
+    public boolean checkPin(String id,String pin){String stored=get(id).optString("pinHash");return stored.isEmpty()||MessageDigest.isEqual(stored.getBytes(StandardCharsets.UTF_8),hash(id,pin).getBytes(StandardCharsets.UTF_8));}
+    static String hash(String id,String pin){PBEKeySpec spec=new PBEKeySpec(pin.toCharArray(),("noir-phone-profile:"+id).getBytes(StandardCharsets.UTF_8),200000,256);try{return "pbkdf2:"+DataStore.hex(SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).getEncoded());}catch(GeneralSecurityException e){throw new IllegalStateException(e);}finally{spec.clearPassword();}}
+    public void pin(String id,String pin){String hashed=pin.isEmpty()?"":hash(id,pin);update(id,p->DataStore.put(p,"pinHash",hashed));}
+    public void select(String id,String pin){if(!checkPin(id,pin))throw new IllegalArgumentException("That PIN isn't right.");DataStore.flushWrites();synchronized(GATE){JSONObject root=read();get(id);DataStore.put(root,"current",id);write(root);}}
+    public void delete(String id){synchronized(GATE){JSONObject root=read();JSONArray old=root.optJSONArray("profiles");if(id.equals(root.optString("current"))||old.length()<=1)throw new IllegalArgumentException("Switch to another profile before deleting this one.");JSONArray keep=new JSONArray();for(JSONObject p:DataStore.objects(old))if(!id.equals(p.optString("id")))keep.put(p);DataStore.put(root,"profiles",keep);write(root);}}
+    static Context context(Context c,String id){return new Namespace(base(c),id);}
+    static final class Namespace extends ContextWrapper {
+        final Context base;final String id;
+        Namespace(Context c,String profile){super(c);base=c;id=profile;if(!DEFAULT.equals(id))UUID.fromString(id);}
+        @Override public Context getApplicationContext(){return this;}
+        @Override public File getFilesDir(){File dir=DEFAULT.equals(id)?base.getFilesDir():new File(base.getFilesDir(),"profiles/"+id);dir.mkdirs();return dir;}
+        @Override public File getCacheDir(){File dir=DEFAULT.equals(id)?base.getCacheDir():new File(base.getCacheDir(),"profiles/"+id);dir.mkdirs();return dir;}
+        @Override public File getExternalFilesDir(String type){File dir=base.getExternalFilesDir(type);if(dir==null)return null;if(!DEFAULT.equals(id))dir=new File(dir,"profiles/"+id);dir.mkdirs();return dir;}
+        @Override public android.content.SharedPreferences getSharedPreferences(String name,int mode){return base.getSharedPreferences(DEFAULT.equals(id)?name:"profile-"+id+"-"+name,mode);}
+    }
+}

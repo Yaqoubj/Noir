@@ -69,6 +69,7 @@ static class DownloadChecks
         for(int n=0;n<200&&worker.Jobs().Any(j=>j.Status!="Completed"&&j.Status!="Failed");n++)await Task.Delay(50);
         check(worker.Jobs().All(j=>j.Status=="Completed")&&workerProvider.LinkedIds.SequenceEqual(new long[]{101,102})&&workerStore.Archive.Count(i=>i.Available)==2,"Queue worker rematches owned TorBox file IDs and completes a season into the library");
         await SmartDownloadChecks.Run(dir,check);
+        await SourceDownloadChecks.Run(dir,check);
         var savedJobs=worker.Jobs();var interrupted=savedJobs[0];interrupted.Status="Paused";interrupted.SubtitleLanguages=[];
         var recoveryDir=Path.Combine(dir,"subtitle-stage-recovery");Directory.CreateDirectory(recoveryDir);File.Copy(Path.Combine(workerStore.DataDirectory,"downloads-settings.dpapi"),Path.Combine(recoveryDir,"downloads-settings.dpapi"),true);
         File.WriteAllText(Path.Combine(recoveryDir,"pc-downloads.json"),JsonSerializer.Serialize(savedJobs));

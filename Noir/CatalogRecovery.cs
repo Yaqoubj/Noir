@@ -20,7 +20,7 @@ public sealed partial class LibraryStore
                 if(State.PlaybackPreferences.TryGetValue(old,out var preference)) State.PlaybackPreferences.TryAdd(key,preference);
                 foreach(var pair in State.Intros.Where(p=>p.Key.StartsWith(old+":season:")).ToList()) State.Intros.TryAdd(key+pair.Key[old.Length..],pair.Value);
                 foreach(var pair in State.Outros.Where(p=>p.Key.StartsWith(old+":season:")).ToList()) State.Outros.TryAdd(key+pair.Key[old.Length..],pair.Value);
-                entry.Item.CollectionKey=key;
+                entry.Item.CollectionKey=key;CatalogChanged();
             }
         }
         foreach(var duplicate in State.Catalog.Values.GroupBy(e=>(e.Item.GroupKey,e.Item.Season,e.Item.Episode)).Where(g=>g.Count()>1).ToList())

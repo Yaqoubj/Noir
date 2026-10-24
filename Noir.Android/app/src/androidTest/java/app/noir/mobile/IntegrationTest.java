@@ -42,6 +42,8 @@ public final class IntegrationTest {
         JSONObject item=DataStore.objects(data.items()).stream().filter(i->i.optBoolean("available")).findFirst().get();String id=item.optString("id");
         getInstrumentation().runOnMainSync(()->{home.page="Library";home.detail=item.optString("group");home.render();});getInstrumentation().waitForIdleSync();Thread.sleep(500);screenshot("show.png");
         PlayerActivity p=(PlayerActivity)getInstrumentation().startActivitySync(new Intent(getInstrumentation().getTargetContext(),PlayerActivity.class).putExtra("id",id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        // A failed check must not leave video playing: it repaints forever and every later activity launch times out.
+        try{
         for(int n=0;n<360&&(p.player==null||!p.player.isPlaying()||!p.player.isSeekable());n++)Thread.sleep(250);
         assertTrue("Visible player is playing",p.player!=null&&p.player.isPlaying());getInstrumentation().runOnMainSync(()->p.seek(360.125));Thread.sleep(3000);getInstrumentation().runOnMainSync(()->p.show());screenshot("player-controls.png");
         android.graphics.Bitmap[] frame=new android.graphics.Bitmap[1];getInstrumentation().runOnMainSync(()->{android.view.TextureView texture=p.video.findViewById(org.videolan.R.id.texture_video);if(texture!=null)frame[0]=texture.getBitmap(320,180);});
@@ -49,6 +51,7 @@ public final class IntegrationTest {
         getInstrumentation().runOnMainSync(()->{p.manualHidden=false;p.show();p.root.getChildAt(1).performClick();});getInstrumentation().waitForIdleSync();assertEquals(android.view.View.GONE,p.controls.getVisibility());screenshot("player-hidden.png");
         getInstrumentation().runOnMainSync(()->{p.root.getChildAt(1).performClick();p.pause.performClick();});for(int n=0;n<20&&p.player.isPlaying();n++)Thread.sleep(100);assertFalse("Pause works",p.player.isPlaying());assertTrue("Pause saves actual timestamp",data.item(id).getJSONObject("progress").getDouble("position")>=359);
         getInstrumentation().runOnMainSync(p::finish);for(int n=0;n<50&&!p.destroyed;n++)Thread.sleep(100);getInstrumentation().waitForIdleSync();assertTrue("Player released when returning to library",p.destroyed);screenshot("returned-library.png");
+        }finally{getInstrumentation().runOnMainSync(()->{if(!p.isFinishing())p.finish();home.finish();});}
     }
     void screenshot(String name)throws Exception {Thread.sleep(350);android.graphics.Bitmap b=getInstrumentation().getUiAutomation().takeScreenshot();try(FileOutputStream out=new FileOutputStream(new File(getInstrumentation().getTargetContext().getFilesDir(),name))){b.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out);}b.recycle();}
 }

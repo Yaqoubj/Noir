@@ -14,7 +14,7 @@ public partial class MainWindow
         }
         var quality=Select(new[]{"All"}.Concat(choices.Select(c=>c.Resolution).Where(q=>q.Length>0).Distinct()),config.BrowseQuality,"Quality");
         var language=Select(new[]{"All"}.Concat(choices.SelectMany(c=>c.Languages.Split(new[]{" / "," + ",", "},StringSplitOptions.RemoveEmptyEntries)).Distinct()),config.BrowseLanguage,"Audio language");
-        var ready=new CheckBox{Content="Ready on TorBox",IsChecked=config.BrowseReadyOnly,Margin=new(0,8,14,8)};filters.Children.Add(ready);
+        var ready=new CheckBox{Content="Ready to download",IsChecked=config.BrowseReadyOnly,Margin=new(0,8,14,8)};filters.Children.Add(ready);
         var size=new CheckBox{Content="Within size preference",IsChecked=config.BrowseSizeLimit,IsEnabled=config.MaxEpisodeBytes>0,Margin=new(0,8,0,8)};filters.Children.Add(size);
         var reset=ActionButton("Reset filters",()=>{quality.SelectedItem="All";language.SelectedItem="All";ready.IsChecked=false;size.IsChecked=false;});reset.Margin=new(12,0,0,8);filters.Children.Add(reset);
         root.Children.Add(new Expander{Header="Filter releases",Content=filters,Margin=new(0,8,0,8)});

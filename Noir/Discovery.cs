@@ -61,6 +61,25 @@ public sealed class DiscoveryClient : IDisposable
         var all=new List<DiscoverTitle>();for(int i=0;i<outcomes.Max(o=>o.Titles.Count);i++)foreach(var o in outcomes)if(i<o.Titles.Count)all.Add(o.Titles[i]);
         return new(all.DistinctBy(t=>(t.Id,t.Type)).ToList(),outcomes.Any(o=>o.Cached),string.Join(" · ",outcomes.Select(o=>o.Message).Where(s=>s.Length>0)));
     }
+    // One page of Cinemeta's most popular titles, for picking history quickly.
+    public async Task<List<DiscoverTitle>> Top(string type,int skip,CancellationToken token)
+    {
+        var response=await Read($"catalog/{type}/top/skip={Math.Max(0,skip)}.json",TimeSpan.FromHours(12),token);using var doc=JsonDocument.Parse(response.Json);
+        return doc.RootElement.TryGetProperty("metas",out var metas)&&metas.ValueKind==JsonValueKind.Array?metas.EnumerateArray().Select(m=>Parse(m,type)).Where(t=>Regex.IsMatch(t.Id,@"^tt\d+$")).ToList():[];
+    }
+    public async Task<List<string>> VideoIds(string imdbId,CancellationToken token)
+    {
+        if(!Regex.IsMatch(imdbId,@"^tt\d+$"))throw new IOException("This title has no IMDb identity.");
+        var response=await Read($"meta/series/{imdbId}.json",TimeSpan.FromHours(12),token);using var doc=JsonDocument.Parse(response.Json);
+        if(!doc.RootElement.TryGetProperty("meta",out var meta)||!meta.TryGetProperty("videos",out var videos)||videos.ValueKind!=JsonValueKind.Array)return [];
+        return videos.EnumerateArray().Select(v=>S(v,"id")).Where(id=>id.Length>0).ToList();
+    }
+    // Cinemeta's top titles in one genre, used for genre-based recommendations without any API key.
+    public async Task<List<DiscoverTitle>> Genre(string type,string genre,CancellationToken token)
+    {
+        var response=await Read($"catalog/{type}/top/genre={Uri.EscapeDataString(genre)}.json",TimeSpan.FromHours(12),token);using var doc=JsonDocument.Parse(response.Json);
+        return doc.RootElement.TryGetProperty("metas",out var metas)&&metas.ValueKind==JsonValueKind.Array?metas.EnumerateArray().Select(m=>Parse(m,type)).Where(t=>Regex.IsMatch(t.Id,@"^tt\d+$")).ToList():[];
+    }
     public async Task<DiscoverTitle> Details(DiscoverTitle title,CancellationToken token)
     {
         if(!Regex.IsMatch(title.Id,@"^tt\d+$")||title.Type is not ("movie" or "series"))throw new IOException("Choose a title from search.");
@@ -88,7 +107,7 @@ public sealed partial class LibraryStore
             var group=representative.GroupKey;
             if(title.Episodes.Count>0){var known=State.EpisodeSchedules.GetValueOrDefault(group)??[];State.EpisodeSchedules[group]=title.Episodes.Concat(known).DistinctBy(e=>(e.Season,e.Episode)).ToList();}
             foreach(var entry in State.Catalog.Values.Where(e=>e.Item.GroupKey==group)){var item=entry.Item;if(item.ImdbId.Length==0)item.ImdbId=title.Id;if(title.Poster.Length>0)item.Poster=title.Poster;if(title.Background.Length>0)item.Backdrop=title.Background;if(title.Summary.Length>0)item.Summary=title.Summary;if(title.Genres.Count>0)item.Genres=string.Join(" · ",title.Genres);item.ReviewTitle=title.Name;item.SourceName="Cinemeta";item.SourceUrl="https://www.imdb.com/title/"+title.Id+"/";entry.MetadataCheckedAt=DateTimeOffset.UtcNow;}
-            if(watchlist)State.Watchlist.Add(group);Save();return EpisodesFor(group);
+            if(watchlist){State.Watchlist.Add(group);State.HiddenTitles.Remove(group);}Save();return EpisodesFor(group);
         }
     }
 }

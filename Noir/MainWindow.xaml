@@ -2,51 +2,66 @@
  Title="Noir" Width="1320" Height="900" MinWidth="780" MinHeight="520" SizeChanged="Library_SizeChanged" UseLayoutRounding="True" TextOptions.TextFormattingMode="Ideal" FontFamily="Segoe UI Variable Text, Segoe UI" Background="{StaticResource Ink}" WindowStartupLocation="Manual" PreviewKeyDown="Window_KeyDown" Closing="Window_Closing">
  <Grid>
   <Grid x:Name="LibraryRoot" Background="{StaticResource Ink}">
-   <!-- Full-width content. Cinematic pages put their hero under the floating top bar. -->
-   <ScrollViewer x:Name="ContentScroll" ScrollChanged="Content_ScrollChanged">
-    <StackPanel x:Name="PageBody">
-     <StackPanel x:Name="LibraryHeader" Margin="56,108,56,10">
-      <TextBlock x:Name="PageEyebrow" Text="LOCAL LIBRARY" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Accent}"/>
-      <TextBlock x:Name="PageTitle" Foreground="{StaticResource Text}" Text="Your evening, queued." FontSize="40" FontWeight="Bold" FontFamily="Segoe UI Variable Display, Segoe UI" Margin="0,6,0,0" TextTrimming="CharacterEllipsis"/>
-     </StackPanel>
-     <StackPanel x:Name="ContentPanel" Margin="56,0,56,56"/>
-    </StackPanel>
-   </ScrollViewer>
-   <!-- Floating top bar: transparent over artwork, solid once the page scrolls. -->
-   <Grid x:Name="TopBar" VerticalAlignment="Top" Height="78">
-    <Grid.RowDefinitions><RowDefinition Height="78"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-    <Border Grid.RowSpan="2" IsHitTestVisible="False"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#D90B0B0D" Offset="0"/><GradientStop Color="#000B0B0D" Offset="1"/></LinearGradientBrush></Border.Background></Border>
-    <Border Grid.RowSpan="2" x:Name="TopBarFill" Background="#F20D0D0F" Opacity="0" IsHitTestVisible="False" BorderBrush="#1FFFFFFF" BorderThickness="0,0,0,1"/>
-    <DockPanel x:Name="TopBarContent" Margin="44,0,36,0">
-     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-      <Grid x:Name="SearchHost" Width="270" Height="42" Margin="0,0,10,0">
-       <TextBox x:Name="SearchBox" Style="{StaticResource SearchPill}" ToolTip="Search your library" TextChanged="Search_Changed" AutomationProperties.Name="Search library"/>
-       <Path Data="M10,1 A9,9 0 1 1 9.99,1 M16.5,16.5 L23,23" Stroke="#B8B2AA" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Width="16" Height="16" Stretch="Uniform" HorizontalAlignment="Left" Margin="16,0,0,0" IsHitTestVisible="False"/>
-       <TextBlock x:Name="SearchPlaceholder" Text="Search movies &amp; shows" Foreground="#8F8A83" FontSize="13.5" Margin="44,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Text,ElementName=SearchBox}" Value=""><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
-      </Grid>
-      <Button x:Name="DownloadsNav" Style="{StaticResource TopIcon}" Click="Downloads_Click" ToolTip="Downloads" AutomationProperties.Name="Downloads"/>
-      <Button x:Name="ScanNav" Style="{StaticResource TopIcon}" Click="Scan_Click" ToolTip="Scan library for new files" AutomationProperties.Name="Scan library"/>
-      <Button x:Name="SettingsNav" Style="{StaticResource TopIcon}" Click="Settings_Click" ToolTip="Settings" AutomationProperties.Name="Settings"/>
-     </StackPanel>
-     <TextBlock Text="N O I R" Foreground="{StaticResource Accent}" FontSize="21" FontWeight="Bold" FontFamily="Segoe UI Variable Display, Segoe UI" VerticalAlignment="Center" Cursor="Hand" MouseLeftButtonDown="Logo_Click" ToolTip="Home"/>
-     <ScrollViewer x:Name="NavScroll" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled" Margin="34,0,16,0" VerticalAlignment="Center">
-      <StackPanel x:Name="NavLinks" Orientation="Horizontal">
-       <Button x:Name="HomeNav" Content="Home" Style="{StaticResource TopNav}" Click="Home_Click"/>
-       <Button x:Name="ShowNav" Content="Shows" Style="{StaticResource TopNav}" Click="Shows_Click"/>
-       <Button x:Name="MovieNav" Content="Movies" Style="{StaticResource TopNav}" Click="Movies_Click"/>
-       <Button x:Name="WatchlistNav" Content="My List" Style="{StaticResource TopNav}" Click="Watchlist_Click"/>
-       <Button x:Name="HistoryNav" Content="History" Style="{StaticResource TopNav}" Click="History_Click"/>
-       <Button x:Name="DiscoverNav" Content="Discover" Style="{StaticResource TopNav}" Click="Discover_Click"/>
+   <Grid.ColumnDefinitions><ColumnDefinition x:Name="RailColumn" Width="236"/><ColumnDefinition/></Grid.ColumnDefinitions>
+   <!-- Side rail: the page list with icons, the profile card and the language switch. Arabic mirrors it to the right. -->
+   <Border x:Name="SideRail" Background="#0E0E10" BorderBrush="#14FFFFFF" BorderThickness="0,0,1,0">
+    <DockPanel>
+     <Grid DockPanel.Dock="Top" Height="78" Margin="22,0,14,0">
+      <TextBlock x:Name="RailLogo" Text="N O I R" Foreground="{StaticResource Accent}" FontSize="21" FontWeight="Bold" FontFamily="Segoe UI Variable Display, Segoe UI" VerticalAlignment="Center" Cursor="Hand" MouseLeftButtonDown="Logo_Click" ToolTip="Home"/>
+     </Grid>
+     <StackPanel x:Name="RailFooter" DockPanel.Dock="Bottom" Margin="12,8,12,16"/>
+     <ScrollViewer x:Name="NavScroll" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Hidden">
+      <Grid x:Name="NavSurface">
+      <StackPanel x:Name="NavLinks" Margin="12,4,12,8">
+       <Button x:Name="HomeNav" Style="{StaticResource SideNav}" Click="Home_Click" AutomationProperties.Name="Home"/>
+       <Button x:Name="DiscoverNav" Style="{StaticResource SideNav}" Click="Discover_Click" AutomationProperties.Name="Discover"/>
+       <Button x:Name="ShowNav" Style="{StaticResource SideNav}" Click="Shows_Click" AutomationProperties.Name="Shows"/>
+       <Button x:Name="MovieNav" Style="{StaticResource SideNav}" Click="Movies_Click" AutomationProperties.Name="Movies"/>
+       <Button x:Name="WatchlistNav" Style="{StaticResource SideNav}" Click="Watchlist_Click" AutomationProperties.Name="My List"/>
+       <Border x:Name="NavDivider" Height="1" Background="#14FFFFFF" Margin="12,12,12,12"/>
+       <Button x:Name="HistoryNav" Style="{StaticResource SideNav}" Click="History_Click" AutomationProperties.Name="History"/>
+       <Button x:Name="UpcomingNav" Style="{StaticResource SideNav}" Click="Upcoming_Click" AutomationProperties.Name="Upcoming"/>
+       <Button x:Name="DownloadsNav" Style="{StaticResource SideNav}" Click="Downloads_Click" AutomationProperties.Name="Downloads"/>
+       <Button x:Name="SettingsNav" Style="{StaticResource SideNav}" Click="Settings_Click" AutomationProperties.Name="Settings"/>
       </StackPanel>
+      <Border x:Name="NavIndicator" Width="3" Height="24" CornerRadius="1.5" Background="{StaticResource Accent}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="12,0,0,0" IsHitTestVisible="False" Opacity="0"><Border.RenderTransform><TranslateTransform/></Border.RenderTransform></Border>
+      </Grid>
      </ScrollViewer>
     </DockPanel>
-    <Border x:Name="CompactNavHost" Grid.Row="1" Visibility="Collapsed"/>
-   </Grid>
-   <!-- Status messages float briefly at the bottom instead of occupying a line. -->
-   <Border x:Name="StatusToast" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="24,0,24,26" Padding="18,10" CornerRadius="20" Background="#F21C1C1F" BorderBrush="#33E4C084" BorderThickness="1" Opacity="0" IsHitTestVisible="False" MaxWidth="720">
-    <TextBlock x:Name="Status" Foreground="#E9E4DC" FontSize="13" TextWrapping="Wrap" TextAlignment="Center"/>
    </Border>
-   <TextBlock x:Name="LibraryCount" Visibility="Collapsed"/>
+   <Grid Grid.Column="1">
+    <Border x:Name="PageAmbient" IsHitTestVisible="False"/>
+    <!-- Full-width content. Cinematic pages put their hero under the floating top bar. -->
+    <ScrollViewer x:Name="ContentScroll" ScrollChanged="Content_ScrollChanged">
+     <StackPanel x:Name="PageBody">
+      <StackPanel x:Name="LibraryHeader" Margin="56,108,56,10">
+       <TextBlock x:Name="PageEyebrow" Text="LOCAL LIBRARY" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Accent}"/>
+       <TextBlock x:Name="PageTitle" Foreground="{StaticResource Text}" Text="Your evening, queued." FontSize="40" FontWeight="Bold" FontFamily="Segoe UI Variable Display, Segoe UI" Margin="0,6,0,0" TextTrimming="CharacterEllipsis"/>
+      </StackPanel>
+      <StackPanel x:Name="ContentPanel" Margin="56,0,56,56"/>
+     </StackPanel>
+    </ScrollViewer>
+    <!-- Floating top bar: a centred search pill over the artwork, solid once the page scrolls. -->
+    <Grid x:Name="TopBar" VerticalAlignment="Top" Height="78">
+     <Border IsHitTestVisible="False"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#B30B0B0D" Offset="0"/><GradientStop Color="#000B0B0D" Offset="1"/></LinearGradientBrush></Border.Background></Border>
+     <Border x:Name="TopBarFill" Background="#F20D0D0F" Opacity="0" IsHitTestVisible="False" BorderBrush="#1FFFFFFF" BorderThickness="0,0,0,1"/>
+     <Grid x:Name="TopBarContent" Margin="36,0,28,0">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <Button x:Name="RailToggle" Style="{StaticResource TopIcon}" Click="RailToggle_Click" ToolTip="Show or hide labels" AutomationProperties.Name="Toggle side menu" Margin="0"/>
+      <Grid x:Name="SearchHost" Grid.Column="1" Width="420" Height="42" HorizontalAlignment="Center">
+       <TextBox x:Name="SearchBox" Style="{StaticResource SearchPill}" ToolTip="Search your library" TextChanged="Search_Changed" AutomationProperties.Name="Search library"/>
+       <Path x:Name="SearchGlyph" Data="M10,1 A9,9 0 1 1 9.99,1 M16.5,16.5 L23,23" Stroke="#B8B2AA" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Width="16" Height="16" Stretch="Uniform" HorizontalAlignment="Left" Margin="16,0,0,0" IsHitTestVisible="False"/>
+       <TextBlock x:Name="SearchPlaceholder" Text="Search movies &amp; shows" Foreground="#8F8A83" FontSize="13.5" Margin="44,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Text,ElementName=SearchBox}" Value=""><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+      </Grid>
+      <Button x:Name="ScanNav" Grid.Column="2" Style="{StaticResource TopIcon}" Click="Scan_Click" ToolTip="Scan library for new files" AutomationProperties.Name="Scan library"/>
+     </Grid>
+    </Grid>
+    <!-- Status messages float briefly at the bottom instead of occupying a line. -->
+    <Border x:Name="StatusToast" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="24,0,24,26" Padding="18,10" CornerRadius="20" Background="#F21C1C1F" BorderBrush="#33E4C084" BorderThickness="1" Opacity="0" IsHitTestVisible="False" MaxWidth="720">
+     <TextBlock x:Name="Status" Foreground="#E9E4DC" FontSize="13" TextWrapping="Wrap" TextAlignment="Center"/>
+    </Border>
+    <TextBlock x:Name="LibraryCount" Visibility="Collapsed"/>
+   </Grid>
   </Grid>
   <Grid x:Name="PlayerRoot" Background="Black" Visibility="Collapsed">
    <vlc:VideoView x:Name="Video" Background="Black" SizeChanged="Video_SizeChanged">
@@ -62,15 +77,31 @@
      <TextBlock x:Name="PlayerHint" Visibility="Collapsed" IsHitTestVisible="False" Foreground="{StaticResource Text}" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,130" FontSize="15" Background="#BB101012" Padding="16,8"/>
      <Button x:Name="SkipIntro" Content="Skip intro  →" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,32,140" Visibility="Collapsed" Click="SkipIntro_Click" Style="{StaticResource Primary}"/>
      <Button x:Name="CreditsChip" Visibility="Collapsed" Content="Next episode ›" Click="CreditsChip_Click" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="24,24,24,122" Background="#EE222224"/>
-     <Border x:Name="NextPanel" Visibility="Collapsed" Background="#EE171719" BorderBrush="#494139" BorderThickness="1" CornerRadius="10" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="24,24,24,122" Padding="16" Width="290">
-      <StackPanel><TextBlock x:Name="NextLabel" Text="UP NEXT" Foreground="{StaticResource Accent}" FontSize="11"/><TextBlock x:Name="NextTitle" Foreground="{StaticResource Text}" FontSize="18" TextWrapping="Wrap" Margin="0,8,0,7"/><TextBlock x:Name="NextCountdown" Foreground="{StaticResource Muted}" Margin="0,0,0,16"/><StackPanel Orientation="Horizontal"><Button x:Name="NextPlay" Content="Play now" Click="NextNow_Click" Style="{StaticResource Primary}" Margin="0,0,10,0"/><Button Content="Cancel" Click="CancelNext_Click"/></StackPanel></StackPanel>
+     <!-- Up Next card: episode still in a reserved 16:9 box, ring countdown around the play button. -->
+     <Border x:Name="NextPanel" Visibility="Collapsed" Background="#F2161618" BorderBrush="#4D453B" BorderThickness="1" CornerRadius="12" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="24,24,28,122" Width="352" Panel.ZIndex="12">
+      <StackPanel>
+       <Grid x:Name="NextMedia" Height="198">
+        <Border x:Name="NextStill" Background="#1E1E21" CornerRadius="11,11,0,0"/>
+        <Border CornerRadius="11,11,0,0" IsHitTestVisible="False"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#00161618" Offset="0.45"/><GradientStop Color="#F2161618" Offset="1"/></LinearGradientBrush></Border.Background></Border>
+        <Grid x:Name="NextRingHost" Width="68" Height="68" HorizontalAlignment="Center" VerticalAlignment="Center">
+         <Ellipse Stroke="#55FFFFFF" StrokeThickness="3" Fill="#99101012"/>
+         <Path x:Name="NextRing" Stroke="{StaticResource Accent}" StrokeThickness="3.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" IsHitTestVisible="False"/>
+         <Button x:Name="NextRingPlay" Click="NextNow_Click" Style="{StaticResource PlayerRound}" Width="50" Height="50" AutomationProperties.Name="Play next now"><Path Data="M5,2 L21,12 L5,22 Z" Fill="#16120C" Width="16" Height="16" Stretch="Uniform" Margin="3,0,0,0"/></Button>
+        </Grid>
+       </Grid>
+       <StackPanel Margin="18,12,18,16"><TextBlock x:Name="NextLabel" Text="UP NEXT" Foreground="{StaticResource Accent}" FontSize="11" FontWeight="SemiBold"/><TextBlock x:Name="NextTitle" Foreground="{StaticResource Text}" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,6,0,5"/><TextBlock x:Name="NextCountdown" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,14"/><StackPanel Orientation="Horizontal"><Button x:Name="NextPlay" Content="Play now" Click="NextNow_Click" Style="{StaticResource Primary}" Margin="0,0,10,0"/><Button x:Name="NextCancel" Content="Cancel" Click="CancelNext_Click"/></StackPanel></StackPanel>
+      </StackPanel>
+     </Border>
+     <Border x:Name="StillWatchingPanel" Visibility="Collapsed" Background="#F5141416" BorderBrush="#4D453B" BorderThickness="1" CornerRadius="14" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="32,28" MaxWidth="460" Panel.ZIndex="20">
+      <StackPanel><TextBlock x:Name="StillWatchingTitle" Foreground="{StaticResource Text}" FontSize="24" FontWeight="SemiBold" TextWrapping="Wrap" TextAlignment="Center" FontFamily="Segoe UI Variable Display, Segoe UI"/><TextBlock x:Name="StillWatchingBody" Foreground="{StaticResource Muted}" FontSize="13.5" TextWrapping="Wrap" TextAlignment="Center" Margin="0,8,0,22"/>
+       <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"><Button x:Name="StillWatchingContinue" Content="Continue watching" Click="StillWatchingContinue_Click" Style="{StaticResource Primary}" Margin="0,0,12,0"/><Button x:Name="StillWatchingBack" Content="Back to Noir" Click="Back_Click"/></StackPanel></StackPanel>
      </Border>
    <StackPanel x:Name="PlayerFooter" VerticalAlignment="Bottom" Panel.ZIndex="10">
     <StackPanel.Background><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#00101012" Offset="0"/><GradientStop Color="#D0101012" Offset="0.3"/><GradientStop Color="#F0101012" Offset="1"/></LinearGradientBrush></StackPanel.Background>
     <Grid Margin="24,15,24,8">
      <Grid.ColumnDefinitions><ColumnDefinition Width="70"/><ColumnDefinition/><ColumnDefinition Width="70"/></Grid.ColumnDefinitions>
      <TextBlock x:Name="Elapsed" Foreground="{StaticResource Text}" Text="0:00" VerticalAlignment="Center" FontSize="13"/>
-     <Slider x:Name="SeekBar" Style="{StaticResource SeekSlider}" Grid.Column="1" Minimum="0" Maximum="1" IsMoveToPointEnabled="True" PreviewMouseLeftButtonDown="Seek_Begin" PreviewMouseLeftButtonUp="Seek_End" Thumb.DragCompleted="Seek_DragCompleted" MouseMove="Seek_Preview" MouseLeave="Seek_Leave" VerticalAlignment="Center" AutomationProperties.Name="Playback position"/>
+     <Grid Grid.Column="1" VerticalAlignment="Center"><Slider x:Name="SeekBar" Style="{StaticResource SeekSlider}" Minimum="0" Maximum="1" IsMoveToPointEnabled="True" PreviewMouseLeftButtonDown="Seek_Begin" PreviewMouseLeftButtonUp="Seek_End" Thumb.DragCompleted="Seek_DragCompleted" MouseMove="Seek_Preview" MouseLeave="Seek_Leave" SizeChanged="SeekBar_SizeChanged" VerticalAlignment="Center" AutomationProperties.Name="Playback position"/><Canvas x:Name="ChapterTicks" IsHitTestVisible="False" VerticalAlignment="Center" Height="5"/></Grid>
      <TextBlock x:Name="Total" Foreground="{StaticResource Text}" Grid.Column="2" Text="0:00" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="13" Cursor="Hand" ToolTip="Switch between time left and length" MouseLeftButtonDown="Total_Click"/>
     </Grid>
     <Grid Margin="24,2,24,18">
@@ -83,6 +114,7 @@
      <Button Grid.Column="5" Click="Languages_Click" Style="{StaticResource PlayerIcon}" ToolTip="Audio &amp; subtitles" AutomationProperties.Name="Audio and subtitles"><Grid Width="30" Height="22"><Border BorderBrush="#F4F1EB" BorderThickness="1.6" CornerRadius="4"/><TextBlock Text="CC" FontSize="10.5" FontWeight="Bold" Foreground="#F4F1EB" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid></Button>
      <Button Grid.Column="6" Click="PlayerMore_Click" Style="{StaticResource PlayerIcon}" Margin="4,0,0,0" ToolTip="More: picture, sleep timer, intro times" AutomationProperties.Name="More"><Path Data="M1,5 L23,5 M1,12 L23,12 M1,19 L23,19 M7,2 L7,8 M17,9 L17,15 M10,16 L10,22" Stroke="#F4F1EB" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Width="22" Height="22" Stretch="Uniform"/></Button>
      <Button x:Name="PictureModeButton" Visibility="Collapsed" Grid.Column="7" Content="Fill" Click="PictureMode_Click"/>
+     <StackPanel Grid.Column="7" Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="BoostButton" Content="Boost" Click="Boost_Click" Background="Transparent" Padding="10,6" Margin="4,0,0,0" FontSize="12" ToolTip="Volume boost: up to 200% for quiet videos" AutomationProperties.Name="Volume boost"/><Button x:Name="SpeedButton" Content="1×" Click="Speed_Click" Background="Transparent" Padding="10,6" Margin="2,0,0,0" FontSize="13" FontWeight="SemiBold" ToolTip="Playback speed" AutomationProperties.Name="Playback speed"/></StackPanel>
      <Button Grid.Column="8" AutomationProperties.Name="Fullscreen" Click="Fullscreen_Click" ToolTip="Fullscreen (F)" Margin="4,0,0,0" Style="{StaticResource PlayerIcon}"><Viewbox Width="22" Height="22"><Path Stroke="#F4F1EB" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M1,8 L1,1 L8,1 M16,1 L23,1 L23,8 M23,16 L23,23 L16,23 M8,23 L1,23 L1,16"/></Viewbox></Button>
     </Grid>
    </StackPanel>

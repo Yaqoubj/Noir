@@ -8,29 +8,50 @@ var root=Path.Combine(Directory.GetCurrentDirectory(),"NoirValidation","android-
 var dir=Path.Combine(root,"fixture-"+DateTime.Now.ToString("yyyyMMdd-HHmmss"));Directory.CreateDirectory(dir);
 // Read-only copy of the personal catalog for realistic posters/video decoding. Never touch its store or accounts.
 var source=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),".noir");
-File.Copy(Path.Combine(source,"library.json"),Path.Combine(dir,"library.json"));
-Directory.CreateDirectory(Path.Combine(dir,"art"));foreach(var image in Directory.EnumerateFiles(Path.Combine(source,"art"))) File.Copy(image,Path.Combine(dir,"art",Path.GetFileName(image)));
+if(!args.Contains("--offline")&&File.Exists(Path.Combine(source,"library.json")))File.Copy(Path.Combine(source,"library.json"),Path.Combine(dir,"library.json"));
+Directory.CreateDirectory(Path.Combine(dir,"art"));foreach(var image in !args.Contains("--offline")&&Directory.Exists(Path.Combine(source,"art"))?Directory.EnumerateFiles(Path.Combine(source,"art")):[]) File.Copy(image,Path.Combine(dir,"art",Path.GetFileName(image)));
 var store=new LibraryStore(dir);store.State.SyncTrakt=false;store.State.SyncSerializd=false;store.State.WatchSync.Clear();store.Save();
 var smallRoot=Path.Combine(dir,"transfer-fixture");Directory.CreateDirectory(smallRoot);var smallFile=Path.Combine(smallRoot,"Download fixture (2026).mp4");File.WriteAllBytes(smallFile,Enumerable.Range(0,2*1024*1024).Select(n=>(byte)(n%251)).ToArray());store.State.Roots.Add(new(){Path=smallRoot,Movies=true});store.Scan(out _);
 File.WriteAllText(Path.ChangeExtension(smallFile,".en.srt"),"1\n00:00:01,000 --> 00:00:03,000\nNoir subtitle fixture\n");
-var commandItem=new VideoItem{Id="pc-download-fixture",CollectionKey="fixture-command",Title="PC command fixture",Season=1,Episode=1,ImdbId="tt123",Available=false};store.State.Catalog[commandItem.Id]=new(){Item=commandItem};store.Record(commandItem,421.625,1800);
+var commandItem=new VideoItem{Id="pc-download-fixture",CollectionKey="fixture-command",Title="PC command fixture",Season=1,Episode=1,ImdbId="tt123",Available=false};var fixturePoster=Path.Combine(dir,"art","fixture.png");File.WriteAllBytes(fixturePoster,Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN1kAAAAASUVORK5CYII="));commandItem.Poster=fixturePoster;store.State.Catalog[commandItem.Id]=new(){Item=commandItem};store.Record(commandItem,421.625,1800);
 var subtitleFixture=Path.Combine(root,"subtitle-fixture");
 if(Directory.Exists(subtitleFixture)){store.State.Roots.Add(new(){Path=subtitleFixture,Movies=true});store.Scan(out _);}
 store.State.Roots.Add(new(){Path=smallRoot,Movies=false});using var downloads=new PcDownloads(store,new CommandProvider(),start:false);downloads.Configure("https://example.invalid/fixture/manifest.json","fixture-key-not-real",smallRoot,smallRoot);
 var useDefaultPort=args.Contains("--default-port");
 var port=useDefaultPort?MobileSyncServer.Port:49272;
-await using var host=new MobileSyncServer(store,store.MobileSnapshot,store.MergeMobile,port,downloads);await host.SetEnabled(true);
+bool allowSettings=false;int confirmations=0;
+await using var host=new MobileSyncServer(store,store.MobileSnapshot,store.MergeMobile,port,downloads,(name,ct)=>{confirmations++;return Task.FromResult(allowSettings);},ephemeralCertificate:args.Contains("--policy-only"));
+if(args.Contains("--policy-only"))
+{
+    void Verify(bool ok,string message){if(!ok)throw new Exception(message);Console.WriteLine("PASS: "+message);}
+    var fakeToken=new string('A',64);var unknown=await host.ShareDownloadSettings(fakeToken);Verify(unknown.Status==401&&unknown.Settings==null&&confirmations==0,"Unpaired clients cannot obtain secrets or trigger a confirmation");
+    host.Config.Peers.Add(new(){Name="Fixture phone",Hash=Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(fakeToken)))});
+    var refused=await host.ShareDownloadSettings(fakeToken);Verify(refused.Status==403&&refused.Settings==null&&confirmations==1,"The endpoint policy refuses paired clients without explicit confirmation");
+    allowSettings=true;var permitted=await host.ShareDownloadSettings(fakeToken);Verify(permitted.Status==200&&permitted.Settings?.TorBoxKey=="fixture-key-not-real"&&confirmations==2,"Confirmed sharing returns the download settings once");
+    allowSettings=false;var again=await host.ShareDownloadSettings(fakeToken);Verify(again.Status==403&&again.Settings==null,"An earlier approval never grants a subsequent settings request");
+    host.Revoke();Verify((await host.ShareDownloadSettings(fakeToken)).Status==401,"Revoked phones cannot request settings");
+    await using var withoutCallback=new MobileSyncServer(store,store.MobileSnapshot,store.MergeMobile,port,downloads,ephemeralCertificate:true);withoutCallback.Config.Peers.Add(new(){Name="Fixture phone",Hash=Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(fakeToken)))});Verify((await withoutCallback.ShareDownloadSettings(fakeToken)).Status==403,"Missing UI confirmation callback fails closed");
+    Console.WriteLine("ALL SETTINGS POLICY CHECKS PASSED");return;
+}
+await host.SetEnabled(true);
 if(!host.Running) throw new Exception(host.Status);
 var checks=new List<string>();void Check(bool ok,string label){if(!ok)throw new Exception(label);checks.Add(label);Console.WriteLine("PASS: "+label);}
 using var handler=new HttpClientHandler {ServerCertificateCustomValidationCallback=(_,cert,_,_)=>cert!=null&&Convert.ToHexString(SHA256.HashData(cert.RawData))==host.Pin};
 using var client=new HttpClient(handler){BaseAddress=new($"https://127.0.0.1:{port}")};
 Check((await client.GetAsync("/v1/library")).StatusCode==HttpStatusCode.Unauthorized,"Unpaired clients cannot read library or videos");
 Check((await client.GetAsync("/v1/pc-downloads")).StatusCode==HttpStatusCode.Unauthorized&&(await client.GetAsync("/v1/subtitles/any/any")).StatusCode==HttpStatusCode.Unauthorized,"Download commands and subtitles require phone authentication");
+Check((await client.PostAsJsonAsync("/v1/phone-downloads/settings",new{})).StatusCode==HttpStatusCode.Unauthorized&&confirmations==0,"Unpaired clients cannot request secrets or trigger a PC confirmation");
+Check((await client.PostAsJsonAsync("/v1/phone-downloads/prepare",new{itemId="any"})).StatusCode==HttpStatusCode.Unauthorized,"Unpaired clients cannot prepare phone download descriptors");
 var link=host.BeginPairing("127.0.0.1");var query=System.Web.HttpUtility.ParseQueryString(new Uri(link).Query);
 Check(query["address"]==$"127.0.0.1:{port}","Pairing link advertises the listening port");
 Check((await client.PostAsJsonAsync("/v1/pair",new{code="00000000",name="test"})).StatusCode==HttpStatusCode.Unauthorized,"Wrong pairing codes are rejected");
 var paired=await client.PostAsJsonAsync("/v1/pair",new{code=query["code"],name="transport test"});Check(paired.IsSuccessStatusCode,"Valid one-time pairing succeeds over pinned HTTPS");
 var result=await paired.Content.ReadFromJsonAsync<JsonElement>();client.DefaultRequestHeaders.Authorization=new("Bearer",result.GetProperty("token").GetString());
+var denied=await client.PostAsJsonAsync("/v1/phone-downloads/settings",new{});var deniedText=await denied.Content.ReadAsStringAsync();
+Check(denied.StatusCode==HttpStatusCode.Forbidden&&confirmations==1&&!deniedText.Contains("fixture-key")&&!deniedText.Contains("manifest"),"Paired phone receives no settings without an explicit PC confirmation");
+allowSettings=true;var shared=await client.PostAsJsonAsync("/v1/phone-downloads/settings",new{});var sharedJson=await shared.Content.ReadFromJsonAsync<JsonElement>();
+Check(shared.IsSuccessStatusCode&&sharedJson.GetProperty("torBoxKey").GetString()=="fixture-key-not-real"&&!sharedJson.ToString().Contains(smallRoot),"Confirmed sharing sends only selected download settings once over authenticated TLS");allowSettings=false;
+Check((await client.PostAsJsonAsync("/v1/phone-downloads/settings",new{})).StatusCode==HttpStatusCode.Forbidden,"An earlier confirmation never authorizes the next settings request");
 if(useDefaultPort)
 {
     using var legacyHandler=new HttpClientHandler {ServerCertificateCustomValidationCallback=(_,cert,_,_)=>cert!=null&&Convert.ToHexString(SHA256.HashData(cert.RawData))==host.Pin};
@@ -40,6 +61,7 @@ if(useDefaultPort)
     Check((await legacyClient.GetAsync("/v1/library")).IsSuccessStatusCode,"Existing phone tokens work on the legacy port with the same pinned certificate");
 }
 Check((await client.PostAsJsonAsync("/v1/pair",new{code=query["code"],name="replay"})).StatusCode==HttpStatusCode.Unauthorized,"Consumed pairing code cannot be reused");
+using(var gzipRequest=new HttpRequestMessage(HttpMethod.Get,"/v1/library")){gzipRequest.Headers.AcceptEncoding.ParseAdd("gzip");using var compressed=await client.SendAsync(gzipRequest);Check(compressed.IsSuccessStatusCode&&compressed.Content.Headers.ContentEncoding.Contains("gzip"),"Library snapshot is gzip-compressed for phones that accept it");}
 var response=await client.GetStringAsync("/v1/library");Check(!response.Contains("C:\\")&&!response.Contains("watchSync",StringComparison.OrdinalIgnoreCase),"HTTP snapshot does not leak local paths or provider accounts");
 var sync=await client.PostAsJsonAsync("/v1/sync",new List<MobileOperation>());var synced=await sync.Content.ReadFromJsonAsync<JsonElement>();var syncedItem=synced.GetProperty("library").GetProperty("items").EnumerateArray().Single(i=>i.GetProperty("id").GetString()==commandItem.Id);Check(syncedItem.GetProperty("progress").GetProperty("position").GetDouble()==421.625,"Empty phone sync receives the exact newer PC bookmark");
 var subtitleItem=store.Archive.First(i=>i.Path==smallFile);var sub=MobileSubtitles.Find(subtitleItem).Single();Check((await client.GetStringAsync("/v1/subtitles/"+subtitleItem.Id+"/"+sub.Info.Id)).Contains("Noir subtitle fixture"),"Paired phones retrieve the matching external subtitle");Check((await client.GetAsync("/v1/subtitles/"+subtitleItem.Id+"/unknown")).StatusCode==HttpStatusCode.NotFound,"Unknown subtitle IDs cannot expose arbitrary files");
@@ -47,6 +69,9 @@ var subtitleInfo=await client.GetFromJsonAsync<JsonElement>("/v1/subtitle-tools/
 Check((await client.GetAsync("/v1/subtitle-tools/unknown")).StatusCode==HttpStatusCode.NotFound,"Unknown subtitle-video IDs cannot expose PC filenames");
 Check((await client.PostAsJsonAsync("/v1/subtitle-tools/"+subtitleItem.Id+"/sync",new MobileSubtitleSyncInput{Hash="0000000000000000",Text="1\n00:00:01,000 --> 00:00:03,000\nTest subtitle",Extension=".srt"})).StatusCode==HttpStatusCode.BadRequest,"Timing checks reject a phone copy with a different video fingerprint");
 var releases=await client.GetFromJsonAsync<JsonElement>("/v1/pc-downloads/search/"+commandItem.Id+"?season=true");var releaseId=releases.GetProperty("choices")[0].GetProperty("id").GetString()!;var fileResponse=await client.GetFromJsonAsync<JsonElement>("/v1/pc-downloads/files/"+releaseId);var fileId=fileResponse.GetProperty("files")[0].GetProperty("id").GetString()!;var command=new DownloadRequest{RequestId=Guid.NewGuid().ToString(),ReleaseId=releaseId,FileIds=[fileId]};var queued=await client.PostAsJsonAsync("/v1/pc-downloads",command);var receipt=await queued.Content.ReadFromJsonAsync<JsonElement>();var jobId=receipt.GetProperty("ids")[0].GetString()!;Check(queued.IsSuccessStatusCode&&downloads.Jobs().Single().Status=="Queued","Paired phone can select an opaque release and queue an episode on PC");await client.PostAsJsonAsync("/v1/pc-downloads",command);Check(downloads.Jobs().Count==1,"Retried HTTP download requests do not duplicate jobs");Check((await client.PostAsJsonAsync("/v1/pc-downloads/control",new{id=jobId,action="pause"})).IsSuccessStatusCode&&downloads.Jobs().Single().Status=="Paused","Phone can pause a persisted PC download");var queue=await client.GetStringAsync("/v1/pc-downloads");Check(!queue.Contains("fixture-key")&&!queue.Contains("example.invalid")&&!queue.Contains(smallRoot,StringComparison.OrdinalIgnoreCase),"HTTP download queue keeps provider credentials and PC paths private");Check((await client.PostAsJsonAsync("/v1/pc-downloads",new DownloadRequest{ReleaseId="unknown",FileIds=["unknown"]})).StatusCode==HttpStatusCode.BadRequest,"Unknown release and file IDs cannot schedule arbitrary downloads");
+var descriptorResponse=await client.PostAsJsonAsync("/v1/phone-downloads/prepare",new{itemId=subtitleItem.Id});var descriptor=await descriptorResponse.Content.ReadFromJsonAsync<JsonElement>();
+Check(descriptorResponse.IsSuccessStatusCode&&!descriptor.ToString().Contains("fixture-key")&&!descriptor.ToString().Contains(smallRoot)&&descriptor.GetProperty("expiresAt").GetDateTimeOffset()>DateTimeOffset.UtcNow,"Phone descriptors are short-lived and expose no provider keys or PC paths");
+using(var descriptorRequest=new HttpRequestMessage(HttpMethod.Get,descriptor.GetProperty("url").GetString())){descriptorRequest.Headers.Range=new(100,199);using var content=await client.SendAsync(descriptorRequest);Check(content.StatusCode==HttpStatusCode.PartialContent&&(await content.Content.ReadAsByteArrayAsync()).Length==100,"Short-lived phone descriptors preserve byte-range downloading");}
 var video=store.Archive.First(i=>i.Available&&File.Exists(i.Path));
 using var range=new HttpRequestMessage(HttpMethod.Get,"/v1/media/"+video.Id);range.Headers.Range=new(100,199);using var bytes=await client.SendAsync(range);
 Check(bytes.StatusCode==HttpStatusCode.PartialContent&&(await bytes.Content.ReadAsByteArrayAsync()).Length==100,"PC streaming supports exact byte ranges for seeking");
@@ -56,6 +81,7 @@ var actualBytes=await bytes.Content.ReadAsByteArrayAsync();
 using(var input=File.OpenRead(video.Path)){input.Position=100;var expected=new byte[100];input.ReadExactly(expected);Check(expected.SequenceEqual(actualBytes),"Range bytes match the real file");}
 Check((await client.GetAsync("/v1/media/unknown")).StatusCode==HttpStatusCode.NotFound,"Media endpoint serves only known catalog IDs");
 var art=store.MobileSnapshot().Items.First(i=>i.Poster.Length>0).Poster;Check((await client.GetAsync("/v1/art/"+art)).IsSuccessStatusCode,"Cached poster is served to the paired phone");
+await ProfileTransportChecks.Run(client,store,Check);
 host.Revoke();Check((await client.GetAsync("/v1/library")).StatusCode==HttpStatusCode.Unauthorized,"Disconnect immediately revokes the phone token");
 File.WriteAllText(Path.Combine(root,"transport-checks.json"),JsonSerializer.Serialize(checks,new JsonSerializerOptions {WriteIndented=true}));
 if(args.Contains("--once")) return;

@@ -11,6 +11,11 @@ namespace Noir;
 
 public sealed class DownloadCredentials
 {
+    public string Service {get;set;}="TorBox";
+    public string TorBoxKey {get;set;}="";
+    public string RealDebridKey {get;set;}="";
+    public string DeviceId {get;set;}=Guid.NewGuid().ToString("N");
+    public List<MediaServerAccount> Servers {get;set;}=[];
     public string Manifest {get;set;}="";
     public string Key {get;set;}="";
     public string ShowsRoot {get;set;}="";
@@ -19,13 +24,18 @@ public sealed class DownloadCredentials
     public long MaxEpisodeBytes {get;set;}
     public List<string> SubtitleLanguages {get;set;}=["en","ar"];
     public bool AutoSyncSubtitles {get;set;}=true;
+    public string SubtitleAddonUrl {get;set;}="";
+    public bool SubtitleAddonOnly {get;set;}=true;
     public string BrowseQuality {get;set;}="All";
     public string BrowseLanguage {get;set;}="All";
     public bool BrowseReadyOnly {get;set;}
     public bool BrowseSizeLimit {get;set;}
     public string OriginalManifest {get;set;}="";
 }
-public sealed record IndexedRelease(DownloadChoice Choice,string Hash);
+public sealed record IndexedRelease(DownloadChoice Choice,string Hash,[property:System.Text.Json.Serialization.JsonIgnore] List<DirectDownloadSource>? Direct=null)
+{
+    public string Service {get;set;}="";
+}
 public sealed record TorboxFile(long Id,string Name,long Size);
 public sealed record TorboxTorrent(long Id,string Hash,bool Ready,List<TorboxFile> Files);
 public interface IDownloadProvider
@@ -43,7 +53,7 @@ public interface IDownloadProvider
 }
 public sealed class TorboxProvider(Func<DownloadCredentials> config,HttpClient? client=null) : IDownloadProvider
 {
-    readonly HttpClient http=client??new HttpClient {Timeout=TimeSpan.FromSeconds(45)};
+    readonly HttpClient http=client??DownloadSecurity.Client(TimeSpan.FromSeconds(45));
     readonly System.Collections.Concurrent.ConcurrentDictionary<string,TorboxTorrent> owned=new(StringComparer.OrdinalIgnoreCase);
     public static Uri Manifest(string text)
     {
@@ -93,7 +103,8 @@ public sealed class TorboxProvider(Func<DownloadCredentials> config,HttpClient? 
         if(result.Releases.Count>0)return result.Releases;
         throw new IOException(string.Join(" · ",result.Sources.Select(s=>s.Source+": "+(s.Message.Length>0?s.Message:s.State))));
     }
-    public async Task<ProviderSearchResult> Discover(VideoItem item,bool season,List<VideoItem> probes,IProgress<DownloadSourceStatus>? progress,CancellationToken ct)
+    public Task<ProviderSearchResult> Discover(VideoItem item,bool season,List<VideoItem> probes,IProgress<DownloadSourceStatus>? progress,CancellationToken ct)=>Discover(item,season,probes,progress,ct,true);
+    internal async Task<ProviderSearchResult> Discover(VideoItem item,bool season,List<VideoItem> probes,IProgress<DownloadSourceStatus>? progress,CancellationToken ct,bool includeIndex)
     {
         string indexWarning="";
         async Task<(List<IndexedRelease> Releases,DownloadSourceStatus Status)> Run(string source,Func<Task<List<IndexedRelease>>> fetch)
@@ -109,6 +120,7 @@ public sealed class TorboxProvider(Func<DownloadCredentials> config,HttpClient? 
         async Task<List<IndexedRelease>> Index()
         {
             var found=new List<IndexedRelease>();var errors=new List<string>();
+            if(season&&config().Service=="AIOStreams links")return await BestSeason(probes,ct);
             foreach(var probe in probes.DistinctBy(p=>(p.Season,p.Episode)).Take(season?3:1)){
                 try{found.AddRange(await IndexSearch(probe,ct));}catch(OperationCanceledException)when(ct.IsCancellationRequested){throw;}catch(Exception e)when(e is IOException or HttpRequestException or JsonException or OperationCanceledException){errors.Add(e is IOException?e.Message:e is OperationCanceledException?"Source timed out. Retry.":"Couldn't read this source's response. Retry.");if(found.Count==0&&errors.Count==1&&e.Message.Contains("has been removed",StringComparison.OrdinalIgnoreCase))throw;}
             }
@@ -116,18 +128,18 @@ public sealed class TorboxProvider(Func<DownloadCredentials> config,HttpClient? 
             if(found.Count==0&&errors.Count>0)throw new IOException(errors[0]);return found;
         }
         // Both requests run even when the account already contains a matching pack.
-        var libraryTask=Run("TorBox library",()=>AccountReleases(item,season,ct));
-        var indexTask=config().Manifest.Length>0?Run("AIOStreams",Index):Task.FromResult((Releases:new List<IndexedRelease>(),Status:new DownloadSourceStatus{Source="AIOStreams",State="Not configured",Message="Add a manifest link in PC Settings to find new releases"}));
+        var libraryTask=config().Service=="TorBox"?Run("TorBox library",()=>AccountReleases(item,season,ct)):Task.FromResult((Releases:new List<IndexedRelease>(),Status:new DownloadSourceStatus{Source="TorBox library",State="Not selected"}));
+        var indexTask=includeIndex&&config().Manifest.Length>0?Run("AIOStreams",Index):Task.FromResult((Releases:new List<IndexedRelease>(),Status:new DownloadSourceStatus{Source="AIOStreams",State="Not configured",Message="Add a manifest link in PC Settings to find new releases"}));
         await Task.WhenAll(indexTask,libraryTask);var indexed=await indexTask;var library=await libraryTask;
         if(indexWarning.Length>0&&indexed.Status.State=="Ready"){indexed.Status.State="Partial";indexed.Status.Message=indexWarning;progress?.Report(indexed.Status);}
         var merged=new List<IndexedRelease>();
-        foreach(var group in indexed.Releases.Concat(library.Releases).GroupBy(r=>r.Hash,StringComparer.OrdinalIgnoreCase)){
+        foreach(var group in indexed.Releases.Concat(library.Releases).GroupBy(r=>r.Direct!=null?r.Choice.Id:r.Hash,StringComparer.OrdinalIgnoreCase)){
             var release=group.First();release.Choice.Sources=group.SelectMany(r=>r.Choice.Sources).Distinct().ToList();release.Choice.SourceEntries=group.Sum(r=>Math.Max(1,r.Choice.SourceEntries));
             var ownedRelease=group.FirstOrDefault(r=>r.Choice.Sources.Contains("TorBox library"));
             if(ownedRelease!=null){release.Choice.Cached=ownedRelease.Choice.Cached;release.Choice.CacheStatus=ownedRelease.Choice.CacheStatus;release.Choice.Size=ownedRelease.Choice.Size;release.Choice.SizeKind="Pack";}
             merged.Add(release);
         }
-        return new(){Releases=merged,Sources=[indexed.Status,library.Status]};
+        return new(){Releases=merged,Sources=includeIndex?config().Service=="TorBox"?[indexed.Status,library.Status]:[indexed.Status]:config().Service=="TorBox"?[library.Status]:[]};
     }
     public static bool AccountMatch(VideoItem item,JsonElement torrent,bool season)
     {
@@ -144,9 +156,19 @@ public sealed class TorboxProvider(Func<DownloadCredentials> config,HttpClient? 
         var numbers=videos.Select(f=>DownloadNaming.Episode(f.Name,item.Season)).ToList();
         return season?numbers.Where(n=>n.Season==item.Season&&n.Episode>0).Distinct().Count()>1:numbers.Contains((item.Season,item.Episode));
     }
+    // A season plan asks for each episode in parallel; one account listing per half minute serves them all.
+    (DateTime At,Task<JsonElement> List)? accountList;readonly object accountGate=new();
+    Task<JsonElement> AccountList(CancellationToken ct)
+    {
+        lock(accountGate)
+        {
+            if(accountList is {} known&&DateTime.UtcNow-known.At<TimeSpan.FromSeconds(30)&&!known.List.IsFaulted&&!known.List.IsCanceled)return known.List;
+            var fresh=Api("torrents/mylist",null,ct);accountList=(DateTime.UtcNow,fresh);return fresh;
+        }
+    }
     async Task<List<IndexedRelease>> AccountReleases(VideoItem item,bool season,CancellationToken ct)
     {
-        var data=await Api("torrents/mylist",null,ct);var result=new List<IndexedRelease>();
+        var data=await AccountList(ct);var result=new List<IndexedRelease>();
         if(data.ValueKind!=JsonValueKind.Array)return result;
         foreach(var t in data.EnumerateArray()){
             var hash=Text(t,"hash");var id=Number(t,"id");if(!Regex.IsMatch(hash,@"\A[a-fA-F0-9]{40}\z")||id<0||!AccountMatch(item,t,season))continue;
@@ -157,8 +179,8 @@ public sealed class TorboxProvider(Func<DownloadCredentials> config,HttpClient? 
         }
         return result;
     }
-    string SafeText(string value){var key=config().Key;if(key.Length>0)value=value.Replace(key,"[private]");value=Regex.Replace(value,@"https?://\S+","[link]");return value[..Math.Min(1500,value.Length)];}
-    async Task<List<IndexedRelease>> IndexSearch(VideoItem item,CancellationToken ct)
+    string SafeText(string value)=>DownloadSecurity.SafeText(value,config());
+    public async Task<List<IndexedRelease>> IndexSearch(VideoItem item,CancellationToken ct)
     {
         if(string.IsNullOrWhiteSpace(config().Manifest))throw new IOException("Add an AIOStreams installation URL to find new releases. No matching files were found in your TorBox library.");
         if(!Regex.IsMatch(item.ImdbId,@"^tt\d+$"))throw new IOException("Correct this title's IMDb match before finding releases.");
@@ -181,28 +203,59 @@ public sealed class TorboxProvider(Func<DownloadCredentials> config,HttpClient? 
             }
             if(stream.TryGetProperty("externalUrl",out _)&&!stream.TryGetProperty("url",out _)&&!stream.TryGetProperty("infoHash",out _))continue;
             playable++;
-            var hash=Hash(stream);if(hash.Length==0)continue;converted++;
+            var hash=config().Service=="AIOStreams links"?"":Hash(stream);
+            DirectDownloadSource? direct=null;
+            if(hash.Length==0){direct=ReadDirect(stream,item);if(direct==null)continue;}converted++;
             var sourceMatch=Regex.Match(Text(stream,"description"),@"\[NOIR_SOURCE:([^\]\r\n]{1,100})\]");
-            var source=sourceMatch.Success?SafeText(sourceMatch.Groups[1].Value):"AIOStreams";
-            if(found.FirstOrDefault(x=>x.Hash==hash) is {} duplicate){duplicate.Choice.SourceEntries++;if(!duplicate.Choice.Sources.Contains(source))duplicate.Choice.Sources.Add(source);continue;}
+            var source=sourceMatch.Success?SafeText(sourceMatch.Groups[1].Value):direct==null?"AIOStreams":SafeText(Text(stream,"name"));if(source.Length==0)source="AIOStreams";
+            if(direct!=null)source+=" (AIOStreams links)";
+            if(direct==null&&found.FirstOrDefault(x=>x.Direct==null&&x.Hash==hash) is {} duplicate){duplicate.Choice.SourceEntries++;if(!duplicate.Choice.Sources.Contains(source))duplicate.Choice.Sources.Add(source);continue;}
             var name=Text(stream,"name");var detail=Text(stream,"description");if(detail.Length==0)detail=Text(stream,"title");
             // URLs and any provider account configuration never enter the phone response.
             name=Regex.Replace(name,@"https?://\S+","[link]");detail=Regex.Replace(detail,@"https?://\S+","[link]");
             long size=0;if(stream.TryGetProperty("behaviorHints",out var hints)&&hints.TryGetProperty("videoSize",out var bytes)&&bytes.ValueKind==JsonValueKind.Number)bytes.TryGetInt64(out size);
             if(stream.TryGetProperty("behaviorHints",out var fileHints)&&Text(fileHints,"filename") is {Length:>0} filename)name=filename;
+            else if(Text(fileHints,"name") is {Length:>0} hintName)name=hintName;
             var audio=Regex.Match(detail,@"\[NOIR_AUDIO:([^\]\r\n]{0,200})\]");
+            var language=audio.Success&&audio.Groups[1].Value.Trim().Length>0?SafeText(audio.Groups[1].Value):"Unknown";
             name=SafeText(name);detail=SafeText(Regex.Replace(detail,@"\[NOIR_(?:HASH|SOURCE|AUDIO):[^\]\r\n]*\]","").Trim());
-            found.Add(new(new(){Id=Guid.NewGuid().ToString("N"),Name=name.Length>0?name[..Math.Min(256,name.Length)]:"Release",Detail=detail,Languages=audio.Success&&audio.Groups[1].Value.Trim().Length>0?SafeText(audio.Groups[1].Value):"Unknown",Size=size,SizeKind=item.IsMovie?"Movie":"Episode",Sources=[source],Resolution=Resolution(name+" "+detail),ReferenceSeason=item.Season,ReferenceEpisode=item.Episode},hash));
+            if(direct!=null){var secrets=DownloadSecurity.SourceSecrets(direct).ToList();name=DownloadSecurity.SafeText(name,config(),secrets);detail=DownloadSecurity.SafeText(detail,config(),secrets);source=DownloadSecurity.SafeText(source,config(),secrets);language=DownloadSecurity.SafeText(language,config(),secrets);direct.Name=DownloadSecurity.SafeText(direct.Name,config(),secrets);direct.Resolution=Resolution(name+" "+detail);direct.Language=language;}
+            found.Add(new(new(){Id=Guid.NewGuid().ToString("N"),Name=name.Length>0?name[..Math.Min(256,name.Length)]:"Release",Detail=detail,Languages=language,Size=size,SizeKind=item.IsMovie?"Movie":"Episode",Sources=[source],Resolution=Resolution(name+" "+detail),ReferenceSeason=item.Season,ReferenceEpisode=item.Episode,Cached=direct!=null,CacheStatus=direct!=null?"Ready":"Unknown"},hash,direct==null?null:[direct]));
         }
         if(found.Count==0)throw new IOException(DiscoveryMessage(playable,errors));
-        if(errors.Count>0||playable>converted){found[0].Choice.Warning=(errors.Count>0?SafeText(errors[0])+" · ":"")+(playable>converted?"Some links could not be converted to TorBox torrent downloads":"");}
+        if(errors.Count>0||playable>converted){found[0].Choice.Warning=(errors.Count>0?SafeText(errors[0])+" · ":"")+(playable>converted?"Some streams did not include a usable download source":"");}
         try
         {
-            var hashes=string.Join("&",found.Take(100).Select(x=>"hash="+x.Hash));
+            if(config().Service!="TorBox")return found;
+            var torrents=found.Where(x=>x.Direct==null).Take(100).ToList();if(torrents.Count==0)return found;
+            var hashes=string.Join("&",torrents.Select(x=>"hash="+x.Hash));
             var cached=await Api("torrents/checkcached?format=list&list_files=false&"+hashes,null,ct);
-            if(cached.ValueKind==JsonValueKind.Array){var set=cached.EnumerateArray().Select(x=>Text(x,"hash")).ToHashSet(StringComparer.OrdinalIgnoreCase);foreach(var x in found.Take(100)){x.Choice.Cached=set.Contains(x.Hash);x.Choice.CacheStatus=x.Choice.Cached?"Ready":"Not cached";}}
+            if(cached.ValueKind==JsonValueKind.Array){var set=cached.EnumerateArray().Select(x=>Text(x,"hash")).ToHashSet(StringComparer.OrdinalIgnoreCase);foreach(var x in torrents){x.Choice.Cached=set.Contains(x.Hash);x.Choice.CacheStatus=x.Choice.Cached?"Ready":"Not cached";}}
         }catch(Exception e)when(e is IOException or HttpRequestException||e is OperationCanceledException&&!ct.IsCancellationRequested){} // Releases remain browsable if the cache lookup fails.
         return found;
+    }
+    DirectDownloadSource? ReadDirect(JsonElement stream,VideoItem item)
+    {
+        var url=Text(stream,"url");if(!DownloadSecurity.ValidUrl(url))return null;
+        var hints=stream.TryGetProperty("behaviorHints",out var h)?h:default;
+        var name=Text(hints,"filename");if(name.Length==0)name=Text(hints,"name");if(name.Length==0)name=Text(stream,"name");
+        name=SafeText(name);if(!DownloadNaming.Video(name))name=(item.IsMovie?"Movie":$"S{item.Season:00}E{item.Episode:00}")+".mkv";
+        var source=new DirectDownloadSource{Url=url,Name=name,Size=Math.Max(0,Number(hints,"videoSize")),Season=item.Season,Episode=item.Episode};
+        if(hints.ValueKind==JsonValueKind.Object&&hints.TryGetProperty("proxyHeaders",out var proxy)&&proxy.TryGetProperty("request",out var headers)&&headers.ValueKind==JsonValueKind.Object)
+            foreach(var header in headers.EnumerateObject())if(header.Value.ValueKind==JsonValueKind.String)source.Headers[header.Name]=header.Value.GetString()??"";
+        DownloadSecurity.ValidateHeaders(source.Headers);return source;
+    }
+    async Task<List<IndexedRelease>> BestSeason(List<VideoItem> probes,CancellationToken ct)
+    {
+        using var slots=new SemaphoreSlim(3);var c=config();var failed=0;
+        var tasks=probes.DistinctBy(p=>(p.Season,p.Episode)).Take(40).Select(async item=>{
+            await slots.WaitAsync(ct);try{
+                var found=await IndexSearch(item,ct);var eligible=found.Where(r=>r.Direct!=null&&(c.MaxEpisodeBytes<=0||r.Choice.Size>0&&r.Choice.Size<=c.MaxEpisodeBytes)&&(c.BrowseLanguage=="All"||r.Choice.Languages.Contains(c.BrowseLanguage,StringComparison.OrdinalIgnoreCase))).ToList();
+                var best=ReleasePresentation.Recommend(eligible.Select(r=>r.Choice),c.PreferredResolution,c.MaxEpisodeBytes,1).FirstOrDefault();return eligible.FirstOrDefault(r=>r.Choice==best);
+            }catch(Exception e)when(e is IOException or HttpRequestException or JsonException||e is OperationCanceledException&&!ct.IsCancellationRequested){Interlocked.Increment(ref failed);return null;}finally{slots.Release();}
+        }).ToList();
+        var picked=(await Task.WhenAll(tasks)).Where(r=>r!=null).Select(r=>r!).ToList();if(picked.Count==0)return [];
+        return [new(new(){Id=Guid.NewGuid().ToString("N"),Name="Best link per episode",Detail=$"{picked.Count} episodes · up to 40 missing released episodes checked",SizeKind="Pack",Size=picked.Sum(r=>r.Choice.Size),Cached=true,CacheStatus="Ready",Sources=picked.SelectMany(r=>r.Choice.Sources).Distinct().ToList(),Warning=failed>0?$"{failed} episode lookups unavailable":""},"",picked.SelectMany(r=>r.Direct!).OrderBy(d=>d.Episode).ToList())];
     }
     public static string Resolution(string name)=>Regex.Match(name,@"(?i)(?<!\d)(2160p|1080p|720p|480p|4k)(?!\d)").Value.ToLowerInvariant().Replace("4k","2160p");
     public static string DiscoveryMessage(int playable,IEnumerable<string> errors)
@@ -263,4 +316,44 @@ public sealed class TorboxProvider(Func<DownloadCredentials> config,HttpClient? 
     }
     static string Text(JsonElement element,string name)=>element.ValueKind==JsonValueKind.Object&&element.TryGetProperty(name,out var v)&&v.ValueKind==JsonValueKind.String?v.GetString()??"":"";
     static long Number(JsonElement element,string name)=>element.ValueKind==JsonValueKind.Object&&element.TryGetProperty(name,out var v)&&v.ValueKind==JsonValueKind.Number&&v.TryGetInt64(out var n)?n:-1;
+}
+
+public sealed class DownloadProviders : IDownloadProvider
+{
+    readonly Func<DownloadCredentials> config;
+    readonly TorboxProvider torbox,links;
+    readonly RealDebridProvider rd;
+    readonly MediaServers servers;
+    public DownloadProviders(Func<DownloadCredentials> config,HttpClient? http=null)
+    {
+        this.config=config;torbox=new(()=>For("TorBox"),http);links=new(()=>For("AIOStreams links"),http);rd=new(()=>For("Real-Debrid"),http);servers=new(http);
+    }
+    DownloadCredentials For(string service)
+    {
+        var c=config();c.Key=service=="Real-Debrid"?c.RealDebridKey.Length>0?c.RealDebridKey:c.Service==service?c.Key:"":c.TorBoxKey.Length>0?c.TorBoxKey:c.Service=="TorBox"?c.Key:"";c.Service=service;return c;
+    }
+    public IDownloadProvider ForService(string service)=>service=="Real-Debrid"?rd:service=="AIOStreams links"?links:torbox;
+    public Task<List<IndexedRelease>> Search(VideoItem item,CancellationToken ct)=>SearchCore(item,false,ct);
+    public Task<List<IndexedRelease>> SearchSeason(VideoItem item,CancellationToken ct)=>SearchCore(item,true,ct);
+    async Task<List<IndexedRelease>> SearchCore(VideoItem item,bool season,CancellationToken ct)=>(await Discover(item,season,[item],null,ct)).Releases;
+    public Task<ProviderSearchResult> Discover(VideoItem item,bool season,List<VideoItem> probes,IProgress<DownloadSourceStatus>? progress,CancellationToken ct)=>Discover(item,season,probes,progress,ct,false);
+    internal async Task<ProviderSearchResult> Discover(VideoItem item,bool season,List<VideoItem> probes,IProgress<DownloadSourceStatus>? progress,CancellationToken ct,bool indexSearched)
+    {
+        var c=config();var services=new List<string>{c.Service};
+        if(c.TorBoxKey.Length>0&&!services.Contains("TorBox"))services.Add("TorBox");
+        if(c.RealDebridKey.Length>0&&!services.Contains("Real-Debrid"))services.Add("Real-Debrid");
+        if(!indexSearched&&c.Manifest.Length>0&&!services.Contains("AIOStreams links"))services.Add("AIOStreams links");
+        var tasks=services.Select(async service=>{var active=ForService(service);var result=indexSearched&&active is TorboxProvider aio?await aio.Discover(item,season,probes,progress,ct,false):await active.Discover(item,season,probes,progress,ct);foreach(var release in result.Releases)release.Service=service;return result;}).ToList();
+        tasks.AddRange(c.Servers.Select(async server=>{
+            var status=new DownloadSourceStatus{Source=MediaServers.Source(server)};progress?.Report(status);var found=new List<IndexedRelease>();
+            try{found=await servers.Search(server,item,season,ct);status.State=found.Count>0?"Ready":"Empty";status.Count=found.Count;status.Message=found.Count>0?$"{found.Count} matches on your server":"No matching files";}
+            catch(OperationCanceledException)when(ct.IsCancellationRequested){throw;}
+            catch(Exception){status.State="Failed";status.Message="Couldn't read this server. Test its connection in PC Settings.";}
+            progress?.Report(status);return new ProviderSearchResult{Releases=found,Sources=[status]};
+        }));
+        var all=await Task.WhenAll(tasks);return new(){Releases=all.SelectMany(r=>r.Releases).ToList(),Sources=all.SelectMany(r=>r.Sources).ToList()};
+    }
+    public Task<List<TorboxFile>> Files(string hash,CancellationToken ct)=>ForService(config().Service).Files(hash,ct);
+    public Task<TorboxTorrent> Prepare(string hash,long id,CancellationToken ct)=>ForService(config().Service).Prepare(hash,id,ct);
+    public Task<string> Link(long id,long file,CancellationToken ct)=>ForService(config().Service).Link(id,file,ct);
 }

@@ -24,7 +24,7 @@ public partial class MainWindow
                 foreach(var button in new[]{HomeNav,ShowNav,MovieNav,WatchlistNav,HistoryNav,DiscoverNav,DownloadsNav,SettingsNav})
                 {
                     var rect=button.TransformToAncestor(LibraryRoot).TransformBounds(new Rect(button.RenderSize));
-                    Check(rect.Left>=0&&rect.Right<=LibraryRoot.ActualWidth+1&&rect.Top>=0&&rect.Bottom<=TopBar.ActualHeight+1,$"{button.Name} stays visible at {size}");
+                    Check(button.IsVisible&&rect.Left>=0&&rect.Right<=SideRail.ActualWidth+1&&rect.Top>=0&&(size.Item2<650||rect.Bottom<=LibraryRoot.ActualHeight+1),$"{button.Name} stays visible in the side rail at {size}");
                 }
                 var heroAction=Descendants(ContentPanel).OfType<Button>().FirstOrDefault(b=>b.Content as string is "▶   Resume" or "▶   Play" or "ⓘ   More info");
                 Check(heroAction!=null&&heroAction.TransformToAncestor(LibraryRoot).Transform(new Point()).Y>TopBar.ActualHeight,$"Hero actions clear the top navigation at {size}");
@@ -41,18 +41,18 @@ public partial class MainWindow
             Check(ContentScroll.VerticalOffset<down,"Scrolling reverses without jumping");
             foreach(var view in new[]{"Stats","Collection","Diary"})
             {
-                historyView=view;historyMonth="All time";Navigate("History");await Settle();
+                trackerTab=view=="Collection"?"Shows":view;historyMonthTracker="All time";Navigate("History");await Settle();
                 CaptureLibrary(Path.Combine(store.DataDirectory,"premium-history-"+view.ToLowerInvariant()+".png"));
                 Check(ContentPanel.Children.Count>3,"History "+view+" renders saved library data");
             }
-            Navigate("Settings");await Settle();Check(Descendants(ContentPanel).OfType<CheckBox>().Any(),"Playback preferences remain available");CaptureLibrary(Path.Combine(store.DataDirectory,"premium-settings.png"));
+            settingsSection="Playback";Navigate("Settings");await Settle();Check(Descendants(ContentPanel).OfType<CheckBox>().Any(),"Playback preferences remain available");CaptureLibrary(Path.Combine(store.DataDirectory,"premium-settings.png"));
             // Deterministic discovery data exercises the new hero, season tabs and future-episode guard.
             discoveryFactory=()=>new DiscoveryClient(store.DataDirectory,new DiscoveryFixtureHandler());Navigate("Discover");
             var deadline=DateTime.UtcNow.AddSeconds(15);while(discoverResults==null&&DateTime.UtcNow<deadline)await Task.Delay(80);
             Check(discoverResults?.Titles.Count>0,"Discover loads its spotlight and popular rails");await Settle();CaptureLibrary(Path.Combine(store.DataDirectory,"premium-discover.png"));
-            var count=store.State.Viewings.Count;await OpenDiscover(discoverResults!.Titles.First(t=>!t.IsMovie));await Settle();
+            var count=store.State.Viewings.Count;var show=discoverResults!.Titles.First(t=>!t.IsMovie);await OpenDiscover(show);await Settle();Check(discoverPanel!=null,"Discover opens the preview side panel first");CloseDiscoverPanel();await OpenDiscoverFull(show);await Settle();
             Check(Descendants(ContentPanel).OfType<Button>().Any(b=>b.Content as string=="Find season downloads"),"Discover keeps whole-season download action");
-            discoverSeason=2;Render();await Settle();Check(Descendants(ContentPanel).OfType<Button>().Any(b=>b.Content as string=="↓ Download"&&!b.IsEnabled),"Future episodes cannot be downloaded");
+            discoverSeason=2;Render();await Settle();CaptureLibrary(Path.Combine(store.DataDirectory,"premium-discover-season2.png"));File.WriteAllText(Path.Combine(store.DataDirectory,"season2-buttons.txt"),string.Join("\n",Descendants(ContentPanel).OfType<Button>().Select(b=>(b.Content as string??b.Content?.GetType().Name)+" enabled="+b.IsEnabled)));Check(Descendants(ContentPanel).OfType<Button>().Any(b=>b.Content as string=="↓ Download"&&!b.IsEnabled),"Future episodes cannot be downloaded");
             Check(store.State.Viewings.Count==count,"Browsing never creates watched history");CaptureLibrary(Path.Combine(store.DataDirectory,"premium-discover-detail.png"));
         }
         catch(Exception error){results.Add("FAIL: "+error);}

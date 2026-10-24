@@ -1,0 +1,202 @@
+package app.noir.mobile;
+import android.content.Intent;
+import android.graphics.*;
+import android.graphics.drawable.GradientDrawable;
+import android.text.TextUtils;
+import android.view.*;
+import android.widget.*;
+import org.json.*;
+import java.time.*;
+import java.util.*;
+
+// The phone's TV Time-style tracker: Up next with one-tap check-offs, an Upcoming calendar with
+// what's out now, and the tracked Shows and Movies. Works offline; changes sync to the PC.
+final class PhoneTracker {
+ final MainActivity a;
+ PhoneTracker(MainActivity activity){a=activity;}
+ static final String[] TABS={"Up next","Upcoming","Shows","Movies","Diary","Stats"};
+ String showsFilter="All";LocalDate month=LocalDate.now().withDayOfMonth(1),day=null;
+ LinearLayout rewards;final Map<String,View> liveRows=new HashMap<>();final Map<String,TextView> liveChecks=new HashMap<>();
+ Map<String,Long> airMap=new HashMap<>();List<List<JSONObject>> groups;
+
+ static final class Show{List<JSONObject> g;JSONObject next;int watched,released;long last;String status;boolean upcoming;}
+ void prepare(){
+  groups=a.groups();airMap.clear();JSONObject schedules=a.browsingSettings().optJSONObject("schedules");
+  if(schedules!=null)for(Iterator<String> keys=schedules.keys();keys.hasNext();){String g=keys.next();for(JSONObject e:DataStore.objects(schedules.optJSONArray(g))){long at=DataStore.date(e.optString("airsAt"));if(at>0)airMap.put(g+":"+e.optInt("season")+":"+e.optInt("episode"),at);}}
+ }
+ long airs(JSONObject i){String at=i.optString("airsAt");if(!at.isEmpty()&&!at.equals("null")){long t=DataStore.date(at);if(t==0)try{t=LocalDate.parse(at.substring(0,10)).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli();}catch(Exception ignored){}if(t>0)return t;}Long t=airMap.get(i.optString("group")+":"+i.optInt("season")+":"+i.optInt("episode"));return t==null?0:t;}
+ boolean aired(JSONObject i,long now){long t=airs(i);return t==0||t<=now;}
+ Show track(List<JSONObject> g,long now){
+  Show s=new Show();s.g=g;List<JSONObject> regular=new ArrayList<>();for(JSONObject i:g)if(a.smart.counts(i)&&aired(i,now))regular.add(i);
+  regular.sort(Comparator.comparingInt((JSONObject i)->i.optInt("season")).thenComparingInt(i->i.optInt("episode")));
+  int furthest=-1;for(int n=0;n<regular.size();n++)if(DataStore.watched(regular.get(n)))furthest=n;
+  for(int n=furthest+1;n<regular.size()&&s.next==null;n++)if(!DataStore.watched(regular.get(n)))s.next=regular.get(n);
+  if(s.next==null)for(JSONObject i:regular)if(!DataStore.watched(i)){s.next=i;break;}
+  s.released=regular.size();for(JSONObject i:regular)if(DataStore.watched(i))s.watched++;s.last=MainActivity.recent(g);
+  for(JSONObject i:g)if(i.optInt("season")>0&&airs(i)>now)s.upcoming=true;
+  String manual=g.get(0).optString("status");boolean started=s.watched>0||g.stream().anyMatch(i->MainActivity.position(i)>0);
+  JSONObject states=a.browsingSettings().optJSONObject("showStates");boolean ended=states!=null&&"Ended".equals(states.optString(g.get(0).optString("group")));
+  String computed=manual.equals("Dropped")?"Dropped":!started?"Not started":s.next==null?(s.upcoming?"Caught up":manual.equals("Finished")||ended&&s.watched>=s.released?"Finished":"Caught up"):"Watching";
+  // Only logged history and episodes left: you stopped somewhere in the past.
+  s.status=computed.equals("Watching")&&s.last==0&&!manual.equals("Watching")?"Unfinished":computed;
+  return s;
+ }
+ List<Show> shows(){long now=System.currentTimeMillis();List<Show> list=new ArrayList<>();for(List<JSONObject> g:groups)if(!g.get(0).optBoolean("movie"))list.add(track(g,now));return list;}
+ boolean follows(Show s){String manual=s.g.get(0).optString("status");return !s.status.equals("Dropped")&&!s.status.equals("Unfinished")&&(s.watched>0||s.g.get(0).optBoolean("listed")||manual.equals("Watching")||manual.equals("Planned"));}
+
+ void render(){
+  liveRows.clear();liveChecks.clear();profileHeader();rewards=a.column();a.body.addView(rewards);PhoneRewardCard.show(a,rewards,!a.animatedPages.contains(a.motionPage));prepare();
+  LinearLayout actions=new LinearLayout(a);actions.addView(a.ui.chip("＋ Log what you watched",this::log,true));actions.addView(a.ui.chip("⚡ Quick add",this::log,false));actions.addView(a.ui.chip("☰ Paste a list",()->a.startActivity(new Intent(a,HistoryToolsActivity.class)),false));actions.addView(a.ui.chip("⇅ Import · export · backup",()->a.startActivity(new Intent(a,HistoryToolsActivity.class)),false));a.body.addView(a.ui.row(actions));
+  String tab=a.premium.historyView.equals("Collection")?"Shows":a.premium.historyView;if(!Arrays.asList(TABS).contains(tab))tab="Up next";
+  TextView gap=new TextView(a);gap.setPadding(0,a.dp(6),0,0);a.body.addView(gap);a.harbor.tabs(a.body,TABS,tab,t->{a.premium.historyView=t;a.premium.diaryLimit=60;a.render();});
+  switch(tab){case "Upcoming":upcoming();break;case "Shows":showsTab();break;case "Movies":movies();break;case "Diary":case "Stats":a.premium.history();break;default:upNext();}
+ }
+ void details(List<JSONObject> g){JSONObject first=g.get(0);a.body.addView(a.ui.chip("‹ Back",()->{a.detail="";a.render();},false));a.ui.hero(a.body,first,g,"Your viewing life","＋ Log what you watched",()->a.startActivity(new Intent(a,LogActivity.class).putExtra("imdb",first.optString("imdb")).putExtra("query",first.optString("title"))),true);LinearLayout tools=new LinearLayout(a);tools.addView(a.ui.chip("☆ Rate / note",()->quickRate(a,first),false));tools.addView(a.ui.chip("Viewing status",()->a.premium.status(first),false));a.body.addView(a.ui.row(tools));if(first.optBoolean("movie")){a.body.addView(a.button(DataStore.watched(first)?"↻ Log a rewatch":"✓ Mark watched",()->{if(DataStore.watched(first))a.smart.watchedClick(first);else a.smart.checkOff(first,first.optString("title"));},true));return;}a.body.addView(seasonStrip(a,g));prepare();Map<Integer,List<JSONObject>> seasons=new TreeMap<>();for(JSONObject i:g)seasons.computeIfAbsent(i.optInt("season"),k->new ArrayList<>()).add(i);for(Map.Entry<Integer,List<JSONObject>> entry:seasons.entrySet()){a.heading(Loc.f("Season %d",entry.getKey()));for(JSONObject i:entry.getValue()){boolean seen=DataStore.watched(i);LinearLayout row=new LinearLayout(a);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(a.dp(12),a.dp(8),a.dp(8),a.dp(8));TextView name=a.text(label(i,true),14,MainActivity.WHITE);row.addView(name,new LinearLayout.LayoutParams(0,-2,1));if(aired(i,System.currentTimeMillis()))row.addView(check(seen,(seen?"Unmark ":"Mark ")+label(i,false),()->{if(seen)a.smart.watchedClick(i);else checkOff(i,first.optString("title")+" "+label(i,false));}),new LinearLayout.LayoutParams(a.dp(44),a.dp(44)));else row.addView(a.text("Upcoming",12,MainActivity.MUTED));a.body.addView(row);}}}
+ void log(){a.startActivity(new Intent(a,LogActivity.class));}
+
+ // ---- Up next ----
+ void upNext(){
+  long now=System.currentTimeMillis();List<Show> all=shows(),active=new ArrayList<>(),dormant=new ArrayList<>(),fresh=new ArrayList<>();
+  List<Show> premieres=new ArrayList<>();JSONObject snoozes=a.data.prefs().optJSONObject("snoozes");
+  for(Show s:all){if(s.next==null)continue;if(s.status.equals("Watching")){boolean premiere=s.next.optInt("episode")==1&&s.next.optInt("season")>1&&airs(s.next)>now-60L*86400000;if(premiere)for(JSONObject i:s.g)if(a.smart.counts(i)&&i.optInt("season")<s.next.optInt("season")&&!DataStore.watched(i))premiere=false;
+   if(premiere)premieres.add(s);else if(s.last>now-60L*86400000||snoozes!=null&&snoozes.optLong(s.g.get(0).optString("group"))>now)active.add(s);else dormant.add(s);}else if(s.status.equals("Not started")&&(s.g.get(0).optBoolean("listed")||!s.g.get(0).optString("status").isEmpty()&&!s.g.get(0).optString("status").equals("Automatic")||s.g.stream().anyMatch(a::playable)))fresh.add(s);}
+  active.sort((x,y)->Long.compare(y.last,x.last));dormant.sort((x,y)->Long.compare(y.last,x.last));
+  if(active.isEmpty()&&dormant.isEmpty()&&fresh.isEmpty()&&premieres.isEmpty()){empty();return;}
+  if(!active.isEmpty()||!premieres.isEmpty()){int n=active.size()+premieres.size();a.heading("Watch next");a.paragraph(n+(n==1?" show":" shows")+" in progress · tap the circle the moment you finish an episode.");for(Show s:premieres)a.body.addView(row(s,false,"SEASON "+s.next.optInt("season")+" IS OUT"));for(Show s:active)a.body.addView(row(s,false,""));}
+  if(!PhoneExperience.trackerOnly(a.data))a.ui.latest(a.body);
+  List<View> soonRows=new ArrayList<>();for(Show s:all)if(s.status.equals("Caught up")&&follows(s)){JSONObject e=nextAiring(s,now);if(e!=null)soonRows.add(agendaRow(s.g.get(0),e,now));}
+  a.harbor.section(a.body,"Caught up · airing soon","New episodes of shows you've finished so far.",soonRows);
+  List<View> waiting=new ArrayList<>();for(Show s:fresh)waiting.add(a.harbor.titleRow(s.g,s.released>0?s.released+" episodes":"Not started"));a.harbor.section(a.body,"Not started yet","Saved or downloaded, waiting for episode one.",waiting);
+  long unfinished=all.stream().filter(s->s.status.equals("Unfinished")).count();
+  if(unfinished>0){TextView note=a.text(unfinished+" unfinished show"+(unfinished==1?"":"s")+" from your logged history are in Shows ›",12,MainActivity.MUTED);note.setPadding(0,a.dp(14),0,0);note.setOnClickListener(v->{showsFilter="Unfinished";a.premium.historyView="Shows";a.render();});a.body.addView(note);}
+  if(!dormant.isEmpty()){a.heading("Still watching these?");a.paragraph("Nothing checked off for two months. Keep them in Up next, or stop tracking.");for(Show s:dormant)a.body.addView(row(s,true,""));}
+ }
+ void empty(){
+  LinearLayout card=a.column();card.setPadding(a.dp(20),a.dp(20),a.dp(20),a.dp(18));card.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{Color.rgb(42,36,28),Color.rgb(20,20,22)}){{setCornerRadius(a.dp(20));}});
+  TextView t=a.text("Track everything you watch",22,MainActivity.WHITE);t.setTypeface(null,Typeface.BOLD);card.addView(t);
+  card.addView(a.text("Log shows and movies you've seen anywhere — on Netflix, at the cinema, years ago. Noir then tells you what's next, when new episodes air, and checks them off in one tap. No files needed.",14,MainActivity.MUTED));
+  card.addView(a.button("＋ Log what you watched",this::log,true));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.setMargins(0,a.dp(14),0,a.dp(8));a.body.addView(card,p);
+  a.body.addView(a.button("Import here",()->a.startActivity(new Intent(a,HistoryToolsActivity.class)),false));a.body.addView(a.button("Watched up to…",this::log,false));a.paragraph("Import Netflix, TV Time, Trakt or Letterboxd history right here on your phone.");
+ }
+ JSONObject nextAiring(Show s,long now){JSONObject best=null;for(JSONObject i:s.g){long t=airs(i);if(i.optInt("season")>0&&t>now&&(best==null||t<airs(best)))best=i;}return best;}
+ JSONObject schedule(JSONObject i){JSONObject e=new JSONObject();DataStore.put(e,"season",i.optInt("season"));DataStore.put(e,"episode",i.optInt("episode"));DataStore.put(e,"airsAt",java.time.Instant.ofEpochMilli(airs(i)).toString());return e;}
+ String label(JSONObject i,boolean full){boolean spoiler=a.browsingSettings().optBoolean("hideSpoilers",true)&&!DataStore.watched(i)&&aired(i,System.currentTimeMillis());String title=i.optString("episodeTitle");return String.format(Locale.ROOT,"S%02d E%02d",i.optInt("season"),i.optInt("episode"))+(full&&!title.isEmpty()&&!title.equals("null")&&(!spoiler||title.matches("(?i)(episode|chapter)\\s*\\d+"))?"  "+title:"");}
+ View row(Show s,boolean dormant,String badge){
+  JSONObject show=s.g.get(0),next=s.next;LinearLayout row=new LinearLayout(a);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(a.dp(10),a.dp(10),a.dp(10),a.dp(10));row.setBackground(MainActivity.bg(MainActivity.PANEL,a.dp(16)));if(dormant)row.setAlpha(.85f);
+  LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.setMargins(0,0,0,a.dp(10));row.setLayoutParams(lp);
+  FrameLayout poster=a.ui.art(show,true,a.dp(62),a.dp(93));poster.setOnClickListener(v->a.open(show));row.addView(poster);
+  LinearLayout info=a.column();LinearLayout.LayoutParams ip=new LinearLayout.LayoutParams(0,-2,1);ip.setMargins(a.dp(12),0,a.dp(8),0);row.addView(info,ip);
+  int left=s.released-s.watched;
+  if(!badge.isEmpty()||left>0&&left<3){TextView chip=a.ui.pill(badge.isEmpty()?"ALMOST DONE":badge,badge.isEmpty()?MainActivity.GOLD:MainActivity.BLACK,badge.isEmpty()?Color.argb(50,228,192,132):MainActivity.GOLD);LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-2,-2);cp.setMargins(0,0,0,a.dp(4));info.addView(chip,cp);}
+  TextView title=a.text(show.optString("title"),16,MainActivity.WHITE);title.setTypeface(null,Typeface.BOLD);title.setSingleLine();title.setEllipsize(TextUtils.TruncateAt.END);info.addView(title);
+  TextView ep=a.text(label(next,true),13,MainActivity.GOLD);ep.setSingleLine();ep.setEllipsize(TextUtils.TruncateAt.END);info.addView(ep);
+  double seconds=0;List<JSONObject> gaps=new ArrayList<>();JSONObject furthest=null;long now=System.currentTimeMillis();
+  for(JSONObject i:a.smart.sorted(s.g))if(a.smart.counts(i)&&aired(i,now)){if(!DataStore.watched(i))seconds+=a.ui.runtime(i);else furthest=i;}
+  if(furthest!=null)for(JSONObject i:a.smart.sorted(s.g))if(a.smart.counts(i)&&i.optInt("season")>0&&aired(i,now)&&PhoneSmart.before(i,furthest)&&!DataStore.watched(i)&&!i.optString("id").equals(next.optString("id")))gaps.add(i);
+  long minutes=(long)(seconds/60);info.addView(a.text((left==1?"Last episode out":left+" episodes left")+(minutes>0?" · ≈ "+(minutes>=60?minutes/60+" h "+String.format(Locale.ROOT,"%02d",minutes%60):minutes+" min"):"")+(s.last>0?" · "+NoirUi.ago(s.last):"")+(!PhoneExperience.trackerOnly(a.data)&&a.playable(next)?" · ▶ ready":""),11,MainActivity.MUTED));
+  ProgressBar bar=new ProgressBar(a,null,android.R.attr.progressBarStyleHorizontal);bar.setMax(Math.max(1,s.released));bar.setProgress(s.watched);bar.setProgressTintList(android.content.res.ColorStateList.valueOf(MainActivity.GOLD));LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(-1,a.dp(5));bp.setMargins(0,a.dp(6),0,0);info.addView(bar,bp);
+  if(!gaps.isEmpty()){TextView fill=a.text("Skipped "+gaps.size()+" earlier · Mark them",12,MainActivity.GOLD);fill.setPadding(0,a.dp(6),0,0);fill.setOnClickListener(v->a.smart.bulk(gaps,show.optString("title")+": "+gaps.size()+" skipped episodes marked"));info.addView(fill);}
+  if(dormant){LinearLayout nudge=new LinearLayout(a);nudge.setPadding(0,a.dp(6),0,0);nudge.addView(a.ui.small("Keep",()->{JSONObject z=a.data.prefs().optJSONObject("snoozes");if(z==null)z=new JSONObject();DataStore.put(z,show.optString("group"),System.currentTimeMillis()+60L*86400000);a.data.pref("snoozes",z);a.renderKeep();},false));
+   nudge.addView(a.ui.small("Stop tracking",()->{JSONObject op=a.data.operation(show.optString("id"),"status");DataStore.put(op,"status","Dropped");a.data.queue(op);a.data.syncSoon();a.renderKeep();},false));info.addView(nudge);}
+  if(!PhoneExperience.trackerOnly(a.data)&&a.playable(next)){TextView play=a.text("▶",15,MainActivity.WHITE);play.setGravity(Gravity.CENTER);play.setBackground(MainActivity.bg(Color.argb(60,255,255,255),a.dp(20)));play.setContentDescription("Play "+label(next,false));play.setOnClickListener(v->a.play(next,false));LinearLayout.LayoutParams pp=new LinearLayout.LayoutParams(a.dp(40),a.dp(40));pp.setMargins(0,0,a.dp(8),0);row.addView(play,pp);}
+  TextView nextButton=a.ui.chip("✓ Next episode",()->checkOff(next,show.optString("title")+" "+label(next,false)+" watched"),true);nextButton.setContentDescription("Mark "+show.optString("title")+" "+label(next,false)+" watched");LinearLayout.LayoutParams nb=new LinearLayout.LayoutParams(-1,a.dp(48));nb.setMargins(0,a.dp(10),0,0);info.addView(nextButton,nb);liveRows.put(show.optString("group"),row);liveChecks.put(show.optString("group"),nextButton);
+  row.setOnClickListener(v->a.open(show));row.setOnLongClickListener(v->{a.options(next);return true;});Motion.card(row);return row;
+ }
+ // The tracker's signature control: an outlined circle that fills gold with a tick.
+ TextView check(boolean on,String description,Runnable act){
+  TextView c=a.text("✓",20,on?MainActivity.BLACK:MainActivity.MUTED);c.setGravity(Gravity.CENTER);c.setTypeface(null,Typeface.BOLD);c.setContentDescription(description);
+  GradientDrawable ring=new GradientDrawable();ring.setShape(GradientDrawable.OVAL);ring.setColor(on?MainActivity.GOLD:Color.TRANSPARENT);ring.setStroke(a.dp(2),on?MainActivity.GOLD:Color.rgb(107,102,94));c.setBackground(ring);
+  Motion.card(c);c.setOnClickListener(v->act.run());return c;
+ }
+ boolean refreshAfterLog(JSONObject focus){if(focus==null||!a.page.equals("History")||!a.detail.isEmpty())return false;String key=focus.optString("group");View old=liveRows.get(key);if(old==null||old.getParent()==null)return false;TextView check=liveChecks.get(key);if(rewards!=null&&rewards.isAttachedToWindow())PhoneRewardCard.show(a,rewards,false);Runnable swap=()->{if(!(old.getParent() instanceof ViewGroup))return;prepare();List<JSONObject> g=a.group(key);if(g==null)return;Show fresh=track(g,System.currentTimeMillis());View replacement;if(fresh.next!=null)replacement=row(fresh,false,"");else{LinearLayout done=a.column();done.setPadding(a.dp(18),a.dp(18),a.dp(18),a.dp(18));done.setBackground(MainActivity.bg(0xff242019,a.dp(16)));done.addView(a.text(g.get(0).optString("title"),17,MainActivity.WHITE));done.addView(a.text("All caught up. Beautifully done.",14,MainActivity.GOLD));replacement=done;liveRows.remove(key);liveChecks.remove(key);}ViewGroup parent=(ViewGroup)old.getParent();int index=parent.indexOfChild(old);ViewGroup.LayoutParams params=old.getLayoutParams();parent.removeView(old);parent.addView(replacement,index,params);Motion.fadeIn(replacement);};if(check!=null&&check.isAttachedToWindow()){check.setEnabled(false);Motion.checkMorph(check);Motion.after(check,190,swap);}else swap.run();a.updateStatus();return true;}
+ void checkOff(JSONObject item,String message){a.smart.checkOff(item,message);}
+ void uncheck(JSONObject item,String message){a.smart.watchedClick(item);}
+
+ // ---- Upcoming ----
+ void upcoming(){
+  long now=System.currentTimeMillis();ZoneId zone=ZoneId.systemDefault();LocalDate today=LocalDate.now();
+  boolean alerts=a.data.prefs().optBoolean("alerts",true);
+  LinearLayout top=new LinearLayout(a);top.addView(a.ui.chip(alerts?"🔔 New-episode alerts on":"🔕 Alerts off",()->{a.data.pref("alerts",!alerts);if(!alerts)EpisodeAlerts.askPermission(a);a.renderKeep();},false));a.body.addView(a.ui.row(top));
+  if(alerts)EpisodeAlerts.askPermission(a);
+  List<JSONObject[]> list=new ArrayList<>();for(Show s:shows())if(follows(s))for(JSONObject i:s.g){long t=airs(i);if(i.optInt("season")>0&&i.optInt("episode")>0&&t>0)list.add(new JSONObject[]{s.g.get(0),i});}
+  list.sort(Comparator.comparingLong(x->airs(x[1])));
+  if(list.isEmpty()){a.heading("Nothing on the calendar yet");a.paragraph("Log a show you're watching and its next episodes appear here with their air dates.");a.body.addView(a.button("＋ Log a show",this::log,true));return;}
+  List<JSONObject[]> fresh=new ArrayList<>();for(JSONObject[] x:list){long t=airs(x[1]);if(t<=now&&t>now-14L*86400000&&!DataStore.watched(x[1]))fresh.add(0,x);}
+  if(!fresh.isEmpty()){a.heading("Out now");a.paragraph(fresh.size()+(fresh.size()==1?" new episode":" new episodes")+" from the last two weeks.");for(JSONObject[] x:fresh)a.body.addView(outNow(x[0],x[1]));}
+  calendar(list,today,zone);
+  List<JSONObject[]> agenda=new ArrayList<>();for(JSONObject[] x:list){LocalDate d=Instant.ofEpochMilli(airs(x[1])).atZone(zone).toLocalDate();if(day!=null?d.equals(day):airs(x[1])>now&&d.isBefore(today.plusDays(120)))agenda.add(x);}
+  a.heading(day==null?"Coming up":day.equals(today)?"Today":day.equals(today.plusDays(1))?"Tomorrow":day.format(java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM")));
+  if(day!=null)a.body.addView(a.button("Show everything coming up",()->{day=null;a.renderKeep();},false));
+  if(agenda.isEmpty())a.paragraph("No announced episodes in the next four months.");
+  LocalDate shown=null;for(JSONObject[] x:agenda){LocalDate d=Instant.ofEpochMilli(airs(x[1])).atZone(zone).toLocalDate();if(day==null&&!d.equals(shown)){TextView h=a.text(d.equals(today)?"Today":d.equals(today.plusDays(1))?"Tomorrow":d.format(java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM")),16,MainActivity.WHITE);h.setTypeface(null,Typeface.BOLD);h.setPadding(0,a.dp(14),0,a.dp(8));a.body.addView(h);shown=d;}a.body.addView(agendaRow(x[0],x[1],now));}
+ }
+ void calendar(List<JSONObject[]> list,LocalDate today,ZoneId zone){
+  LinearLayout box=a.column();box.setPadding(a.dp(12),a.dp(12),a.dp(12),a.dp(12));box.setBackground(MainActivity.bg(Color.rgb(20,20,22),a.dp(16)));LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(-1,-2);bp.setMargins(0,a.dp(18),0,a.dp(4));a.body.addView(box,bp);
+  Map<LocalDate,List<JSONObject[]>> byDay=new HashMap<>();for(JSONObject[] x:list){LocalDate d=Instant.ofEpochMilli(airs(x[1])).atZone(zone).toLocalDate();if(d.getYear()==month.getYear()&&d.getMonth()==month.getMonth())byDay.computeIfAbsent(d,k->new ArrayList<>()).add(x);}
+  LinearLayout head=new LinearLayout(a);head.setGravity(Gravity.CENTER_VERTICAL);TextView name=a.text(month.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy")),18,MainActivity.WHITE);name.setTypeface(null,Typeface.BOLD);head.addView(name,new LinearLayout.LayoutParams(0,-2,1));
+  head.addView(a.ui.small("‹",()->{month=month.minusMonths(1);day=null;a.renderKeep();},false));head.addView(a.ui.small("›",()->{month=month.plusMonths(1);day=null;a.renderKeep();},false));box.addView(head);
+  int count=0;for(List<JSONObject[]> v:byDay.values())count+=v.size();box.addView(a.text(count+(count==1?" episode":" episodes")+" this month · tap a day",11,MainActivity.MUTED));
+  LinearLayout week=new LinearLayout(a);for(DayOfWeek d:new DayOfWeek[]{DayOfWeek.MONDAY,DayOfWeek.TUESDAY,DayOfWeek.WEDNESDAY,DayOfWeek.THURSDAY,DayOfWeek.FRIDAY,DayOfWeek.SATURDAY,DayOfWeek.SUNDAY}){TextView t=a.text(d.getDisplayName(java.time.format.TextStyle.NARROW,Locale.getDefault()),11,MainActivity.MUTED);t.setGravity(Gravity.CENTER);week.addView(t,new LinearLayout.LayoutParams(0,-2,1));}box.addView(week);
+  LinearLayout line=null;int lead=month.getDayOfWeek().getValue()-1,cells=lead+month.lengthOfMonth();
+  for(int n=0;n<((cells+6)/7)*7;n++){if(n%7==0){line=new LinearLayout(a);box.addView(line);}LocalDate d=n<lead||n>=cells?null:month.plusDays(n-lead);LinearLayout cell=a.column();cell.setGravity(Gravity.CENTER_HORIZONTAL);cell.setPadding(0,a.dp(5),0,a.dp(5));
+   if(d!=null){List<JSONObject[]> on=byDay.getOrDefault(d,List.of());boolean isToday=d.equals(today),selected=d.equals(day);TextView num=a.text(""+d.getDayOfMonth(),13,isToday?MainActivity.BLACK:d.isBefore(today)?Color.rgb(107,102,94):MainActivity.WHITE);num.setGravity(Gravity.CENTER);if(isToday){num.setBackground(MainActivity.bg(MainActivity.GOLD,a.dp(12)));num.setTypeface(null,Typeface.BOLD);}cell.addView(num,new LinearLayout.LayoutParams(a.dp(26),a.dp(26)));
+    TextView dots=a.text(on.isEmpty()?" ":on.size()>3?"●●●+":String.join("",Collections.nCopies(on.size(),"●")),7,d.isBefore(today)?MainActivity.MUTED:MainActivity.GOLD);dots.setGravity(Gravity.CENTER);cell.addView(dots);
+    if(selected)cell.setBackground(MainActivity.bg(Color.argb(60,228,192,132),a.dp(10)));if(!on.isEmpty()){final LocalDate pick=d;cell.setContentDescription(d+": "+on.size()+" episodes");cell.setOnClickListener(v->{day=pick.equals(day)?null:pick;a.renderKeep();});}}
+   line.addView(cell,new LinearLayout.LayoutParams(0,-2,1));}
+ }
+ View outNow(JSONObject show,JSONObject i){
+  LinearLayout row=new LinearLayout(a);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(a.dp(10),a.dp(10),a.dp(10),a.dp(10));row.setBackground(MainActivity.bg(MainActivity.PANEL,a.dp(16)));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.setMargins(0,0,0,a.dp(10));row.setLayoutParams(lp);
+  FrameLayout poster=a.ui.art(show,true,a.dp(62),a.dp(93));poster.setOnClickListener(v->a.open(show));row.addView(poster);
+  LinearLayout info=a.column();LinearLayout.LayoutParams ip=new LinearLayout.LayoutParams(0,-2,1);ip.setMargins(a.dp(12),0,a.dp(8),0);row.addView(info,ip);
+  TextView badge=a.ui.pill(i.optInt("episode")==1?(i.optInt("season")==1?"SERIES PREMIERE":"SEASON PREMIERE"):"NEW EPISODE",MainActivity.BLACK,MainActivity.GOLD);LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(-2,-2);bp.setMargins(0,0,0,a.dp(4));info.addView(badge,bp);
+  TextView title=a.text(show.optString("title"),16,MainActivity.WHITE);title.setTypeface(null,Typeface.BOLD);title.setSingleLine();title.setEllipsize(TextUtils.TruncateAt.END);info.addView(title);
+  info.addView(a.text(label(i,true)+" · aired "+NoirUi.ago(airs(i)),12,MainActivity.GOLD));
+  LinearLayout actions=new LinearLayout(a);actions.setPadding(0,a.dp(6),0,0);
+  if(!PhoneExperience.trackerOnly(a.data)){if(a.playable(i))actions.addView(a.ui.small("▶ Play",()->a.play(i,false),true));else if(PhoneStream.available(a)){JSONObject target=DataStore.copy(i);if(target.optString("imdb").isEmpty())DataStore.put(target,"imdb",show.optString("imdb"));actions.addView(a.ui.small("▶ Stream",()->PhoneStream.start(a,target,false),true));}else actions.addView(a.ui.small("Set up streaming",()->PhoneStream.start(a,i,false),false));
+  if(!show.optString("imdb").isEmpty()){actions.addView(a.ui.small("Stremio",()->a.stremio(i),false));actions.addView(a.ui.small("Nuvio",()->a.nuvio(i),false));}info.addView(actions);}
+  row.addView(check(false,"Mark "+label(i,false)+" watched",()->checkOff(i,show.optString("title")+" "+label(i,false)+" watched")),new LinearLayout.LayoutParams(a.dp(50),a.dp(50)));
+  row.setOnLongClickListener(v->{a.options(i);return true;});return row;
+ }
+ View agendaRow(JSONObject show,JSONObject i,long now){
+  LinearLayout row=new LinearLayout(a);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(a.dp(10),a.dp(8),a.dp(10),a.dp(8));row.setBackground(MainActivity.bg(Color.rgb(20,20,22),a.dp(12)));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.setMargins(0,0,0,a.dp(8));row.setLayoutParams(lp);
+  row.addView(a.ui.art(show,true,a.dp(44),a.dp(66)));LinearLayout info=a.column();LinearLayout.LayoutParams ip=new LinearLayout.LayoutParams(0,-2,1);ip.setMargins(a.dp(12),0,a.dp(8),0);row.addView(info,ip);
+  TextView title=a.text(show.optString("title"),15,MainActivity.WHITE);title.setTypeface(null,Typeface.BOLD);title.setSingleLine();title.setEllipsize(TextUtils.TruncateAt.END);info.addView(title);
+  ZonedDateTime when=Instant.ofEpochMilli(airs(i)).atZone(ZoneId.systemDefault());
+  info.addView(a.text(label(i,true)+(when.getHour()+when.getMinute()>0?String.format(Locale.ROOT," · %02d:%02d",when.getHour(),when.getMinute()):"")+(i.optInt("episode")==1?" · premiere":""),12,MainActivity.GOLD));
+  long t=airs(i);if(t>now){long days=java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(),when.toLocalDate());row.addView(a.ui.pill(days<=0?"Tonight":days==1?"Tomorrow":days<7?"In "+days+" days":NoirUi.date(t),MainActivity.BLACK,MainActivity.GOLD));}
+  else{boolean seen=DataStore.watched(i);row.addView(check(seen,(seen?"Unmark ":"Mark ")+label(i,false),()->{if(seen)uncheck(i,"Unmarked "+label(i,false));else checkOff(i,show.optString("title")+" "+label(i,false)+" watched");}),new LinearLayout.LayoutParams(a.dp(40),a.dp(40)));}
+  row.setOnClickListener(v->a.open(show));return row;
+ }
+
+ // ---- Shows & Movies ----
+ void showsTab(){
+  List<Show> all=new ArrayList<>();for(Show s:shows())if(s.watched>0||!s.status.equals("Not started")||s.g.get(0).optBoolean("listed"))all.add(s);
+  String[] filters={"All","Watching","Unfinished","Caught up","Not started","Finished","Dropped"};LinearLayout chips=new LinearLayout(a);for(String f:filters){long n=f.equals("All")?all.size():all.stream().filter(s->s.status.equals(f)).count();if(n==0&&!f.equals("All"))continue;chips.addView(a.ui.chip(f+" · "+n,()->{showsFilter=f;a.renderKeep();},f.equals(showsFilter)));}a.body.addView(a.ui.row(chips));
+  List<Show> shown=new ArrayList<>();for(Show s:all)if(showsFilter.equals("All")||s.status.equals(showsFilter))shown.add(s);shown.sort((x,y)->Long.compare(y.last,x.last));
+  if(shown.isEmpty()){a.paragraph(all.isEmpty()?"No shows tracked yet. Log a show and every episode you check off appears here.":"Nothing here. Try another filter.");if(all.isEmpty())a.body.addView(a.button("＋ Log a show",this::log,true));return;}
+  int toGo=0,seen=0;for(Show s:shown){seen+=s.watched;toGo+=Math.max(0,s.released-s.watched);}a.paragraph(shown.size()+(shown.size()==1?" show · ":" shows · ")+seen+" episodes watched · "+toGo+" to go");
+  List<View> cards=new ArrayList<>();for(Show s:shown){LinearLayout card=(LinearLayout)a.ui.posterCard(s.g);int stars=a.smart.rating(s.g.get(0).optString("group"));String chip=(s.status.equals("Watching")&&s.next!=null?"Next "+label(s.next,false):s.status+(s.released>0?" · "+(s.watched*100/s.released)+"%":""))+(stars>0?"  "+String.join("",Collections.nCopies(stars,"★")):"");card.addView(a.text(chip,11,MainActivity.GOLD));cards.add(card);}
+  grid(cards);
+ }
+ void grid(List<View> cards){int cols=Math.max(2,(a.getResources().getConfiguration().screenWidthDp-44)/140);LinearLayout line=null;for(int n=0;n<cards.size();n++){if(n%cols==0){line=new LinearLayout(a);line.setPadding(0,a.dp(8),0,a.dp(8));a.body.addView(line);}line.addView(cards.get(n));}}
+ void movies(){
+  List<List<JSONObject>> list=new ArrayList<>();for(List<JSONObject> g:groups)if(g.get(0).optBoolean("movie")&&g.stream().anyMatch(DataStore::watched))list.add(g);list.sort((x,y)->Long.compare(MainActivity.recent(y),MainActivity.recent(x)));
+  if(list.isEmpty()){a.paragraph("Movies you finish, log or import appear here.");a.body.addView(a.button("＋ Log a movie",this::log,true));return;}
+  int rated=0,views=0;for(List<JSONObject> g:list){JSONObject r=g.get(0).optJSONObject("review");if(r!=null&&r.optInt("rating")>0)rated++;views+=DataStore.objects(g.get(0).optJSONArray("viewings")).size();}
+  a.paragraph(list.size()+(list.size()==1?" movie · ":" movies · ")+views+" viewings · "+rated+" rated");
+  List<View> cards=new ArrayList<>();for(List<JSONObject> g:list){JSONObject m=g.get(0);LinearLayout card=(LinearLayout)a.ui.posterCard(g);JSONObject r=m.optJSONObject("review");int stars=r==null?0:r.optInt("rating");TextView rate=a.text(stars>0?String.join("",Collections.nCopies(stars,"★")):"☆ Rate",12,MainActivity.GOLD);rate.setOnClickListener(v->quickRate(a,m));card.addView(rate);cards.add(card);}
+  grid(cards);
+ }
+ void profileHeader(){a.heading(Loc.t("Four favorites"));LinearLayout row=new LinearLayout(a);org.json.JSONArray favorites=a.data.favorites();Map<String,List<JSONObject>> index=new HashMap<>();for(List<JSONObject> g:a.groups())index.put(g.get(0).optString("group"),g);int w=Math.max(58,(a.getResources().getConfiguration().screenWidthDp-68)/4);for(int n=0;n<4;n++){final int slot=n;String key=favorites.optString(n);List<JSONObject> g=index.get(key);LinearLayout cell=a.column();LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(0,-2,1);cp.setMargins(0,0,a.dp(6),a.dp(12));row.addView(cell,cp);View art;if(g!=null){art=a.ui.art(g.get(0),true,-1,a.dp(w*1.5f));TextView title=a.text(g.get(0).optString("title"),11,MainActivity.WHITE);title.setSingleLine();title.setEllipsize(TextUtils.TruncateAt.END);cell.addView(art);cell.addView(title);art.setOnClickListener(v->a.open(g.get(0)));}else{TextView empty=a.text(Loc.t("+ Pick a favorite"),12,MainActivity.GOLD);empty.setGravity(Gravity.CENTER);empty.setPadding(a.dp(6),0,a.dp(6),0);empty.setBackground(MainActivity.bg(MainActivity.PANEL,a.dp(12)));art=empty;cell.addView(art,new LinearLayout.LayoutParams(-1,a.dp(w*1.5f)));art.setOnClickListener(v->pickFavorite(slot));}art.setContentDescription(g==null?Loc.t("+ Pick a favorite"):g.get(0).optString("title")+" · "+Loc.t("Hold to replace or remove"));art.setOnLongClickListener(v->{Motion.haptic(v);new android.app.AlertDialog.Builder(a).setItems(new String[]{Loc.t("Replace favorite"),Loc.t("Remove favorite")},(d,k)->{if(k==0)pickFavorite(slot);else{List<String> keys=favoriteKeys();if(slot<keys.size())keys.remove(slot);a.data.favorites(keys);a.renderKeep();}}).show();return true;});Motion.card(art);}a.body.addView(row);}
+ List<String> favoriteKeys(){List<String> keys=new ArrayList<>();org.json.JSONArray f=a.data.favorites();for(int n=0;n<f.length();n++)keys.add(f.optString(n));return keys;}
+ void pickFavorite(int slot){LinearLayout box=a.column();box.setPadding(a.dp(18),0,a.dp(18),0);EditText query=new EditText(a);query.setHint(Loc.t("Search your library and history"));query.setTextColor(MainActivity.WHITE);box.addView(query);ListView list=new ListView(a);box.addView(list,new LinearLayout.LayoutParams(-1,a.dp(320)));List<List<JSONObject>> source=a.groups();List<JSONObject> shown=new ArrayList<>();ArrayAdapter<String> adapter=new ArrayAdapter<>(a,android.R.layout.simple_list_item_1,new ArrayList<>());list.setAdapter(adapter);Runnable filter=()->{shown.clear();adapter.clear();String q=query.getText().toString().toLowerCase(Locale.ROOT);for(List<JSONObject> g:source)if(g.get(0).optString("title").toLowerCase(Locale.ROOT).contains(q)){shown.add(g.get(0));adapter.add(g.get(0).optString("title"));if(shown.size()>=100)break;}adapter.notifyDataSetChanged();};android.app.AlertDialog dialog=new android.app.AlertDialog.Builder(a).setTitle(Loc.t("Pick a favorite")).setView(box).setNegativeButton(Loc.t("Cancel"),null).create();list.setOnItemClickListener((p,v,n,id)->{String key=shown.get(n).optString("group");a.data.favorites(replaceFavorite(favoriteKeys(),slot,key));dialog.dismiss();a.renderKeep();});query.addTextChangedListener(new android.text.TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int af){}public void onTextChanged(CharSequence s,int st,int before,int count){filter.run();}public void afterTextChanged(android.text.Editable e){}});filter.run();dialog.show();}
+ static List<String> replaceFavorite(List<String> current,int slot,String key){List<String> keys=new ArrayList<>(current);int existing=keys.indexOf(key);if(slot<keys.size()){if(existing>=0)Collections.swap(keys,slot,existing);else keys.set(slot,key);}else{if(existing>=0)keys.remove(existing);keys.add(key);}return keys;}
+ static String stars(int rating10){int value=Math.max(0,Math.min(10,rating10));return String.join("",Collections.nCopies(value/2,"★"))+(value%2==1?"½":"");}
+ static void quickRate(MainActivity a,JSONObject item){LinearLayout box=a.column();box.setPadding(a.dp(20),a.dp(8),a.dp(20),0);RatingBar rate=new RatingBar(a);rate.setNumStars(5);rate.setStepSize(.5f);rate.setRating(a.data.rating10(item)/2f);box.addView(rate,new LinearLayout.LayoutParams(-2,-2));CheckBox like=new CheckBox(a);like.setText(Loc.t("♥ Like this title"));like.setTextColor(MainActivity.GOLD);like.setChecked(a.data.liked(item.optString("group"))||a.data.liked(item.optString("id")));box.addView(like);EditText note=new EditText(a);note.setHint(Loc.t("Note · optional"));note.setTextColor(MainActivity.WHITE);JSONObject review=item.optJSONObject("review");note.setText(review==null?"":review.optString("note"));box.addView(note);new android.app.AlertDialog.Builder(a).setTitle(Loc.t("Rating · optional")).setView(box).setNegativeButton(Loc.t("Not now"),null).setPositiveButton(Loc.t("Save"),(d,w)->{a.data.review10(item.optString("id"),Math.round(rate.getRating()*2),note.getText().toString());a.data.like(item.optString("group"),like.isChecked());a.data.syncSoon();a.renderKeep();}).show();}
+ static java.lang.ref.WeakReference<PopupWindow> reactionPopup=new java.lang.ref.WeakReference<>(null);
+ static void reactionRow(MainActivity a,JSONObject item){reactionRow(a,a.data,a.body,item);}
+ static void reactionRow(android.app.Activity a,DataStore data,View anchor,JSONObject item){if(a.isFinishing()||a.isDestroyed())return;PopupWindow old=reactionPopup.get();if(old!=null)old.dismiss();float density=a.getResources().getDisplayMetrics().density;int unit=Math.max(1,Math.round(density));LinearLayout row=new LinearLayout(a);row.setPadding(10*unit,10*unit,10*unit,10*unit);row.setBackground(MainActivity.bg(0xff242019,18*unit));PopupWindow pop=new PopupWindow(row,-2,-2,false);reactionPopup=new java.lang.ref.WeakReference<>(pop);String[] keys={"loved","funny","wow","sad","meh"},icons={"\u2665","\u263a","\u2726","\u2602","\u2013"};for(int n=0;n<keys.length;n++){String mood=keys[n];TextView b=new TextView(a);b.setText(icons[n]);b.setTextSize(25);b.setTextColor(MainActivity.GOLD);b.setGravity(Gravity.CENTER);b.setContentDescription(Loc.t(mood));row.addView(b,new LinearLayout.LayoutParams(52*unit,52*unit));b.setOnClickListener(v->{data.reaction(item.optString("id"),mood);data.syncSoon();Motion.haptic(b);pop.dismiss();});Motion.card(b);}anchor.post(()->{if(!a.isFinishing())try{pop.showAtLocation(a.getWindow().getDecorView(),Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL,0,98*unit);Motion.riseIn(row,0);row.postDelayed(pop::dismiss,6000);}catch(Exception ignored){}});}
+
+ static View seasonStrip(android.app.Activity activity,List<JSONObject> group){MainActivity a=activity instanceof MainActivity?(MainActivity)activity:null;DataStore data=a==null?new DataStore(activity):a.data;LinearLayout panel=new LinearLayout(activity);panel.setOrientation(LinearLayout.VERTICAL);if(group.isEmpty())return panel;String key=group.get(0).optString("group");TreeMap<Integer,List<JSONObject>> seasons=new TreeMap<>();Map<String,Integer> moods=new LinkedHashMap<>();for(JSONObject i:group){if(i.optInt("season")>0)seasons.computeIfAbsent(i.optInt("season"),k->new ArrayList<>()).add(i);String mood=data.reaction(i.optString("id"));if(!mood.isEmpty())moods.merge(mood,1,Integer::sum);}TextView heading=new TextView(activity);heading.setText(Loc.t("Seasons & moods"));heading.setTextColor(MainActivity.GOLD);heading.setTextSize(17);heading.setPadding(0,16,0,12);panel.addView(heading);HorizontalScrollView scroll=new HorizontalScrollView(activity);scroll.setHorizontalScrollBarEnabled(false);LinearLayout row=new LinearLayout(activity);scroll.addView(row);panel.addView(scroll);for(Map.Entry<Integer,List<JSONObject>> entry:seasons.entrySet()){int season=entry.getKey(),rating=data.seasonRating(key,season);long watched=entry.getValue().stream().filter(DataStore::watched).count();TextView cell=new TextView(activity);cell.setText(Loc.f("Season %d",season)+"\n"+watched+"/"+entry.getValue().size()+"  "+(rating>0?stars(rating):"☆"));cell.setTextColor(MainActivity.GOLD);cell.setPadding(22,16,22,16);cell.setBackground(MainActivity.bg(MainActivity.PANEL,12));row.addView(cell);cell.setOnClickListener(v->{RatingBar rate=new RatingBar(activity);rate.setNumStars(5);rate.setStepSize(.5f);rate.setRating(data.seasonRating(key,season)/2f);new android.app.AlertDialog.Builder(activity).setTitle(Loc.f("Season %d",season)).setView(rate).setNegativeButton(Loc.t("Not now"),null).setPositiveButton(Loc.t("Save"),(d,w)->{int value=Math.round(rate.getRating()*2);data.seasonRating(key,season,value);data.syncSoon();cell.setText(Loc.f("Season %d",season)+"\n"+watched+"/"+entry.getValue().size()+"  "+stars(value));}).setNeutralButton(Loc.t("Save card"),(d,w)->YearStoryActivity.reward(activity,Loc.f("Season %d",season),watched+" / "+entry.getValue().size())).show();});Motion.card(cell);}if(!moods.isEmpty()){TextView map=new TextView(activity);StringBuilder text=new StringBuilder(Loc.t("Mood map"));for(Map.Entry<String,Integer> entry:moods.entrySet())text.append("  ·  ").append(Loc.t(entry.getKey())).append(" ").append(entry.getValue());map.setText(text);map.setTextColor(MainActivity.MUTED);map.setPadding(0,14,0,14);panel.addView(map);}return panel;}
+
+}

@@ -70,7 +70,7 @@ public sealed class CommunitySync : IDisposable
         busy=true;
         try
         {
-            foreach(var job in store.State.WatchSync.Values.Where(j=>j.SyncedAt==null&&j.RetryAt<=DateTimeOffset.UtcNow&&CommunityQueue.Enabled(store.State,j.Provider)).OrderBy(j=>j.WatchedAt).ToList())
+            foreach(var job in store.State.WatchSync.Values.Where(j=>j.Provider!="Nuvio"&&j.SyncedAt==null&&j.RetryAt<=DateTimeOffset.UtcNow&&CommunityQueue.Enabled(store.State,j.Provider)).OrderBy(j=>j.WatchedAt).ToList())
             {
                 if(!Current(job)) continue;
                 job.Attempts++;job.Message="Syncing…";store.Save();changed();
@@ -150,24 +150,4 @@ public sealed class CommunitySync : IDisposable
 public partial class MainWindow
 {
     CommunitySync? watchSync;
-    void RenderCommunitySettings()
-    {
-        ContentPanel.Children.Add(Heading("Connected watch history","Finished here, remembered on your accounts."));
-        void Option(string provider,bool enabled,Action<bool> save)
-        {
-            var check=new System.Windows.Controls.CheckBox{Content="Mark watched on "+provider+(provider=="Serializd"?" · TV episodes":" · movies & episodes"),IsChecked=enabled};
-            check.Click+=(_,_)=>{save(check.IsChecked==true);store.Save();watchSync?.Retry();};ContentPanel.Children.Add(check);
-            var jobs=store.State.WatchSync.Values.Where(j=>j.Provider==provider).ToList();
-            var pending=jobs.Count(j=>j.SyncedAt==null);var done=jobs.Count(j=>j.SyncedAt!=null);
-            ContentPanel.Children.Add(Body($"{done} confirmed · {pending} waiting"+(jobs.LastOrDefault(j=>j.SyncedAt==null) is { } last?" · "+last.Message:""),12));
-        }
-        Option("Trakt",store.State.SyncTrakt,value=>store.State.SyncTrakt=value);
-        Option("Serializd",store.State.SyncSerializd,value=>store.State.SyncSerializd=value);
-        ContentPanel.Children.Add(Body("Sync runs automatically in the background when Noir marks a video watched. You don't need to open a website or press Retry. Uses the accounts signed in under Reviews & comments; the browser closes when its work is done. Offline updates wait here and retry while Noir is open, or after its next launch. Websites can expire a login or request verification. Marking unwatched in Noir does not remove website history.",12));
-        var actions=new System.Windows.Controls.WrapPanel();actions.Children.Add(ActionButton("Retry sync",()=>watchSync?.Retry()));
-        var previous=ActionButton("Sync earlier watched items",()=>watchSync?.QueuePrevious());previous.Margin=new(12,0,0,0);actions.Children.Add(previous);ContentPanel.Children.Add(actions);
-        foreach(var job in store.State.WatchSync.Values.Where(j=>j.SyncedAt==null).Take(8))
-            if(store.State.Catalog.GetValueOrDefault(job.ItemId)?.Item is { } item)
-                ContentPanel.Children.Add(ActionButton(job.Provider+" · "+item.Label,()=>OpenReviews(item,job.Provider)));
-    }
 }

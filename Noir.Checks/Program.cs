@@ -13,11 +13,25 @@ var all=episodes.Append(special).ToList();
 var results=new List<string>();
 void Check(bool condition,string label) { if(!condition) throw new Exception("FAIL: "+label);results.Add("PASS: "+label);Console.WriteLine(results[^1]); }
 MobileChecks.Run(root,Check);
+BrowsingChecks.Run(root,Check);
+LetterboxdChecks.Run(root,Check);
+await PhoneProfileChecks.Run(root,Check);
+EmbeddedSubtitleChecks.Run(Check);
+StreamChecks.Run(Check);
+await StreamingSubtitleChecks.Run(root,Check);
+await SubtitleAddonChecks.Run(root,Check);
+await DetailChecks.Run(root,Check);
+SmartHistoryChecks.Run(root,Check);
+HistoryRewardsChecks.Run(Check);
+AddHistoryChecks.Run(root,Check);
 OrganizerChecks.Run(root,Check);
 ProfileChecks.Run(root,Check);
 PremiumChecks.Run(root,Check);
 UpNextChecks.Run(root,Check);
-await UxChecks.Run(root,Check);
+await PlayerChecks.Run(root,Check);
+await HistoryImportChecks.Run(root,Check);
+await HistoryIoChecks.Run(root,Check);
+await UxChecks.Run(caseRoot,Check);
 var post="https://old.reddit.com/r/television/comments/abc123/episode_discussion/comment42/?context=3";
 Check(RedditDiscussion.Reddit(post)=="https://www.reddit.com/r/television/comments/abc123/episode_discussion/comment42/","Reddit discussion links preserve the exact comment and remove tracking parameters");
 Check(new[]{"https://www.reddit.com/search/?q=test","https://reddit.com.evil.test/r/t/comments/abc123/","https://evil.test@reddit.com/r/t/comments/abc123/","http://reddit.com/r/t/comments/abc123/","https://reddit.com:444/r/t/comments/abc123/","https://reddit.com/r/t/comments/abc123/%22script/"}.All(u=>RedditDiscussion.Reddit(u)==null),"Discussion links reject searches, spoofed domains, credentials, insecure URLs and injected paths");
@@ -114,7 +128,8 @@ using(var writer=new StreamWriter(gzip)) writer.Write("tconst\tparentTconst\tsea
 var indexed=await EpisodeReviewIndex.Resolve([new(){Id="first",ImdbId="tt500",Season=2,Episode=3},new(){Id="second",ImdbId="tt500",Season=2,Episode=4},new(){Id="missing",ImdbId="tt500",Season=3,Episode=1}],caseRoot);
 Check(indexed.Count==2 && indexed["first"]=="tt900" && indexed["second"]=="tt901","Cached IMDb episode index maps season and episode exactly and leaves missing episodes unresolved");
 await DownloadChecks.Run(caseRoot,Check);
-var productionCopy=Path.Combine(caseRoot,"real-copy");Directory.CreateDirectory(productionCopy);
+await SeasonPlannerChecks.Run(caseRoot,Check);
+await FastPlanChecks.Run(caseRoot,Check);
 var syncStore=new LibraryStore(Path.Combine(caseRoot,"sync"));syncStore.State.Roots=[];
 syncStore.State.SyncTrakt=syncStore.State.SyncSerializd=true;
 var syncEpisode=new VideoItem{Id="episode-sync",Path="sync.mkv",Title="Test",ImdbId="tt500",Season=2,Episode=3,Duration=1800};
@@ -138,7 +153,8 @@ syncStore.State.SerializdSeasons[CommunityQueue.SeasonKey(syncEpisode)]="https:/
 Check(ReviewLinks.SerializdUrl(syncEpisode,syncStore.State).EndsWith("/season/66/2/episode/3")&&ReviewLinks.TraktUrl(syncEpisode)=="https://app.trakt.tv/shows/tt500/seasons/2/episodes/3","Both provider links address the exact episode");
 syncStore.State.SerializdSeasons[CommunityQueue.SeasonKey(syncEpisode)]="https://example.com/show/Test-55/season/66/2";
 Check(CommunityQueue.SerializdEpisode(syncStore.State,syncEpisode)=="","An invalid or foreign cached URL cannot be used for watched sync");
-var appData=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),".noir");
+var productionCopy=Path.Combine(caseRoot,"real-copy");Directory.CreateDirectory(productionCopy);
+var appData=Environment.GetEnvironmentVariable("NOIR_CHECKS_PROFILE")??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),".noir");
 foreach(var name in new[]{"library.json","metadata.json"}) File.Copy(Path.Combine(appData,name),Path.Combine(productionCopy,name),true);
 var production=new LibraryStore(productionCopy);var archivedBeforeScan=production.Archive.Count;var library=production.Scan(out var warnings);
 Check(production.Archive.Count>=archivedBeforeScan&&library.All(i=>i.Available&&File.Exists(i.Path)),"Real scan preserves archived titles while returning only existing videos");
@@ -157,7 +173,7 @@ if(!args.Contains("--offline")) using(var metadataClient=new MetadataClient(case
     var misspelled=await metadataClient.Fetch(new VideoItem{Title="Wastemen",IsMovie=true});
     Check(misspelled is {SourceName:"Wikipedia",Summary.Length:>20}&&File.Exists(misspelled.Poster),"A unique movie match handles the existing filename typo and caches its poster");
 }
-Core.Initialize();using var vlc=new LibVLC("--no-video-title-show","--quiet","--vout=dummy","--aout=dummy");
+Core.Initialize();using var vlc=new LibVLC("--no-video-title-show","--quiet","--vout=dummy","--aout=dummy","--avcodec-hw=none");
 using var player=new LibVLCSharp.Shared.MediaPlayer(vlc);
 var real=library.Where(x=>!x.IsMovie&&x.Available&&File.Exists(x.Path)&&Path.GetExtension(x.Path).Equals(".mkv",StringComparison.OrdinalIgnoreCase)).OrderBy(x=>new FileInfo(x.Path).Length).First();
 using var media=new Media(vlc,new Uri(real.Path));

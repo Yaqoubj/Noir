@@ -9,7 +9,7 @@ namespace Noir;
 // from the saved viewing diary and bookmarks, so it includes titles whose files are gone.
 public partial class MainWindow
 {
-    sealed record Watched(VideoItem Item,DateTimeOffset At,double Seconds,string Source);
+    sealed record Watched(VideoItem Item,DateTimeOffset At,double Seconds,string Source,bool DateUnknown=false,bool Approximate=false){public bool Precise=>!DateUnknown&&!Approximate;}
     double RuntimeOf(VideoItem item,IReadOnlyDictionary<string,double> typical)
     {
         var bookmark=store.GetProgress(item);
@@ -24,9 +24,10 @@ public partial class MainWindow
         var typical=archive.GroupBy(i=>i.GroupKey).ToDictionary(g=>g.Key,g=>
         {
             var known=g.Select(i=>store.GetProgress(i)?.Duration>60?store.GetProgress(i)!.Duration:i.Duration).Where(d=>d>60).ToList();
-            return known.Count>0?known.Average():g.First().IsMovie?6600:2580;
+            // Otherwise the show's real runtime from TVmaze, before the generic guess.
+            return known.Count>0?known.Average():store.RuntimeMinutes(g.First())*60.0;
         });
-        return archive.SelectMany(i=>store.ViewingHistory(i).Select(v=>new Watched(i,v.WatchedAt,RuntimeOf(i,typical),v.Source))).OrderByDescending(w=>w.At).ToList();
+        return archive.SelectMany(i=>store.ViewingHistory(i).Select(v=>new Watched(i,v.WatchedAt,RuntimeOf(i,typical),v.Source,v.DateUnknown,v.Approximate))).OrderByDescending(w=>w.At).ToList();
     }
     static string Duration(double seconds,bool compact=false)
     {
@@ -40,31 +41,65 @@ public partial class MainWindow
     }
     static (int Current,int Longest) Streaks(IEnumerable<DateTime> days)
     {
-        var set=days.Select(d=>d.Date).ToHashSet();int longest=0;
-        foreach(var day in set) if(!set.Contains(day.AddDays(-1))){var length=1;while(set.Contains(day.AddDays(length)))length++;longest=Math.Max(longest,length);}
-        var today=DateTime.Today;var cursor=set.Contains(today)?today:today.AddDays(-1);var current=0;
-        while(set.Contains(cursor)){current++;cursor=cursor.AddDays(-1);}
-        return (current,longest);
+        return HistoryRewards.Streaks(days.Select(d=>new RewardViewing(d)),DateTime.Today);
+    }
+    int historyReviewYear=DateTime.Today.Year;
+    void RenderYearReview(List<Watched> views)
+    {
+        var years=views.Where(v=>!v.DateUnknown).Select(v=>v.At.LocalDateTime.Year).Append(DateTime.Today.Year).Distinct().OrderDescending().ToArray();
+        var selected=views.Where(v=>!v.DateUnknown&&v.At.LocalDateTime.Year==historyReviewYear).ToList();
+        var card=new Border{CornerRadius=new(16),Background=Brush("#191715"),BorderBrush=Brush("#4DE4C084"),BorderThickness=new(1),Padding=new(22),Margin=new(0,16,0,12)};var body=new StackPanel();card.Child=body;
+        var head=new DockPanel();var year=ActionButton(historyReviewYear+"  ▾",()=>{});year.Background=Brush("#22E4C084");year.Foreground=Brush("#E4C084");year.Padding=new(12,5,12,5);DockPanel.SetDock(year,Dock.Right);head.Children.Add(year);head.Children.Add(Text(T("Year in review","حصاد السنة"),22,"#F4F1EB",FontWeights.SemiBold));body.Children.Add(head);
+        year.Click+=(_,_)=>{var menu=new ContextMenu();foreach(var y in years){var value=y;var item=new MenuItem{Header=y.ToString(),IsCheckable=true,IsChecked=y==historyReviewYear};item.Click+=(_,_)=>{historyReviewYear=value;RenderQuiet();};menu.Items.Add(item);}menu.PlacementTarget=year;menu.IsOpen=true;};
+        var busiest=selected.GroupBy(v=>v.At.LocalDateTime.Month).OrderByDescending(g=>g.Sum(v=>v.Seconds)).FirstOrDefault();
+        var longest=HistoryRewards.Streaks(selected.Select(v=>new RewardViewing(v.At.LocalDateTime.Date,v.Item.IsMovie,v.DateUnknown,v.Approximate)),new DateTime(historyReviewYear,12,31)).Longest;
+        var metrics=new WrapPanel{Margin=new(0,12,0,16)};
+        foreach(var pair in new[]{(T("Hours watched","ساعات المشاهدة"),$"{selected.Sum(v=>v.Seconds)/3600:0.#}"),(T("Busiest month","أكثر الشهور مشاهدة"),busiest==null?"—":new DateTime(historyReviewYear,busiest.Key,1).ToString("MMMM",Loc.Culture)),(T("Longest streak","أطول سلسلة مشاهدة"),T("{0} days","{0} يوم",longest))})
+        {var metric=new StackPanel{MinWidth=145,Margin=new(0,0,26,8)};metric.Children.Add(Text(pair.Item2,23,"#E4C084",FontWeights.SemiBold));metric.Children.Add(Text(pair.Item1,11.5,"#B6AA96"));metrics.Children.Add(metric);}body.Children.Add(metrics);
+        var tops=new WrapPanel();
+        foreach(var movie in new[]{false,true})
+        {
+            var top=selected.Where(v=>v.Item.IsMovie==movie).GroupBy(v=>v.Item.GroupKey).OrderByDescending(g=>g.Sum(v=>v.Seconds)).Take(2).ToList();
+            foreach(var group in top)
+            {
+                var item=group.First().Item;var row=new Grid{Width=200,Margin=new(0,0,18,8)};row.ColumnDefinitions.Add(new(){Width=new(52)});row.ColumnDefinitions.Add(new());row.Children.Add(new Border{CornerRadius=new(6),ClipToBounds=true,Child=HistoryArt(item,75)});
+                var info=new StackPanel{Margin=new(10,0,0,0),VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(info,1);info.Children.Add(Text(movie?T("Top movie","من أبرز الأفلام"):T("Top show","من أبرز المسلسلات"),10,"#B6AA96"));var title=Text(item.Title,13.5,weight:FontWeights.SemiBold);title.TextWrapping=TextWrapping.NoWrap;title.TextTrimming=TextTrimming.CharacterEllipsis;info.Children.Add(title);info.Children.Add(Text(Duration(group.Sum(v=>v.Seconds),true),11,"#E4C084"));row.Children.Add(info);var open=new Button{Content=row,Padding=new(0),Background=Brush("Transparent"),ToolTip=item.Title};open.Click+=(_,_)=>OpenHistoryTitle(store.EpisodesFor(item.GroupKey));tops.Children.Add(open);
+            }
+        }
+        if(selected.Count==0)body.Children.Add(Text(T("A fresh chapter. Log a story to start your year.","بداية جديدة. سجّل مشاهدة لتبدأ حكاية السنة."),13,"#C7BBA7"));else body.Children.Add(tops);ContentPanel.Children.Add(card);
+        ContentPanel.Children.Add(Heading(T("On this day","في مثل هذا اليوم")));
+        var memories=views.Where(v=>v.Precise&&v.At.LocalDateTime.Year<DateTime.Today.Year&&v.At.LocalDateTime.Month==DateTime.Today.Month&&v.At.LocalDateTime.Day==DateTime.Today.Day).Take(6).ToList();
+        if(memories.Count==0)ContentPanel.Children.Add(Body(T("Today's memories are still ahead. Your diary will keep them here.","ذكريات هذا اليوم قادمة. ستحتفظ بها يومياتك هنا."),13));
+        else foreach(var memory in memories)
+        {
+            var row=new DockPanel{Margin=new(0,0,0,8)};var poster=new Border{Width=34,Height=50,CornerRadius=new(5),ClipToBounds=true,Child=HistoryArt(memory.Item,50),Margin=new(0,0,12,0)};DockPanel.SetDock(poster,Dock.Left);row.Children.Add(poster);var info=new StackPanel{VerticalAlignment=VerticalAlignment.Center};info.Children.Add(Text(memory.Item.Title,14,weight:FontWeights.SemiBold));info.Children.Add(Text(memory.At.LocalDateTime.Year+"  ·  "+(memory.Item.IsMovie?T("Movie"):Short(memory.Item)),11.5,"#C0AC89"));row.Children.Add(info);ContentPanel.Children.Add(new Border{Background=Brush("#151517"),CornerRadius=new(10),Padding=new(12,8,12,8),Margin=new(0,0,0,6),Child=row});
+        }
     }
     void RenderHistoryStats()
     {
         var views=AllViewings();
+        var story=ActionButton(T("Your {0} story ›","حكايتك في {0} ›",historyReviewYear),()=>OpenYearStory(historyReviewYear),true);story.Margin=new(0,14,0,0);ContentPanel.Children.Add(story);
         if(views.Count==0)
         {
-            ContentPanel.Children.Add(Heading("Your stats start with your first finished episode","Watch time, streaks, favourite shows and milestones appear here as you watch."));
+            ContentPanel.Children.Add(Heading(T("Your stats start with your first story","إحصاءاتك تبدأ بأول حكاية"),T("Log a favourite, or bring your history from Netflix, Trakt and more.","سجّل عملاً تحبه أو استورد سجلك من نتفليكس وتراكت وغيرها.")));HistoryEmptyActions();
             return;
         }
+        RenderYearReview(views);
+        RenderProfileStats(views);
         var episodes=views.Where(v=>!v.Item.IsMovie).ToList();var movies=views.Where(v=>v.Item.IsMovie).ToList();
         var total=views.Sum(v=>v.Seconds);
-        var streak=Streaks(views.Select(v=>v.At.ToLocalTime().DateTime));
+        // Logged-without-a-date viewings count toward totals but not toward when-you-watch charts.
+        var dated=views.Where(v=>!v.DateUnknown).ToList();
+        var exact=dated.Where(v=>v.Precise).ToList();
+        var streak=Streaks(exact.Select(v=>v.At.ToLocalTime().DateTime));
         // Headline
         var headline=new Border{Background=new LinearGradientBrush(Brush("#2A241C").Color,Brush("#141416").Color,20),CornerRadius=new(14),Padding=new(26,22,26,22),Margin=new(0,10,0,14)};
         var head=new StackPanel();head.Children.Add(Text("TIME WATCHED",10,"#E4C084",FontWeights.SemiBold));
         var big=Text(Duration(total),36,weight:FontWeights.Bold);big.Margin=new(0,6,0,4);head.Children.Add(big);
         var monthStart=new DateTimeOffset(DateTime.Today.Year,DateTime.Today.Month,1,0,0,0,DateTimeOffset.Now.Offset);
-        var thisMonth=views.Where(v=>v.At>=monthStart).Sum(v=>v.Seconds);var lastMonth=views.Where(v=>v.At>=monthStart.AddMonths(-1)&&v.At<monthStart).Sum(v=>v.Seconds);
+        var thisMonth=dated.Where(v=>v.At>=monthStart).Sum(v=>v.Seconds);var lastMonth=dated.Where(v=>v.At>=monthStart.AddMonths(-1)&&v.At<monthStart).Sum(v=>v.Seconds);
         var trend=lastMonth>0?$" · {(thisMonth>=lastMonth?"▲":"▼")} {Math.Abs(thisMonth-lastMonth)/lastMonth:P0} vs last month":"";
-        head.Children.Add(Text($"{Duration(thisMonth,true)} this month{trend}  ·  {views.Count} viewings since {views[^1].At.ToLocalTime():d MMM yyyy}",13,"#C7C2BC"));
+        head.Children.Add(Text($"{Duration(thisMonth,true)} this month{trend}  ·  {views.Count} viewings"+(dated.Count>0?$" since {dated[^1].At.ToLocalTime():d MMM yyyy}":"")+"",13,"#C7C2BC"));
         var share=ActionButton("Share my stats",()=>ShareStats(views,total,streak.Longest));share.Margin=new(0,16,0,0);head.Children.Add(share);
         headline.Child=head;ContentPanel.Children.Add(headline);
         var cards=new WrapPanel();
@@ -73,26 +108,26 @@ public partial class MainWindow
         cards.Children.Add(StatCard("movies",movies.Count.ToString()));
         cards.Children.Add(StatCard(streak.Current>0?"day streak · best "+streak.Longest:"best streak (days)",(streak.Current>0?streak.Current:streak.Longest).ToString()));
         var phone=views.Count(v=>v.Source.Contains("Android"));if(phone>0)cards.Children.Add(StatCard("watched on your phone",$"{phone*100/views.Count}%"));
-        var binge=episodes.GroupBy(v=>(v.Item.GroupKey,v.At.ToLocalTime().Date)).Select(g=>(g.First().Item.Title,g.Key.Date,Count:g.Count())).OrderByDescending(g=>g.Count).FirstOrDefault();
+        var binge=episodes.Where(v=>v.Precise).GroupBy(v=>(v.Item.GroupKey,v.At.ToLocalTime().Date)).Select(g=>(g.First().Item.Title,g.Key.Date,Count:g.Count())).OrderByDescending(g=>g.Count).FirstOrDefault();
         if(binge.Count>1)cards.Children.Add(StatCard($"biggest binge · {binge.Title}, {binge.Date:d MMM}",$"{binge.Count} eps"));
         ContentPanel.Children.Add(cards);
 
         // Last 12 weeks
         ContentPanel.Children.Add(Heading("Your last 12 weeks","Hours watched each week."));
         var weekStart=DateTime.Today.AddDays(-(((int)DateTime.Today.DayOfWeek+6)%7));
-        var weeks=Enumerable.Range(0,12).Select(i=>weekStart.AddDays(-7*(11-i))).Select(start=>(Start:start,Hours:views.Where(v=>v.At.ToLocalTime().DateTime>=start&&v.At.ToLocalTime().DateTime<start.AddDays(7)).Sum(v=>v.Seconds)/3600)).ToList();
+        var weeks=Enumerable.Range(0,12).Select(i=>weekStart.AddDays(-7*(11-i))).Select(start=>(Start:start,Hours:dated.Where(v=>v.At.ToLocalTime().DateTime>=start&&v.At.ToLocalTime().DateTime<start.AddDays(7)).Sum(v=>v.Seconds)/3600)).ToList();
         ContentPanel.Children.Add(BarChart(weeks.Select(w=>(w.Start.ToString("d MMM"),w.Hours,w.Hours>0?$"{w.Hours:0.#} h":"")).ToList(),140,highlightLast:true));
 
         // When you watch
         var rhythm=new Grid{Margin=new(0,8,0,0)};rhythm.ColumnDefinitions.Add(new());rhythm.ColumnDefinitions.Add(new(){Width=new(28)});rhythm.ColumnDefinitions.Add(new());
-        var days=Enumerable.Range(0,7).Select(d=>(DayOfWeek)((d+1)%7)).Select(d=>(Label:d.ToString()[..3],Value:(double)views.Count(v=>v.At.ToLocalTime().DayOfWeek==d))).ToList();
+        var days=Enumerable.Range(0,7).Select(d=>(DayOfWeek)((d+1)%7)).Select(d=>(Label:d.ToString()[..3],Value:(double)exact.Count(v=>v.At.ToLocalTime().DayOfWeek==d))).ToList();
         var dayPanel=new StackPanel();dayPanel.Children.Add(Text("Favourite days",15,weight:FontWeights.SemiBold));dayPanel.Children.Add(BarChart(days.Select(d=>(d.Label,d.Value,d.Value>0?d.Value.ToString("0"):"")).ToList(),96));rhythm.Children.Add(dayPanel);
         string Part(int hour)=>hour is >=5 and <12?"Morning":hour is >=12 and <17?"Afternoon":hour is >=17 and <22?"Evening":"Late night";
-        var parts=new[]{"Morning","Afternoon","Evening","Late night"}.Select(p=>(Label:p,Count:views.Count(v=>Part(v.At.ToLocalTime().Hour)==p))).ToList();
+        var parts=new[]{"Morning","Afternoon","Evening","Late night"}.Select(p=>(Label:p,Count:exact.Count(v=>Part(v.At.ToLocalTime().Hour)==p))).ToList();
         var timePanel=new StackPanel();Grid.SetColumn(timePanel,2);
         var favourite=parts.MaxBy(p=>p.Count);
         timePanel.Children.Add(Text(favourite.Label switch{"Late night"=>"You're a night owl 🦉","Morning"=>"An early-morning watcher","Afternoon"=>"Afternoon is your time",_=>"Evenings are for watching"},15,weight:FontWeights.SemiBold));
-        foreach(var p in parts) timePanel.Children.Add(MeterRow(p.Label,p.Count/(double)views.Count,$"{p.Count*100/views.Count}%"));
+        foreach(var p in parts) timePanel.Children.Add(MeterRow(p.Label,p.Count/(double)Math.Max(1,exact.Count),$"{p.Count*100/Math.Max(1,exact.Count)}%"));
         rhythm.Children.Add(timePanel);
         ContentPanel.Children.Add(Heading("When you watch"));ContentPanel.Children.Add(rhythm);
 
@@ -108,7 +143,7 @@ public partial class MainWindow
                 var released=Math.Max(group.Count(i=>i.Season>0&&(store.State.EpisodeSchedules.GetValueOrDefault(s.Key)?.FirstOrDefault(e=>e.Season==i.Season&&e.Episode==i.Episode)?.AirsAt is not {} at||at<=DateTimeOffset.UtcNow)),1);
                 var seen=group.Count(i=>i.Season>0&&store.EverWatched(i));
                 var card=new StackPanel{Width=170,Margin=new(0,0,18,18)};
-                var poster=ActionButton("",()=>OpenDetails(group));poster.Content=Art(first.Poster,first.Title,240,true);poster.Padding=new(0);poster.HorizontalAlignment=HorizontalAlignment.Stretch;
+                var poster=ActionButton("",()=>OpenHistoryTitle(group));poster.Content=Art(first.Poster,first.Title,240,true);poster.Padding=new(0);poster.HorizontalAlignment=HorizontalAlignment.Stretch;
                 card.Children.Add(new Border{CornerRadius=new(10),ClipToBounds=true,Child=poster});
                 var name=Text(first.Title,14,weight:FontWeights.SemiBold);name.Margin=new(0,8,0,2);name.TextTrimming=TextTrimming.CharacterEllipsis;name.TextWrapping=TextWrapping.NoWrap;card.Children.Add(name);
                 card.Children.Add(Text($"{Duration(s.Seconds,true)} · {s.Count} episode{(s.Count==1?"":"s")} watched",11,"#AAA6A0"));
@@ -135,7 +170,7 @@ public partial class MainWindow
             foreach(var b in behind)
             {
                 var avg=b.Group.Select(i=>store.GetProgress(i)?.Duration>60?store.GetProgress(i)!.Duration:i.Duration).Where(d=>d>60).DefaultIfEmpty(2580).Average();
-                var line=ActionButton($"{b.Group[0].Title}  ·  {b.Left} episode{(b.Left==1?"":"s")} left  ·  about {Duration(avg*b.Left,true)}",()=>OpenDetails(b.Group));
+                var line=ActionButton($"{b.Group[0].Title}  ·  {b.Left} episode{(b.Left==1?"":"s")} left  ·  about {Duration(avg*b.Left,true)}",()=>OpenHistoryTitle(b.Group));
                 line.HorizontalAlignment=HorizontalAlignment.Stretch;line.HorizontalContentAlignment=HorizontalAlignment.Left;line.Margin=new(0,0,0,8);ContentPanel.Children.Add(line);
             }
         }

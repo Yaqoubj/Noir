@@ -4,7 +4,7 @@ $venv=Join-Path $workspace 'work/subtitle-build'
 if(!(Test-Path -LiteralPath "$venv/Scripts/python.exe")){& python -m venv $venv;if($LASTEXITCODE -ne 0){throw 'Could not create subtitle build environment'}}
 & "$venv/Scripts/python.exe" -m pip install -r "$workspace/Noir.Tools/subtitle-sync/requirements.txt"
 if($LASTEXITCODE -ne 0){throw 'Could not install subtitle build dependencies'}
-& "$venv/Scripts/python.exe" -m PyInstaller --noconfirm --onedir --name NoirSubtitleSync --distpath "$workspace/work/subtitle-dist" --workpath "$workspace/work/subtitle-pyinstaller" --specpath "$workspace/work" --additional-hooks-dir "$workspace/Noir.Tools/subtitle-sync/hooks" --collect-all ffsubsync --copy-metadata ffsubsync "$workspace/Noir.Tools/subtitle-sync/subtitle_sync.py"
+& "$venv/Scripts/python.exe" -m PyInstaller --noconfirm --onedir --name NoirSubtitleSync --distpath "$workspace/work/subtitle-dist" --workpath "$workspace/work/subtitle-pyinstaller" --specpath "$workspace/work/subtitle-pyinstaller" --additional-hooks-dir "$workspace/Noir.Tools/subtitle-sync/hooks" --collect-all ffsubsync --copy-metadata ffsubsync "$workspace/Noir.Tools/subtitle-sync/subtitle_sync.py"
 if($LASTEXITCODE -ne 0){throw 'Could not build subtitle alignment worker'}
 $runtime=Join-Path $workspace 'work/subtitle-runtime'
 New-Item -ItemType Directory -Force $runtime | Out-Null

@@ -81,7 +81,7 @@ public partial class MainWindow
             await Until(()=>ended,"Episode reaches its natural end");
             Assert(sleepPlan==null&&nextTimer?.IsEnabled!=true&&current==episode,"End-of-episode sleep limit prevents automatic advancement");
             ReturnToLibrary();Assert(PlayerOverlay.Visibility==Visibility.Collapsed&&previewPanel?.Visibility!=Visibility.Visible,"Leaving video removes controls and any preview overlay");
-            Navigate("History");historyFilter="Watched";Render();UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"history-new.png"));
+            trackerTab="Diary";Navigate("History");UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"history-new.png"));
             Navigate("Settings");UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"settings-new.png"));
             results.Add("ALL ENHANCEMENT CHECKS PASSED");
         }

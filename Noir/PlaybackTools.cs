@@ -38,7 +38,8 @@ public partial class MainWindow
         if(preference.SubtitleTrack=="Off" || preference.SubtitleTrack.Length==0&&store.State.Subtitles=="Off") player.SetSpu(-1);
         else if(!Select(player.SpuDescription,preference.SubtitleTrack,id=>player.SetSpu(id))&&store.State.Subtitles is "English" or "Arabic")
         {
-            var arabic=store.State.Subtitles=="Arabic";
+            var rememberedLanguage=SubtitleDownloads.Language(preference.SubtitleTrack);
+            var arabic=rememberedLanguage.Length>0?rememberedLanguage=="ar":store.State.Subtitles=="Arabic";
             var english=player.SpuDescription.FirstOrDefault(x=>x.Id>=0&&(x.Name.Contains(arabic?"Arabic":"English",StringComparison.OrdinalIgnoreCase)||x.Name.Contains(arabic?"[ara]":"[eng]",StringComparison.OrdinalIgnoreCase)||System.Text.RegularExpressions.Regex.IsMatch(x.Name,arabic?@"(?i)\.ar[.\]]":@"(?i)\.en[.\]]")));
             if(!string.IsNullOrEmpty(english.Name)) player.SetSpu(english.Id);
         }

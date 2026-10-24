@@ -24,15 +24,28 @@ public partial class MainWindow
         }
         if(discoverQuery.Length==0)
         {
-            var spotlight=discoverResults.Titles.FirstOrDefault(t=>t.BackgroundUrl.Length>0)??discoverResults.Titles[0];
-            ContentPanel.Children.Add(DiscoverHero(spotlight,token,revision,false));
+            // A rotating spotlight of up to five titles with artwork, with dots to pick one.
+            var spotlights=discoverResults.Titles.Where(t=>t.BackgroundUrl.Length>0).Take(5).ToList();if(spotlights.Count==0)spotlights.Add(discoverResults.Titles[0]);
+            discoverSpot%=spotlights.Count;
+            ContentPanel.Children.Add(DiscoverSpotlight(spotlights,token,revision));
             ContentPanel.Children.Add(DiscoverFilters());
+            var genres=discoverResults.Titles.SelectMany(t=>t.Genres).GroupBy(g=>g).Where(g=>g.Count()>=3).OrderByDescending(g=>g.Count()).Select(g=>g.Key).Take(12).ToList();
+            if(discoverGenre!="All genres"&&!genres.Contains(discoverGenre))discoverGenre="All genres";
+            if(genres.Count>1){var chips=Chips(new[]{"All genres"}.Concat(genres).ToArray(),discoverGenre,g=>{discoverGenre=g;Render();});chips.Margin=new(0,0,0,4);ContentPanel.Children.Add(chips);}
             if(discoverMessage.Length>0)ContentPanel.Children.Add(Body(discoverMessage,12));
-            var rest=discoverResults.Titles.Where(t=>t!=spotlight).ToList();
-            if(discoverFilter=="All")
+            var rest=discoverResults.Titles.Where(t=>!spotlights.Contains(t)||discoverGenre!="All genres").Where(t=>discoverGenre=="All genres"||t.Genres.Contains(discoverGenre)).ToList();
+            if(discoverGenre!="All genres")DiscoverGrid(rest,token,revision,T(discoverGenre)+" · "+T(discoverFilter=="All"?"popular now":discoverFilter=="Movies"?"popular movies":"popular shows"));
+            else if(discoverFilter=="All")
             {
+                RenderTopTen();
+                RenderPersonalRails(token,revision);
                 ContentPanel.Children.Add(Rail("Popular shows","Trending series, including anime.",rest.Where(t=>!t.IsMovie).Take(30).Select(t=>DiscoverCard(t,token,revision)).ToList(),()=>{discoverFilter="TV shows";_=SearchDiscover();}));
                 ContentPanel.Children.Add(Rail("Popular movies","What everyone is watching right now.",rest.Where(t=>t.IsMovie).Take(30).Select(t=>DiscoverCard(t,token,revision)).ToList(),()=>{discoverFilter="Movies";_=SearchDiscover();}));
+                foreach(var genre in genres.Take(3))
+                {
+                    var g=genre;var titles=rest.Where(t=>t.Genres.Contains(g)).Take(30).ToList();
+                    if(titles.Count>=4)ContentPanel.Children.Add(Rail(T(g),string.Empty,titles.Select(t=>DiscoverCard(t,token,revision)).ToList(),()=>{discoverGenre=g;Render();ContentScroll.ScrollToTop();}));
+                }
                 var inLibrary=rest.Where(t=>store.Archive.Any(i=>i.ImdbId==t.Id)).ToList();
                 if(inLibrary.Count>0)ContentPanel.Children.Add(Rail("Already in your library",string.Empty,inLibrary.Select(t=>DiscoverCard(t,token,revision)).ToList()));
             }
@@ -45,6 +58,34 @@ public partial class MainWindow
         }
         var credit=Body("Title information and artwork: Cinemeta. Downloads use your AIOStreams and TorBox connection."+(discoverResults.Cached?" Showing cached results.":""),11);credit.Margin=new(0,30,0,10);ContentPanel.Children.Add(credit);
     }
+    int discoverSpot;string discoverGenre="All genres";System.Windows.Threading.DispatcherTimer? spotTimer;
+    FrameworkElement DiscoverSpotlight(List<DiscoverTitle> spotlights,CancellationToken token,int revision)
+    {
+        var host=new Grid();var slot=new ContentControl{Content=DiscoverHero(spotlights[discoverSpot],token,revision,false),Focusable=false};host.Children.Add(slot);
+        if(spotlights.Count<2)return host;
+        var dots=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Bottom,Margin=new(0,0,0,30)};host.Children.Add(dots);
+        void Show(int index)
+        {
+            discoverSpot=index;slot.Content=DiscoverHero(spotlights[index],token,revision,false);Motion.FadeIn(slot);
+            for(int i=0;i<dots.Children.Count;i++){var d=(Button)dots.Children[i];d.Width=i==index?26:9;d.Background=Brush(i==index?"#E4C084":"#66FFFFFF");}
+        }
+        for(int i=0;i<spotlights.Count;i++)
+        {
+            var index=i;var dot=new Button{Width=i==discoverSpot?26:9,Height=9,Margin=new(4,0,4,0),Padding=new(0),Background=Brush(i==discoverSpot?"#E4C084":"#66FFFFFF"),BorderThickness=new(0),Template=DotTemplate(),Cursor=System.Windows.Input.Cursors.Hand,ToolTip=spotlights[i].Name};
+            System.Windows.Automation.AutomationProperties.SetName(dot,"Spotlight "+(i+1)+": "+spotlights[i].Name);dot.Click+=(_,_)=>{spotTimer?.Stop();Show(index);};dots.Children.Add(dot);
+        }
+        // Advances every 9 seconds while Discover's browse view is showing and the pointer isn't on it.
+        spotTimer?.Stop();spotTimer=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromSeconds(9)};
+        spotTimer.Tick+=(_,_)=>{if(page!="Discover"||discoverTitle!=null||revision!=discoverRevision||!host.IsLoaded){spotTimer?.Stop();return;}if(!host.IsMouseOver&&!validationMode)Show((discoverSpot+1)%spotlights.Count);};
+        if(Motion.Enabled&&!validationMode)spotTimer.Start();host.Unloaded+=(_,_)=>spotTimer?.Stop();
+        return host;
+    }
+    static ControlTemplate DotTemplate()
+    {
+        var border=new FrameworkElementFactory(typeof(Border));border.SetValue(Border.CornerRadiusProperty,new CornerRadius(4.5));
+        border.SetBinding(Border.BackgroundProperty,new System.Windows.Data.Binding("Background"){RelativeSource=System.Windows.Data.RelativeSource.TemplatedParent});
+        return new ControlTemplate(typeof(Button)){VisualTree=border};
+    }
     FrameworkElement DiscoverFilters()
     {
         var row=Chips(["All","Movies","TV shows"],discoverFilter,label=>{discoverFilter=label;_=SearchDiscover();});
@@ -55,7 +96,7 @@ public partial class MainWindow
         ContentPanel.Children.Add(Heading(heading));
         var panel=new WrapPanel();ContentPanel.Children.Add(panel);var rendered=0;var more=ActionButton("",()=>{});more.Style=(Style)FindResource("Pill");more.Padding=new(20,10,20,10);more.HorizontalAlignment=HorizontalAlignment.Center;more.Margin=new(0,16,0,0);
         void Batch(){foreach(var t in titles.Skip(rendered).Take(30))panel.Children.Add(DiscoverCard(t,token,revision));rendered=Math.Min(rendered+30,titles.Count);more.Content=$"Show more · {titles.Count-rendered} remaining";more.Visibility=rendered<titles.Count?Visibility.Visible:Visibility.Collapsed;}
-        Batch();more.Click+=(_,_)=>Batch();ContentPanel.Children.Add(more);
+        Batch();StaggerCards(panel);more.Click+=(_,_)=>Batch();ContentPanel.Children.Add(more);
     }
     // Placeholder cards with a soft pulse while results load, instead of a line of text.
     void RenderDiscoverLoading(string query)
@@ -63,14 +104,15 @@ public partial class MainWindow
         cinematic=false;ApplyPageLayout();
         ContentPanel.Children.Add(DiscoverFilters());
         ContentPanel.Children.Add(Heading(query.Length>0?$"Searching for “{query}”…":"Finding popular movies & shows…"));
-        var row=new WrapPanel();var pulse=new DoubleAnimation(.35,.8,TimeSpan.FromMilliseconds(900)){AutoReverse=true,RepeatBehavior=RepeatBehavior.Forever};
-        for(int i=0;i<12;i++){var card=new StackPanel{Width=176,Margin=new(0,0,18,22)};card.Children.Add(new Border{Height=264,CornerRadius=new(10),Background=Brush("#1C1C1F")});card.Children.Add(new Border{Height=12,Width=120,CornerRadius=new(6),Background=Brush("#1C1C1F"),Margin=new(0,10,0,0),HorizontalAlignment=HorizontalAlignment.Left});card.BeginAnimation(OpacityProperty,pulse);row.Children.Add(card);}
-        ContentPanel.Children.Add(row);
+        var row=new WrapPanel();var sheen=new LinearGradientBrush{StartPoint=new(0,0),EndPoint=new(1,.25)};sheen.GradientStops.Add(new(Color.FromRgb(25,25,28),0));sheen.GradientStops.Add(new(Color.FromRgb(43,41,39),.5));sheen.GradientStops.Add(new(Color.FromRgb(25,25,28),1));
+        for(int i=0;i<12;i++){var card=new StackPanel{Width=176,Margin=new(0,0,18,22)};card.Children.Add(new Border{Height=264,CornerRadius=new(10),Background=sheen});card.Children.Add(new Border{Height=12,Width=120,CornerRadius=new(6),Background=Brush("#1C1C1F"),Margin=new(0,10,0,0),HorizontalAlignment=HorizontalAlignment.Left});row.Children.Add(card);}
+        Motion.Shimmer(row,sheen);ContentPanel.Children.Add(row);
     }
-    FrameworkElement DiscoverCard(DiscoverTitle title,CancellationToken token,int revision)
+    FrameworkElement DiscoverCard(DiscoverTitle title,CancellationToken token,int revision,bool anywhere=false)
     {
         var body=new StackPanel{Width=176,Margin=new(0,0,18,8)};
         var picture=new Grid{Height=264,ClipToBounds=true};picture.Children.Add(Art(title.Poster,title.Name,264,true));
+        var status=StatusLabels.For(title.Episodes.Select(e=>new StatusEpisode(e.Season,e.Episode,e.AirsAt)),DateTimeOffset.UtcNow,topTen?.FindIndex(t=>t.Id==title.Id)+1??0);if(status.Length>0)picture.Children.Add(new Border{Background=Brush("#E4C084"),CornerRadius=new(5),Padding=new(7,3,7,3),Margin=new(8),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Bottom,IsHitTestVisible=false,Child=Text(StatusText(status),10,"#16120C",FontWeights.SemiBold)});
         if(title.Rating.Length>0)picture.Children.Add(new Border{IsHitTestVisible=false,Background=Brush("#E6101012"),CornerRadius=new(6),Padding=new(7,3,7,3),Margin=new(8),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Top,Child=Text("★ "+title.Rating,11,"#E4C084",FontWeights.SemiBold)});
         var existing=store.Archive.Where(i=>i.ImdbId==title.Id&&i.IsMovie==title.IsMovie).ToList();
         if(existing.Count>0)picture.Children.Add(new Border{IsHitTestVisible=false,Background=Brush("#E4C084"),CornerRadius=new(6),Padding=new(7,3,7,3),Margin=new(8),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Bottom,Child=Text(existing.Any(CanPlay)?"ON YOUR PC":store.State.Watchlist.Contains(existing[0].GroupKey)?"IN MY LIST":"IN LIBRARY",10,"#16120C",FontWeights.Bold)});
@@ -79,36 +121,54 @@ public partial class MainWindow
         var name=Text(title.Name,14,weight:FontWeights.SemiBold);name.Margin=new(0,9,0,2);name.TextTrimming=TextTrimming.CharacterEllipsis;name.TextWrapping=TextWrapping.NoWrap;body.Children.Add(name);
         body.Children.Add(Text((title.IsMovie?"Movie":"Series")+(title.Years.Length>0?" · "+title.Years:""),11,"#9F9A93"));
         if(!File.Exists(title.Poster))_=Load();
-        async Task Load(){try{using var client=DiscoverClient();await client.Artwork(title,token);if(token.IsCancellationRequested||revision!=discoverRevision||page!="Discover"||closing)return;var source=ImageSource(title.Poster,384);if(source!=null){picture.Children.RemoveAt(0);var image=new Image{Source=source,Stretch=Stretch.UniformToFill};picture.Children.Insert(0,image);image.BeginAnimation(OpacityProperty,new DoubleAnimation(0,1,TimeSpan.FromMilliseconds(350)));}}catch(OperationCanceledException)when(token.IsCancellationRequested){}catch(Exception e){store.Log(e);}}
+        async Task Load(){try{using var client=DiscoverClient();await client.Artwork(title,token);if(token.IsCancellationRequested||!anywhere&&(revision!=discoverRevision||page!="Discover")||closing)return;var source=ImageSource(title.Poster,384);if(source!=null){picture.Children.RemoveAt(0);var image=new Image{Source=source,Stretch=Stretch.UniformToFill};picture.Children.Insert(0,image);if(image.IsLoaded)Motion.FadeIn(image);}}catch(OperationCanceledException)when(token.IsCancellationRequested){}catch(Exception e){store.Log(e);}}
         return Lift(body,edge);
     }
     // Full-bleed artwork for a Discover title; the background is fetched if it isn't cached yet.
     FrameworkElement DiscoverHero(DiscoverTitle title,CancellationToken token,int revision,bool detail)
     {
         var grid=new Grid{Height=HeroHeight(detail),ClipToBounds=true,Background=Brush("#151517")};
-        var image=new Image{Stretch=Stretch.UniformToFill,VerticalAlignment=VerticalAlignment.Top};grid.Children.Add(image);
-        void Paint(){var source=ImageSource(File.Exists(title.Background)?title.Background:title.Poster,1920);if(source!=null){image.Source=source;image.BeginAnimation(OpacityProperty,new DoubleAnimation(0,1,TimeSpan.FromMilliseconds(500)));}}
-        if(File.Exists(title.Background))Paint();else _=Fetch();
+        var artwork=new Grid{IsHitTestVisible=false};grid.Children.Add(artwork);
+        void Paint(){artwork.Children.Clear();HeroArtwork(artwork,File.Exists(title.Background)?title.Background:title.Poster,title.Id);}
+        Paint();if(!File.Exists(title.Background))_=Fetch();
         async Task Fetch(){try{using var client=DiscoverClient();await client.Artwork(title,token,true);if(!token.IsCancellationRequested&&revision==discoverRevision&&!closing)Paint();}catch(OperationCanceledException)when(token.IsCancellationRequested){}catch(Exception e){store.Log(e);}}
-        var side=new LinearGradientBrush{StartPoint=new(0,.5),EndPoint=new(1,.5)};side.GradientStops.Add(new(Color.FromArgb(245,11,11,13),0));side.GradientStops.Add(new(Color.FromArgb(160,11,11,13),.4));side.GradientStops.Add(new(Color.FromArgb(0,11,11,13),.75));
-        var floor=new LinearGradientBrush{StartPoint=new(0,0),EndPoint=new(0,1)};floor.GradientStops.Add(new(Color.FromArgb(150,11,11,13),0));floor.GradientStops.Add(new(Color.FromArgb(0,11,11,13),.22));floor.GradientStops.Add(new(Color.FromArgb(0,11,11,13),.55));floor.GradientStops.Add(new(Color.FromArgb(255,11,11,13),1));
-        grid.Children.Add(new Border{Background=side,IsHitTestVisible=false});grid.Children.Add(new Border{Background=floor,IsHitTestVisible=false});
         var panel=new StackPanel{Margin=new(sidePad,0,sidePad,detail?42:56),MaxWidth=700,HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Bottom};
         panel.Children.Add(new Border{Background=Brush("#33E4C084"),BorderBrush=Brush("#66E4C084"),BorderThickness=new(1),CornerRadius=new(4),Padding=new(9,3,9,3),HorizontalAlignment=HorizontalAlignment.Left,Child=Text(detail?(title.IsMovie?"MOVIE":"SERIES"):"SPOTLIGHT · "+(title.IsMovie?"MOVIE":"SERIES"),11,"#F0D3A0",FontWeights.SemiBold)});
         var name=Text(title.Name,title.Name.Length>24?50:66,weight:FontWeights.Bold);name.FontFamily=new FontFamily("Segoe UI Variable Display, Segoe UI");name.LineHeight=title.Name.Length>24?56:72;name.Margin=new(0,14,0,10);panel.Children.Add(name);
         var facts=new TextBlock{FontSize=14,Foreground=Brush("#D9D4CC"),TextWrapping=TextWrapping.Wrap};
         if(title.Rating.Length>0)facts.Inlines.Add(new System.Windows.Documents.Run("★ "+title.Rating+"  IMDb      "){Foreground=Brush("#E4C084")});
         facts.Inlines.Add(new System.Windows.Documents.Run(string.Join("   ·   ",new[]{title.Years}.Concat(title.Genres.Take(3)).Where(x=>x.Length>0))));panel.Children.Add(facts);
-        if(title.Summary.Length>0){var summary=Text(title.Summary,15,"#C9C4BD");summary.MaxHeight=66;summary.LineHeight=22;summary.TextTrimming=TextTrimming.WordEllipsis;summary.Margin=new(0,12,0,0);summary.MaxWidth=620;summary.HorizontalAlignment=HorizontalAlignment.Left;panel.Children.Add(summary);}
+        if(title.Summary.Length>0){var summary=Text(title.Summary,15,"#C9C4BD");summary.MaxHeight=66;summary.LineHeight=22;summary.TextTrimming=TextTrimming.WordEllipsis;summary.Margin=new(0,12,0,0);summary.MaxWidth=520;summary.HorizontalAlignment=HorizontalAlignment.Left;panel.Children.Add(summary);}
         var actions=new StackPanel{Orientation=Orientation.Horizontal,Margin=new(0,26,0,0)};
         var existing=store.Archive.FirstOrDefault(i=>i.ImdbId==title.Id&&i.IsMovie==title.IsMovie);
         if(!detail)actions.Children.Add(BigButton("ⓘ   Explore",()=>_=OpenDiscover(title),true));
+        else if(title.IsMovie&&!(existing!=null&&CanPlay(existing))&&StreamOffered){actions.Children.Add(BigButton("▶   Stream",()=>DiscoverStream(title,0,0),true));actions.Children.Add(BigButton("↓   Download",()=>DiscoverDownload(title,0,0,false),false));}
         else if(title.IsMovie)actions.Children.Add(BigButton(existing!=null&&CanPlay(existing)?"▶   Play":"↓   Find movie downloads",()=>{if(existing!=null&&CanPlay(existing))_=PlayVideo(existing);else DiscoverDownload(title,0,0,false);},true));
+        else if(NextToStream(title,existing) is {} next)
+            actions.Children.Add(BigButton($"▶   {T("Stream")} S{next.Season} E{next.Episode}",()=>DiscoverStream(title,next.Season,next.Episode),true));
         if(detail&&existing!=null)actions.Children.Add(BigButton("Open in library",()=>{var group=store.EpisodesFor(existing.GroupKey);Navigate(existing.IsMovie?"Movies":"Shows");OpenDetails(group);},false));
         var listed=existing!=null&&store.State.Watchlist.Contains(existing.GroupKey);
         actions.Children.Add(RoundAction(listed?"✓":"＋",listed?"In My List":"Add to My List",()=>{store.AddDiscovered(title,true);Render();Status.Text="Saved to My List. Watching history stays unchanged.";},listed));
+        var inLibrary=existing!=null&&store.InLibrary(existing.GroupKey);
+        actions.Children.Add(RoundAction(inLibrary?"▦":"＋",inLibrary?"In your library · click to remove":"Add to library",()=>{var key=existing?.GroupKey??store.AddDiscovered(title,false)[0].GroupKey;store.SetInLibrary(key,!inLibrary);Render();Status.Text=inLibrary?"Removed from your library. History stays.":"Added to your library.";},inLibrary));
+        if(detail&&title.IsMovie){var seen=existing!=null&&store.EverWatched(existing);actions.Children.Add(RoundAction(seen?"👁":"👁",seen?"Watched · open in History":"I've seen it · log it in History",()=>{if(seen)OpenLog(title);else LogTitleItems(title,[(0,0)],title.Name+" logged as watched");},seen));}
+        if(detail&&!title.IsMovie)actions.Children.Add(RoundAction("✓","Track episodes you've seen",()=>OpenLog(title)));
         panel.Children.Add(actions);grid.Children.Add(panel);FitHero(grid,panel,detail);
         return Bleed(grid,detail?6:0);
+    }
+    // The show's next aired episode you haven't watched (the first one again when you've seen them all).
+    KnownEpisode? NextToStream(DiscoverTitle title,VideoItem? existing)
+    {
+        var released=title.Episodes.Where(e=>e.Season>0&&e.Episode>0&&(e.AirsAt==null||e.AirsAt<=DateTimeOffset.UtcNow)).OrderBy(e=>e.Season).ThenBy(e=>e.Episode).ToList();
+        var seen=existing==null?[]:store.EpisodesFor(existing.GroupKey).Where(store.EverWatched).Select(i=>(i.Season,i.Episode)).ToHashSet();
+        // Details still loading: the pilot is the natural place to start.
+        return released.FirstOrDefault(e=>!seen.Contains((e.Season,e.Episode)))??released.FirstOrDefault()??(title.Episodes.Count==0?new KnownEpisode{Season=1,Episode=1}:null);
+    }
+    void DiscoverStream(DiscoverTitle title,int season,int episode)
+    {
+        if(!StreamSetUp())return;
+        try{var group=store.AddDiscovered(title,false);var item=title.IsMovie?group[0]:group.FirstOrDefault(i=>i.Season==season&&i.Episode==episode);if(item==null){Status.Text="This episode is missing from the title schedule. Refresh details.";return;}StreamItem(item);}
+        catch(Exception e){store.Log(e);Status.Text="Couldn't prepare this title for streaming.";}
     }
     void DiscoverDownload(DiscoverTitle title,int season,int episode,bool whole)
     {
@@ -120,7 +180,8 @@ public partial class MainWindow
         var token=discoverCancellation?.Token??BeginDiscover();var revision=discoverRevision;
         ContentPanel.Children.Add(DiscoverHero(title,token,revision,true));
         var back=ActionButton("←  Back to Discover",()=>{CancelDiscover();discoverTitle=null;Render();ContentScroll.ScrollToTop();});back.Background=Brush("Transparent");back.Foreground=Brush("#AAA6A0");back.Padding=new(0,4,0,4);back.HorizontalAlignment=HorizontalAlignment.Left;ContentPanel.Children.Add(back);
-        if(title.IsMovie){ContentPanel.Children.Add(Body("Review the releases, quality and size before anything downloads. The movie joins your library when it finishes.",13));return;}
+        ContentPanel.Children.Add(WatchOptions(title.Id,title.IsMovie,title.Name));
+        if(title.IsMovie){ContentPanel.Children.Add(Body("Or download it: review the releases, quality and size before anything downloads. The movie joins your library when it finishes.",13));ContentPanel.Children.Add(MoreLikeThis(title.Id,true,title.Genres));return;}
         var seasons=title.Episodes.Select(e=>e.Season).Distinct().Order().ToList();if(seasons.Count==0){ContentPanel.Children.Add(Body("No episode schedule is available for this title yet."));return;}
         if(!seasons.Contains(discoverSeason))discoverSeason=seasons[0];
         var existing=store.Archive.FirstOrDefault(i=>i.ImdbId==title.Id&&i.IsMovie==title.IsMovie);
@@ -134,12 +195,18 @@ public partial class MainWindow
             var available=episode.AirsAt==null||episode.AirsAt<=DateTimeOffset.UtcNow;var local=existing==null?null:store.EpisodesFor(existing.GroupKey).FirstOrDefault(i=>i.Season==episode.Season&&i.Episode==episode.Episode);
             var card=new Border{Width=300,Margin=new(0,0,16,16),CornerRadius=new(12),Background=Brush("#161618"),BorderBrush=Brush("#24FFFFFF"),BorderThickness=new(1),Padding=new(16,14,16,14)};
             var stack=new StackPanel();card.Child=stack;
-            var top=new DockPanel();var number=Text(episode.Episode.ToString("00"),30,"#3A362F",FontWeights.Bold);number.FontFamily=new FontFamily("Segoe UI Variable Display, Segoe UI");DockPanel.SetDock(number,Dock.Left);top.Children.Add(number);
+            var top=new DockPanel();
+            if(available){var seen=local!=null&&store.EverWatched(local);var ep=episode;var check=CheckCircle(seen,seen?"Unmark this episode":"I've seen this episode",()=>{if(seen)UncheckAll([local!],$"S{ep.Season:00} E{ep.Episode:00} unmarked");else LogTitleItems(title,[(ep.Season,ep.Episode)],$"{title.Name} S{ep.Season:00} E{ep.Episode:00} logged");},30);check.Margin=new(10,0,0,0);check.VerticalAlignment=VerticalAlignment.Center;DockPanel.SetDock(check,Dock.Right);top.Children.Add(check);}
+            var number=Text(episode.Episode.ToString("00"),30,"#3A362F",FontWeights.Bold);number.FontFamily=new FontFamily("Segoe UI Variable Display, Segoe UI");DockPanel.SetDock(number,Dock.Left);top.Children.Add(number);
             var state=Text(!available?"Airs "+episode.AirsAt?.ToLocalTime().ToString("d MMM yyyy"):local!=null&&CanPlay(local)?"On your PC":local!=null&&store.EverWatched(local)?"Watched":"Released",11,available?"#E4C084":"#9F9A93",FontWeights.SemiBold);state.HorizontalAlignment=HorizontalAlignment.Right;state.VerticalAlignment=VerticalAlignment.Center;top.Children.Add(state);stack.Children.Add(top);
             var name=Text(episode.Title.Length>0?episode.Title:"Episode "+episode.Episode,14.5,"#F4F1EB",FontWeights.SemiBold);name.Height=40;name.TextTrimming=TextTrimming.WordEllipsis;name.Margin=new(0,4,0,10);stack.Children.Add(name);
-            var playable=local!=null&&CanPlay(local);var act=ActionButton(playable?"▶ Play":"↓ Download",()=>{if(playable)_=PlayVideo(local!);else DiscoverDownload(title,episode.Season,episode.Episode,false);},playable||available);act.IsEnabled=available;act.HorizontalAlignment=HorizontalAlignment.Left;act.Padding=new(14,7,14,7);stack.Children.Add(act);
+            var playable=local!=null&&CanPlay(local);var streams=!playable&&StreamOffered;
+            var act=ActionButton(playable?"▶ Play":streams?"▶ Stream":"↓ Download",()=>{if(playable)_=PlayVideo(local!);else if(streams)DiscoverStream(title,episode.Season,episode.Episode);else DiscoverDownload(title,episode.Season,episode.Episode,false);},playable||available);act.IsEnabled=available;act.HorizontalAlignment=HorizontalAlignment.Left;act.Padding=new(14,7,14,7);
+            if(streams){var row=new StackPanel{Orientation=Orientation.Horizontal};row.Children.Add(act);var get=ActionButton("↓",()=>DiscoverDownload(title,episode.Season,episode.Episode,false));get.IsEnabled=available;get.ToolTip=T("Download to this PC");get.Padding=new(12,7,12,7);get.Margin=new(8,0,0,0);row.Children.Add(get);stack.Children.Add(row);}
+            else stack.Children.Add(act);
             grid.Children.Add(Lift(card));
         }
+        ContentPanel.Children.Add(MoreLikeThis(title.Id,false,title.Genres));
         ContentPanel.Children.Add(Body("Information: Cinemeta · Artwork and schedules are cached for later browsing.",11));
     }
 }

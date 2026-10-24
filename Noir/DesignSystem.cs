@@ -10,12 +10,46 @@ namespace Noir;
 // actionable "Latest" cards used by History.
 public partial class MainWindow
 {
+    Popup? hoverCard;
+    FrameworkElement? hoverOwner;
+    bool hoverEvents;
+    // The hover card is already under the pointer, so start the dwell without waiting for a fresh MouseEnter.
+    void HoverPreview(Border media,VideoItem item){PreviewHost.Attach(media,item,700);media.Dispatcher.BeginInvoke(()=>{if(media.IsMouseOver)media.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice,0){RoutedEvent=Mouse.MouseEnterEvent});},System.Windows.Threading.DispatcherPriority.Loaded);}
+    string TileStatus(VideoItem item)=>StatusLabels.For((store.State.EpisodeSchedules.GetValueOrDefault(item.GroupKey)??[]).Select(e=>new StatusEpisode(e.Season,e.Episode,e.AirsAt)),DateTimeOffset.UtcNow,item.ImdbId.Length>0?topTen?.FindIndex(t=>t.Id==item.ImdbId)+1??0:0);
+    static string StatusText(string label)=>label switch{"New season"=>T("New season","موسم جديد"),"New episode"=>T("New episode","حلقة جديدة"),"Finale"=>T("Finale","ختام الموسم"),"Still planned"=>T("Still planned","ما زال ضمن الخطط"),_=>label.StartsWith("#")?T("{0} this week","{0} هذا الأسبوع",label.Split(' ')[0]):T(label)};
+    void AddStatusPill(Grid picture,VideoItem item)
+    {
+        var label=TileStatus(item);if(label.Length==0)return;picture.Children.Add(new Border{Background=Brush("#E4C084"),CornerRadius=new(5),Padding=new(7,3,7,3),Margin=new(8),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Top,IsHitTestVisible=false,Child=Text(StatusText(label),10,"#16120C",FontWeights.SemiBold)});
+    }
+    void CloseHoverCard(){if(hoverCard!=null){hoverCard.IsOpen=false;hoverCard.Child=null;hoverCard=null;}hoverOwner=null;}
+    FrameworkElement HoverCard(FrameworkElement card,List<VideoItem> group,FrameworkElement? anchor=null)
+    {
+        anchor??=card;var timer=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromMilliseconds(500)};var leave=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromMilliseconds(160)};
+        if(!hoverEvents){hoverEvents=true;ContentScroll.ScrollChanged+=(_,e)=>{if(e.VerticalChange!=0||e.HorizontalChange!=0)CloseHoverCard();};Deactivated+=(_,_)=>CloseHoverCard();PreviewKeyDown+=(_,e)=>{if(e.Key==Key.Escape&&hoverCard!=null){var owner=hoverOwner;CloseHoverCard();owner?.Focus();e.Handled=true;}};}
+        void Start(){leave.Stop();timer.Stop();if(hoverOwner!=card)timer.Start();}
+        void Leave(){timer.Stop();leave.Start();}
+        timer.Tick+=(_,_)=>{timer.Stop();if(card.IsLoaded&&(card.IsMouseOver||card.IsKeyboardFocusWithin))ShowHoverCard(card,anchor,group);};
+        leave.Tick+=(_,_)=>{leave.Stop();if(hoverOwner==card&&hoverCard?.Child is UIElement content&&!content.IsMouseOver&&!content.IsKeyboardFocusWithin)CloseHoverCard();};
+        anchor.MouseEnter+=(_,_)=>Start();anchor.MouseLeave+=(_,_)=>Leave();card.IsKeyboardFocusWithinChanged+=(_,_)=>{if(card.IsKeyboardFocusWithin)Start();else Leave();};card.Unloaded+=(_,_)=>{timer.Stop();leave.Stop();if(hoverOwner==card)CloseHoverCard();};return card;
+    }
+    void ShowHoverCard(FrameworkElement owner,FrameworkElement anchor,List<VideoItem> group)
+    {
+        CloseHoverCard();var item=group[0];var next=store.ContinueFor(group)??store.UpNextFor(group)?.Item??item;var width=Math.Clamp(anchor.ActualWidth*1.35,270,450);
+        var body=new StackPanel();var media=new Border{Height=width*.56,Background=Brush("#19191C"),Child=Art(System.IO.File.Exists(item.Backdrop)?item.Backdrop:item.Poster,item.Title,width*.56),ClipToBounds=true};body.Children.Add(media);if(Motion.Enabled)HoverPreview(media,item);
+        var info=new StackPanel{Margin=new(14)};body.Children.Add(info);info.Children.Add(Text(item.Title,17,weight:FontWeights.SemiBold));var label=TileStatus(item);if(label.Length>0){var pill=new Border{HorizontalAlignment=HorizontalAlignment.Left,CornerRadius=new(5),Padding=new(7,3,7,3),Margin=new(0,8,0,4),Background=Brush("#33E4C084"),Child=Text(StatusText(label),11,"#E4C084")};info.Children.Add(pill);}
+        var facts=new List<string>();if(next.Duration>0)facts.Add(Loc.Runtime(next.Duration));if(item.Year>0)facts.Add(item.Year.ToString());facts.AddRange(item.Genres.Split('·',StringSplitOptions.TrimEntries|StringSplitOptions.RemoveEmptyEntries).Take(3).Select(T));var meta=Text(string.Join(" · ",facts),11,"#BDB6AC");meta.Margin=new(0,6,0,10);info.Children.Add(meta);
+        var actions=new WrapPanel();info.Children.Add(actions);void Add(string text,string name,Action action,bool primary=false){var b=ActionButton(text,()=>{CloseHoverCard();action();},primary);b.Padding=new(10,7,10,7);b.FontSize=12;b.Margin=new(0,0,6,6);System.Windows.Automation.AutomationProperties.SetName(b,name);actions.Children.Add(b);}
+        Add("▶ "+T(store.GetProgress(next) is {Completed:false,Position:>0}?"Resume":"Play"),T("Play")+" "+item.Title,()=>{if(CanPlay(next))_=PlayVideo(next);else OpenDetails(group);},true);var listed=store.State.Watchlist.Contains(item.GroupKey);Add((listed?"✓ ":"＋ ")+T("My List"),T("My List")+" "+item.Title,()=>ToggleWatchlist(item));var seen=store.EverWatched(next);Add(T("✓ Watched","✓ تمت المشاهدة"),T("Watched")+" "+next.Title,()=>{store.Mark(next,!seen);Render();});Add("ⓘ "+T("Details"),T("Details")+" "+item.Title,()=>OpenDetails(group));
+        var progress=store.GetProgress(next);var total=progress?.Duration??next.Duration;var watched=group.Count(store.EverWatched);var bar=new ProgressBar{Height=4,Maximum=total>0?total:Math.Max(1,group.Count),Value=total>0?progress?.Position??0:watched,Foreground=Brush("#E4C084"),Background=Brush("#2A2A30"),BorderThickness=new(0),Margin=new(0,8,0,0)};info.Children.Add(bar);
+        var border=new Border{Width=width,Background=Brush("#18181B"),BorderBrush=Brush("#88E4C084"),BorderThickness=new(1),CornerRadius=new(12),ClipToBounds=true,Child=body,Focusable=true};System.Windows.Automation.AutomationProperties.SetName(border,T("Title preview","معاينة العنوان")+" "+item.Title);
+        hoverOwner=owner;hoverCard=new Popup{Child=border,PlacementTarget=anchor,Placement=PlacementMode.Center,AllowsTransparency=true,StaysOpen=false,IsOpen=true};var active=hoverCard;border.MouseLeave+=(_,_)=>{if(!owner.IsMouseOver&&!border.IsKeyboardFocusWithin&&hoverCard==active)CloseHoverCard();};border.IsKeyboardFocusWithinChanged+=(_,_)=>{if(!border.IsKeyboardFocusWithin&&!border.IsMouseOver&&!owner.IsMouseOver&&hoverCard==active)CloseHoverCard();};active.Closed+=(_,_)=>{if(hoverCard==active){hoverCard=null;hoverOwner=null;}};Motion.FadeIn(border);Motion.Pop(border);if(owner.IsKeyboardFocusWithin&&!owner.IsMouseOver)actions.Children.OfType<Button>().FirstOrDefault()?.Focus();
+    }
     // A titled horizontal row with arrow buttons, Shift+wheel scrolling and an optional "See all".
     FrameworkElement Rail(string title,string subtitle,IEnumerable<FrameworkElement> cards,Action? seeAll=null,string seeAllLabel="See all")
     {
         var container=new StackPanel{Margin=new(0,8,0,4)};var header=new DockPanel{Margin=new(0,22,0,14)};
         var arrows=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Bottom};DockPanel.SetDock(arrows,Dock.Right);header.Children.Add(arrows);
-        var heading=new StackPanel();heading.Children.Add(Text(title,21,weight:FontWeights.SemiBold));if(subtitle.Length>0){var s=Body(subtitle,12);s.Margin=new(0,3,0,0);heading.Children.Add(s);}header.Children.Add(heading);
+        var heading=new StackPanel();heading.Children.Add(Text(T(title),21,weight:FontWeights.SemiBold));if(subtitle.Length>0){var s=Body(subtitle,12);s.Margin=new(0,3,0,0);heading.Children.Add(s);}header.Children.Add(heading);
         var row=new StackPanel{Orientation=Orientation.Horizontal};foreach(var card in cards)row.Children.Add(card);
         if(row.Children.Count==0) return container;
         var scroll=new ScrollViewer{Content=row,HorizontalScrollBarVisibility=ScrollBarVisibility.Hidden,VerticalScrollBarVisibility=ScrollBarVisibility.Disabled,PanningMode=PanningMode.HorizontalOnly,Padding=new(0,6,0,6),Margin=new(-6,-6,-6,0)};
@@ -23,28 +57,55 @@ public partial class MainWindow
         Button Arrow(string glyph,string tip,int direction)
         {
             var b=ActionButton(glyph,()=>scroll.ScrollToHorizontalOffset(Math.Clamp(scroll.HorizontalOffset+direction*Math.Max(300,scroll.ViewportWidth*.8),0,scroll.ScrollableWidth)));
-            b.ToolTip=tip;b.FontSize=20;b.Width=38;b.Height=34;b.Padding=new(0);b.Margin=new(8,0,0,0);b.Background=Brush("#1C1C1F");return b;
+            b.ToolTip=T(tip);b.FontSize=20;b.Width=38;b.Height=34;b.Padding=new(0);b.Margin=new(8,0,0,0);b.Background=Brush("#1C1C1F");return b;
         }
         if(seeAll!=null){var all=ActionButton(seeAllLabel,seeAll);all.Padding=new(14,7,14,7);all.Background=Brush("Transparent");all.Foreground=Brush("#E4C084");arrows.Children.Add(all);}
         var previous=Arrow("‹","Previous",-1);var next=Arrow("›","More",1);arrows.Children.Add(previous);arrows.Children.Add(next);
         void Update(){previous.IsEnabled=scroll.HorizontalOffset>1;next.IsEnabled=scroll.HorizontalOffset<scroll.ScrollableWidth-1;previous.Visibility=next.Visibility=scroll.ScrollableWidth>1?Visibility.Visible:Visibility.Collapsed;}
         scroll.ScrollChanged+=(_,_)=>Update();scroll.Loaded+=(_,_)=>Update();
         scroll.PreviewMouseWheel+=(_,e)=>{if(Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)){scroll.ScrollToHorizontalOffset(scroll.HorizontalOffset-e.Delta);e.Handled=true;}};
-        container.Children.Add(header);container.Children.Add(scroll);return container;
+        container.Children.Add(header);container.Children.Add(scroll);StaggerCards(row);return container;
     }
     // Cards lift slightly and gain a gold edge on hover or keyboard focus.
     static FrameworkElement Lift(FrameworkElement card,Border? edge=null)
     {
-        var scale=new ScaleTransform(1,1);card.RenderTransform=scale;card.RenderTransformOrigin=new(.5,.5);
-        void To(double value,bool on)
+        var shadow=new System.Windows.Media.Effects.DropShadowEffect{Color=Color.FromRgb(0,0,0),BlurRadius=22,ShadowDepth=5,Opacity=.5};shadow.Freeze();
+        void Update(bool? hover=null)
         {
-            var animation=new DoubleAnimation(value,TimeSpan.FromMilliseconds(140)){EasingFunction=new QuadraticEase()};
-            scale.BeginAnimation(ScaleTransform.ScaleXProperty,animation);scale.BeginAnimation(ScaleTransform.ScaleYProperty,animation);
-            if(edge!=null)edge.BorderBrush=Brush(on?"#E4C084":"#00000000");
+            var on=(hover??card.IsMouseOver)||card.IsKeyboardFocusWithin;Motion.Scale(card,on?1.035:1);
+            if(edge!=null){edge.BorderBrush=Brush(on?"#E4C084":"#00000000");edge.Effect=on?shadow:null;}
         }
-        card.MouseEnter+=(_,_)=>To(1.035,true);card.MouseLeave+=(_,_)=>To(1,false);
-        card.IsKeyboardFocusWithinChanged+=(_,e)=>To((bool)e.NewValue?1.035:1,(bool)e.NewValue);
+        card.MouseEnter+=(_,_)=>Update(true);card.MouseLeave+=(_,_)=>Update(false);card.IsKeyboardFocusWithinChanged+=(_,_)=>Update();
+        card.Unloaded+=(_,_)=>{if(edge!=null){edge.Effect=null;edge.BorderBrush=Brush("#00000000");}};
         return card;
+    }
+    int cardEntranceCount;bool animateCards;
+    void StaggerCards(Panel panel)
+    {
+        if(!animateCards||!Motion.Enabled)return;var entered=false;
+        panel.Loaded+=(_,_)=>
+        {
+            if(entered)return;entered=true;var step=0;
+            foreach(var card in panel.Children.OfType<FrameworkElement>().Take(10))
+            {
+                if(cardEntranceCount>=10)break;var bounds=card.TransformToAncestor(ContentScroll).TransformBounds(new Rect(card.RenderSize));
+                if(bounds.Right<=0||bounds.Left>=ContentScroll.ViewportWidth||bounds.Bottom<=0||bounds.Top>=ContentScroll.ViewportHeight)continue;
+                Motion.EnterOnce(card,step++*35);cardEntranceCount++;
+            }
+        };
+    }
+    static void RevealOnFocus(FrameworkElement owner,FrameworkElement reveal)
+    {
+        void Show(bool on)=>Motion.Opacity(reveal,on?1:0,on?150:120);
+        owner.MouseEnter+=(_,_)=>Show(true);owner.MouseLeave+=(_,_)=>Show(owner.IsKeyboardFocusWithin);owner.IsKeyboardFocusWithinChanged+=(_,_)=>Show(owner.IsMouseOver||owner.IsKeyboardFocusWithin);
+    }
+    FrameworkElement PosterQuickActions(List<VideoItem> group)
+    {
+        var item=group[0];var overlay=new Grid{Opacity=0,VerticalAlignment=VerticalAlignment.Bottom,Background=new LinearGradientBrush(Colors.Transparent,Color.FromArgb(235,8,8,10),90)};
+        var row=new StackPanel{Orientation=Orientation.Horizontal,Margin=new(10,30,10,12)};overlay.Children.Add(row);
+        var next=store.ContinueFor(group)??store.UpNextFor(group)?.Item??item;
+        if(CanPlay(next)){var play=ActionButton("▶",()=>_=PlayVideo(next),true);play.ToolTip=T("Play");System.Windows.Automation.AutomationProperties.SetName(play,T("Play")+" "+item.Title);play.Padding=new(13,7,13,7);play.Margin=new(0,0,7,0);row.Children.Add(play);}
+        var listed=store.State.Watchlist.Contains(item.GroupKey);var list=ActionButton(listed?"✓":"＋",()=>ToggleWatchlist(item));list.ToolTip=T(listed?"In My List · click to remove":"Add to My List");System.Windows.Automation.AutomationProperties.SetName(list,(string)list.ToolTip+" "+item.Title);list.Padding=new(12,7,12,7);row.Children.Add(list);return overlay;
     }
     FrameworkElement PosterCard(List<VideoItem> group)
     {
@@ -55,13 +116,13 @@ public partial class MainWindow
         var watched=group.Count(i=>(item.IsMovie||i.Season>0)&&store.EverWatched(i));var total=group.Count(i=>item.IsMovie||i.Season>0);
         if(watched>0&&!item.IsMovie)picture.Children.Add(new ProgressBar{Value=watched,Maximum=Math.Max(1,total),Height=4,VerticalAlignment=VerticalAlignment.Bottom,IsHitTestVisible=false,Background=Brush("#99000000")});
         if(item.IsMovie&&store.EverWatched(item))picture.Children.Add(new Border{IsHitTestVisible=false,Background=Brush("#E6101012"),CornerRadius=new(6),Padding=new(7,3,7,3),Margin=new(8),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Bottom,Child=Text("✓ Watched",10,"#E4C084",FontWeights.SemiBold)});
-        picture.Children.Add(CardMenu(item));
+        var quick=PosterQuickActions(group);picture.Children.Add(quick);RevealOnFocus(panel,quick);picture.Children.Add(CardMenu(item));AddStatusPill(picture,item);
         var edge=new Border{CornerRadius=new(10),ClipToBounds=true,Child=picture,BorderThickness=new(1.5),BorderBrush=Brush("#00000000")};panel.Children.Add(edge);
         var name=Text(item.Title,14,weight:FontWeights.SemiBold);name.Margin=new(0,9,0,2);name.TextTrimming=TextTrimming.CharacterEllipsis;name.TextWrapping=TextWrapping.NoWrap;panel.Children.Add(name);
         var meta=item.IsMovie?(item.Year>0?item.Year.ToString():"Movie"):(watched>0?$"{watched} / {total} watched":$"{total} episodes");
         if(!group.Any(CanPlay))meta+=" · Not on PC";
         var line=Text(meta,11,"#9F9A93");line.TextTrimming=TextTrimming.CharacterEllipsis;line.TextWrapping=TextWrapping.NoWrap;panel.Children.Add(line);
-        panel.ContextMenu=ItemMenu(item);return Lift(panel,edge);
+        LazyMenu(panel,item);return HoverCard(Lift(panel,edge),group,edge);
     }
     void RailCatalog(List<List<VideoItem>> groups,string title,string subtitle="",Action? seeAll=null,int limit=30)
     {
@@ -71,6 +132,11 @@ public partial class MainWindow
     static string Ago(DateTimeOffset at)
     {
         var span=DateTimeOffset.Now-at;
+        if(Loc.Arabic)
+        {
+            if(span.TotalMinutes<2)return "الآن";if(span.TotalHours<1)return $"منذ {(int)span.TotalMinutes} د";if(span.TotalHours<24)return $"منذ {(int)span.TotalHours} س";
+            if(span.TotalDays<2)return "أمس";return at.ToLocalTime().ToString(span.TotalDays<7?"dddd":"d MMM",Loc.Culture);
+        }
         if(span.TotalMinutes<2)return "just now";if(span.TotalHours<1)return $"{(int)span.TotalMinutes} min ago";if(span.TotalHours<24)return $"{(int)span.TotalHours} h ago";
         if(span.TotalDays<2)return "yesterday";if(span.TotalDays<7)return at.ToLocalTime().ToString("dddd");return at.ToLocalTime().ToString("d MMM");
     }
@@ -80,7 +146,7 @@ public partial class MainWindow
         var latest=store.Archive.Select(i=>(Item:i,At:HistoryDate(i))).Where(x=>x.At>DateTimeOffset.MinValue)
             .GroupBy(x=>x.Item.GroupKey).Select(g=>g.OrderByDescending(x=>x.At).First()).OrderByDescending(x=>x.At).Take(14).ToList();
         if(latest.Count==0) return;
-        ContentPanel.Children.Add(Rail("Latest","What you watched most recently, with the next step one click away.",latest.Select(x=>LatestCard(x.Item,x.At)).ToList()));
+        ContentPanel.Children.Add(Rail("Recently watched","The last things you watched, with the next step one click away.",latest.Select(x=>LatestCard(x.Item,x.At)).ToList()));
     }
     FrameworkElement LatestCard(VideoItem item,DateTimeOffset at)
     {
@@ -118,7 +184,7 @@ public partial class MainWindow
         var rating=store.State.PersonalReviews.GetValueOrDefault(item.Id)?.Rating??0;
         Action(rating>0?new string('★',rating):"☆ Rate",()=>OpenDiary(item)).ToolTip="Your rating and note";
         Action("💬",()=>OpenReviews(item)).ToolTip="Reviews & comments";
-        panel.Children.Add(actions);panel.ContextMenu=ItemMenu(item);
+        panel.Children.Add(actions);LazyMenu(panel,item);
         return Lift(panel,edge);
     }
 }

@@ -1,0 +1,15 @@
+# Shared season planner
+
+`PcDownloads.PlanSeason(itemId, DownloadPlanRequest, progress?, ct?)` discovers and plans selected seasons together. `Scope` is one of `Missing episodes` (default), `Unwatched only`, `From episode N`, `Next N episodes`, `Specific episodes`, or `Several seasons / whole show`. `Seasons` restricts seasons; an empty list means the current season, except Next N and whole-show scope, which use all known seasons. Explicit `SpecificEpisodes` are `(Season, Episode)` pairs across the show. Next N counts the next known episode positions after the furthest ever watched, before local/queued/unaired exclusions. Counts must be 1–25.
+
+Pass `Preferences` to save quality, audio language, maximum episode bytes and the auto-download toggle for the show. Omit it to use `SeasonPreferences(itemId)`, which falls back to global settings. `SaveSeasonPreferences(itemId, preference)` persists choices without searching.
+
+`DownloadPlan.Episodes` contains title, season/episode, state, reason, `Chosen`, and `Alternatives`. Each option includes source, release name/ID, resolution, language, cache state and a verified `File` with its ID and size. Unknown quality is explicit; a quality fallback is explained. Language and maximum size are strict filters. Packs compete within each season at preferred quality; broad coverage wins, then readiness, coverage, known/smaller size and stable source/name ordering. Gaps use remaining packs or singles. Only selected video files are queued, never the other files in a pack.
+
+`Folder`, `FreeBytes`, `Fits`, `SelectedBytes`, `HasUnknownSizes`, `Sources`, and legacy `Entries`/count fields support the review UI. Free bytes account for queued reservations; confirmation checks the disk again with a 64 MB reserve. Unknown sizes are displayed and verified during transfer. Per-episode `Not found` states disambiguate gaps across seasons; the legacy integer `MissingEpisodes` field remains available.
+
+Confirm with `EnqueuePlan(new SeasonDownloadConfirmation { PlanId, RequestId, FileIds })`. Supply exactly the chosen file IDs, including swaps from alternatives. Omit unchecked episodes. Confirmation checks plan membership, one option per episode, current local/queued/air/watched state, the download folder and capacity before queueing the complete command. A repeated UUID request ID returns the earlier receipt. Choices remain usable for up to 20 minutes; rebuild expired plans.
+
+`TryAutoDownload(itemId, ct?)` returns true when a newly aired episode was queued from a Ready/On your server option with known size. False means the alert should still be shown. The background alert code calls it only for recently aired episodes and preserves the existing alert deduplication.
+
+Compatibility: `Plan(itemId, List<string> releaseIds, ct)`, `Files`, and `Enqueue(DownloadRequest)` retain their signatures and existing response fields. Legacy Plan responses gain the new episode/alternative fields. Legacy Enqueue keeps its 200-file limit; confirmed whole-show plans can exceed it. No HTTP routes or Android files are changed; mobile routes can opt into `PlanSeason` and `EnqueuePlan` separately.

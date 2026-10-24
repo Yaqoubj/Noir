@@ -20,6 +20,8 @@ public sealed class OnlineDetails
     public string SourceUrl { get; set; }="";
     public string Title { get; set; }="";
     public string ImdbId { get; set; }="";
+    public string Status { get; set; }="";
+    public int Runtime { get; set; }
     public Dictionary<string,(string Title,string Summary)> Episodes { get; }=new();
 }
 
@@ -33,7 +35,7 @@ public sealed class MetadataClient : IDisposable
         this.refreshArtwork=refreshArtwork;
         http=handler==null?new HttpClient():new HttpClient(handler);
         http.Timeout=TimeSpan.FromSeconds(10);
-        http.DefaultRequestHeaders.UserAgent.ParseAdd("Noir/0.4 (personal local media library)");
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("Noir/0.14 (https://github.com/Yaqoubj/Noir; personal local media library)");
         artDirectory=Path.Combine(dataDirectory,"art");Directory.CreateDirectory(artDirectory);
     }
     static string Value(JsonElement e,string key) => e.ValueKind==JsonValueKind.Object && e.TryGetProperty(key,out var v) && v.ValueKind==JsonValueKind.String?v.GetString()??"":"";
@@ -79,7 +81,7 @@ public sealed class MetadataClient : IDisposable
         var show=candidates[0];var id=Number(show,"id");
         var result=new OnlineDetails {Summary=Plain(Value(show,"summary")),SourceName="TVmaze",SourceUrl=Value(show,"url"),
             Title=Value(show,"name"),ImdbId=Value(Child(show,"externals"),"imdb"),
-            Year=int.TryParse(Value(show,"premiered").Split('-')[0],out var year)?year:0};
+            Year=int.TryParse(Value(show,"premiered").Split('-')[0],out var year)?year:0,Status=Value(show,"status"),Runtime=Math.Max(Number(show,"averageRuntime"),Number(show,"runtime"))};
         var genres=Child(show,"genres");if(genres.ValueKind==JsonValueKind.Array) result.Genres=string.Join(" · ",genres.EnumerateArray().Select(x=>x.GetString()));
         result.Poster=File.Exists(item.Poster)&&!refreshArtwork?item.Poster:await Download(Value(Child(show,"image"),"original"),token);
         if(File.Exists(item.Backdrop)&&!refreshArtwork) result.Backdrop=item.Backdrop;
@@ -89,7 +91,7 @@ public sealed class MetadataClient : IDisposable
             {
                 var season=Number(ep,"season");var number=Number(ep,"number");if(number==0) continue;
                 result.Episodes[$"{season}:{number}"]=(Value(ep,"name"),Plain(Value(ep,"summary")));
-                result.Schedule.Add(new(){Season=season,Episode=number,Title=Value(ep,"name"),Image=Value(Child(ep,"image"),"original"),AirsAt=DateTimeOffset.TryParse(Value(ep,"airstamp"),out var airs)?airs:null});
+                result.Schedule.Add(new(){Season=season,Episode=number,Title=Value(ep,"name"),Runtime=Number(ep,"runtime"),Image=Value(Child(ep,"image"),"original"),AirsAt=DateTimeOffset.TryParse(Value(ep,"airstamp"),out var airs)?airs:null});
                 if((!File.Exists(item.Backdrop)||refreshArtwork) && season==item.Season && number==item.Episode)
                     result.Backdrop=await Download(Value(Child(ep,"image"),"original"),token);
             }

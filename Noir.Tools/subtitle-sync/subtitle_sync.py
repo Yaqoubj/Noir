@@ -2,7 +2,8 @@
 import json
 import logging
 import math
-import os
+import contextlib
+import shutil
 import re
 import subprocess
 import sys
@@ -11,6 +12,7 @@ from pathlib import Path
 
 import numpy as np
 import pysubs2
+from alignment import decide_alignment, useful_reference
 from ffsubsync.ffsubsync import make_parser, make_reference_pipe, try_sync, validate_and_transform_args
 
 
@@ -24,12 +26,22 @@ class ScoreCapture(logging.Handler):
 
 
 def synchronize(video, subtitle, output):
-    tools = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
-    ffmpeg = tools / "ffmpeg"
     capture = ScoreCapture()
     logger = logging.getLogger("ffsubsync.ffsubsync")
+    old_level = logger.level
     logger.setLevel(logging.INFO)
     logger.addHandler(capture)
+    try:
+        return _synchronize(video, subtitle, output, capture)
+    finally:
+        logger.removeHandler(capture)
+        logger.setLevel(old_level)
+
+
+def _synchronize(video, subtitle, output, capture):
+    shutil.copyfile(subtitle, output)
+    tools = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
+    ffmpeg = tools / "ffmpeg"
     # Only small, plausible corrections are eligible for automatic application.
     args = [video, "-i", subtitle, "-o", output, "--ffmpeg-path", str(ffmpeg),
             "--max-offset-seconds", "30", "--skip-infer-framerate-ratio",
@@ -61,36 +73,33 @@ def synchronize(video, subtitle, output):
         pipeline = make_reference_pipe(params).fit(reference_file)
         speech = np.asarray(pipeline.transform(reference_file)) > .5
         # Silence or nearly continuous noise cannot establish a trustworthy offset.
-        if speech.sum() < 1000 or not .03 < speech.mean() < .85:
-            return {"accepted": False, "offset": 0, "scale": 1}
+        if not useful_reference(speech):
+            return {"accepted": False, "offset": 0, "scale": 1, "method": "none", "segments": []}
         result = {}
         try_sync(params, pipeline, result)
         offset = float(result.get("offset_seconds") or 0)
         scale = float(result.get("framerate_scale_factor") or 1)
-        accepted = (bool(result.get("sync_was_successful")) and Path(output).is_file()
-                    and capture.score >= 100 and math.isfinite(offset) and math.isfinite(scale)
-                    and abs(offset) <= 30 and abs(scale - 1) <= 0.05)
-        def overlap(path):
-            cues = pysubs2.load(path, encoding="utf-8")
-            active = np.zeros(len(speech), dtype=bool)
-            for cue in cues:
-                start, end = max(0, int(cue.start / 10)), min(len(active), int(cue.end / 10))
-                if end > start:
-                    active[start:end] = True
-            shared = (active & speech).sum()
-            return shared / max(1, active.sum()), shared / max(1, speech.sum())
-        if accepted:
-            precision, recall = overlap(output)
-            previous_precision, _ = overlap(subtitle)
-            meaningful_change = abs(offset) > 1 or abs(scale - 1) > .003
-            accepted = (precision >= (.8 if embedded else .65) and recall >= (.5 if embedded else .35)
-                        and (not meaningful_change or precision - previous_precision >= .05))
-        return {"accepted": bool(accepted), "offset": offset, "scale": scale}
+        original = pysubs2.load(subtitle, encoding="utf-8")
+        global_subs = pysubs2.load(output, encoding="utf-8")
+        decision, aligned = decide_alignment(
+            speech, [(c.start, c.end) for c in original], offset, scale,
+            capture.score, bool(result.get("sync_was_successful")), embedded,
+            [(c.start, c.end) for c in global_subs])
+        if decision["method"] == "piecewise":
+            for cue, (start, end) in zip(original, aligned):
+                cue.start, cue.end = int(start), int(end)
+            original.save(output, encoding="utf-8")
+        elif not decision["accepted"]:
+            shutil.copyfile(subtitle, output)
+        return decision
 
 
 if __name__ == "__main__":
     try:
-        print(json.dumps(synchronize(*sys.argv[1:4]), allow_nan=False))
+        # Third-party progress/logging must never contaminate the JSON protocol.
+        with contextlib.redirect_stdout(sys.stderr):
+            decision = synchronize(*sys.argv[1:4])
+        print(json.dumps(decision, allow_nan=False))
     except Exception:
-        print(json.dumps({"accepted": False, "offset": 0, "scale": 1}))
+        print(json.dumps({"accepted": False, "offset": 0, "scale": 1, "method": "none", "segments": []}))
         sys.exit(1)

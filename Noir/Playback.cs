@@ -36,7 +36,6 @@ public partial class MainWindow
     bool ControlsVisible => PlayerHeader.Visibility==Visibility.Visible;
     string playerTextStyle="";
     bool openingVideo;
-    DispatcherTimer? clickTimer;
     DispatcherTimer? hintTimer;
     void ShowPlayerHint(string text){PlayerHint.Text=text;PlayerHint.Visibility=Visibility.Visible;hintTimer??=new DispatcherTimer{Interval=TimeSpan.FromSeconds(1.4)};hintTimer.Stop();hintTimer.Tick-=HidePlayerHint;hintTimer.Tick+=HidePlayerHint;hintTimer.Start();}
     void HidePlayerHint(object? sender,EventArgs e){hintTimer?.Stop();PlayerHint.Visibility=Visibility.Collapsed;}
@@ -45,8 +44,6 @@ public partial class MainWindow
     bool restoreLibraryView;
     string libraryFocusName="";
     readonly SemaphoreSlim nativeTransition=new(1,1);
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    static extern uint GetDoubleClickTime();
     async Task StopPlayer(LibVLCSharp.Shared.MediaPlayer native)
     {
         await nativeTransition.WaitAsync();try{if(!ReferenceEquals(player,native)||closing)return;await Task.Run(native.Stop);}finally{nativeTransition.Release();}
@@ -125,7 +122,9 @@ public partial class MainWindow
     async Task PlayVideo(VideoItem item,bool restart=false)
     {
         if(openingVideo||closing) return;
-        if(!File.Exists(item.Path)) { Status.Text="This video is unavailable. Reconnect its drive or scan the library.";return; }
+        // A stream chosen by StreamItem plays this once; replaying the same title reuses it.
+        var stream=streaming??(current==item&&!File.Exists(item.Path)?currentStream:null);streaming=null;
+        if(stream==null&&!File.Exists(item.Path)) { Status.Text="This video is unavailable. Reconnect its drive or scan the library.";return; }
         try
         {
             openingVideo=true;Status.Text="Opening "+item.Label+"…";StartupTrace.Mark("Play requested");
@@ -133,10 +132,10 @@ public partial class MainWindow
             if(!await EnsurePlayer()||closing||!IsVisible) return;
             SavePlayback();CancelNext();DetachEvents();
             HidePreview();
-            tick?.Stop();serial++;var thisSerial=serial;var native=player!;
+            tick?.Stop();serial++;streamSubtitleCancellation?.Cancel();var thisSerial=serial;var native=player!;
             StartupTrace.Mark("Player ensured");await StopPlayer(native);StartupTrace.Mark("Previous stopped");if(closing||serial!=thisSerial)return;media?.Dispose();media=null;
-            current=item;ended=false;tracksSelected=false;pictureConfigured=false;appliedCrop=null;
-            introHandled=creditsReached=chaptersChecked=false;saveAfterSeek=false;
+            current=item;ended=false;tracksSelected=false;pictureConfigured=false;appliedCrop=null;attachedStreamSubtitles.Clear();
+            introHandled=creditsReached=chaptersChecked=false;saveAfterSeek=false;ResetPlayerFeatures(item);
             creditsPromptDismissed=creditsExpanded=false;endAction=null;
             store.State.HiddenContinue.Remove(item.GroupKey);
             var bookmark=store.GetProgress(item);
@@ -154,6 +153,8 @@ public partial class MainWindow
             if(Window.GetWindow(PlayerOverlay) is { } overlayWindow && overlayWindow!=this)
             {
                 overlayWindow.ShowActivated=false;
+                // Clicking the video activates VLC's overlay window, so player keys must work there too.
+                if(overlayWindow.Tag as string!="noir-keys"){overlayWindow.Tag="noir-keys";overlayWindow.PreviewKeyDown+=Window_KeyDown;}
                 overlayWindow.Show();
             }
             ShowControls();
@@ -163,17 +164,18 @@ public partial class MainWindow
             SavedLabel.Text="";Elapsed.Text=LibraryStore.Time(resume);UpdateTotalLabel(resume);
             SeekBar.Maximum=Math.Max(1,currentDuration);SeekBar.Value=Math.Min(resume,SeekBar.Maximum);
             endedHandler=(_,_)=>Dispatcher.BeginInvoke(()=> { if(thisSerial==serial && !closing) PlaybackEnded(); });
-            errorHandler=(_,_)=>Dispatcher.BeginInvoke(()=> { if(thisSerial==serial && !closing) { PlayerMessage.Text="VLC could not play this file. Return to the library and try another episode.";PlayerMessage.Visibility=Visibility.Visible;SavePlayback();tick?.Stop(); } });
-            playingHandler=(_,_)=>Dispatcher.BeginInvoke(()=> { if(thisSerial==serial && !closing) { StartupTrace.Mark("VLC Playing");store.ConsumeQueue(item);if(pendingTarget==null) PlayerMessage.Visibility=Visibility.Collapsed;SetPlayState("Pause");ApplyPictureMode(true); } });
+            errorHandler=(_,_)=>Dispatcher.BeginInvoke(()=> { if(thisSerial==serial && !closing) { PlayerMessage.Text=stream!=null?"This stream couldn't play. Open More → Choose another stream. Your place is saved.":"VLC could not play this file. Return to the library and try another episode.";PlayerMessage.Visibility=Visibility.Visible;SavePlayback();tick?.Stop();ShowControls(); } });
+            playingHandler=(_,_)=>Dispatcher.BeginInvoke(()=> { if(thisSerial==serial && !closing) { StartupTrace.Mark("VLC Playing");store.ConsumeQueue(item);if(pendingTarget==null) PlayerMessage.Visibility=Visibility.Collapsed;SetPlayState("Pause");ApplyPictureMode(true);ApplySpeed();AttachStreamSubtitles();EnsureStreamSubtitles(); } });
             native.EndReached+=endedHandler;native.EncounteredError+=errorHandler;native.Playing+=playingHandler;
-            media=new Media(vlc!,new Uri(item.Path));
+            currentStream=stream;
+            media=new Media(vlc!,new Uri(stream?.Url??item.Path));if(stream!=null)StreamOptions(media,stream);
             media.AddOption($":freetype-rel-fontsize={store.State.SubtitleSize}");media.AddOption($":freetype-color={store.State.SubtitleColor}");media.AddOption($":freetype-background-opacity={(store.State.SubtitleBackground?180:0)}");
-            native.Volume=(int)VolumeBar.Value;native.Mute=muted;
+            native.Volume=PlaybackPrefs.NativeVolume(VolumeBar.Value,Prefs.VolumeBoost);native.Mute=muted;
             StartupTrace.Mark("Calling Play");if(!native.Play(media)) throw new InvalidOperationException("VLC did not accept the video.");
             StartupTrace.Mark("Play returned");tick!.Start();Focus();
             if(fullscreen) ShowControls();
         }
-        catch(Exception e) { store.Log(e);PlayerMessage.Text="Could not open video: "+e.Message;PlayerMessage.Visibility=Visibility.Visible; }
+        catch(Exception e) { store.Log(e);PlayerMessage.Text="Could not open video: "+(downloads==null?System.Text.RegularExpressions.Regex.Replace(e.Message,@"(?i)https?://\S+","[link]"):DownloadSecurity.SafeText(e.Message,downloads.Config));PlayerMessage.Visibility=Visibility.Visible; }
         finally {openingVideo=false;}
     }
     void PlaybackTick()
@@ -207,6 +209,7 @@ public partial class MainWindow
                 File.WriteAllText(System.IO.Path.Combine(store.DataDirectory,"chapters.json"),System.Text.Json.JsonSerializer.Serialize(chapters));
 #endif
                 store.RememberChapters(current,Find(@"^(OP|Intro|Opening|Intro credits|Opening credits)$"),Find(@"^(ED|ED/Outro|Ending|Ending credits|Closing credits|Credits|Outro)$"));
+                LoadChapters(chapters);
             }
         }
         if(pendingTarget is double target)
@@ -240,11 +243,7 @@ public partial class MainWindow
                 ApplyPreferredTracks();
             }
         }
-        var intro=store.GetIntro(current);
-        var inIntro=intro is {Valid:true} && time>=intro.Start && time<intro.End-.3;
-        SkipIntro.Visibility=inIntro && ControlsVisible?Visibility.Visible:Visibility.Collapsed;
-        if(inIntro && !introHandled && store.State.AutoSkipIntro && player.IsPlaying && !seeking)
-        {introHandled=true;SeekAbsolute(intro!.End,false,false);}
+        UpdateSkipSegments(time);
         if(!creditsReached && player.IsPlaying && !seeking && time>=store.CompletionStart(current,currentDuration) && currentDuration>0)
         {
             creditsReached=true;SavePlayback();_ = FlushPlayback();
@@ -252,16 +251,16 @@ public partial class MainWindow
             if(nextItem!=null)
             {
                 NextTitle.Text=nextItem.EpisodeLabel+(nextItem.EpisodeTitle.Length>0?" · "+nextItem.EpisodeTitle:"");
-                NextLabel.Text="UP NEXT";NextPlay.Content="Play now";endAction=null;
-                NextCountdown.Text="Watched · Credits are still playing";CreditsChip.Content="Up next · "+nextItem.EpisodeLabel+"  ›";
+                ShowUpNext(nextItem,PL("Watched · Credits are still playing","تمت المشاهدة · الشارة ما زالت تعمل"));NextPanel.Visibility=Visibility.Collapsed;
+                if(Prefs.SkipCredits==SkipMode.Auto&&store.State.AutoNext) StartCountdown();
             }
         }
         if((DateTime.UtcNow-lastSave).TotalSeconds>=2) SavePlayback();
         if(creditsReached && !ended)
         {
-            var visible=nextItem!=null && !creditsPromptDismissed && ControlsVisible && time>=store.CompletionStart(current,currentDuration);
-            NextPanel.Visibility=visible&&creditsExpanded?Visibility.Visible:Visibility.Collapsed;
-            CreditsChip.Visibility=visible&&!creditsExpanded?Visibility.Visible:Visibility.Collapsed;
+            // Off waits for the real end; Manual and Auto show the card while credits roll.
+            var visible=nextItem!=null && !creditsPromptDismissed && Prefs.SkipCredits!=SkipMode.Off && StillWatchingPanel.Visibility!=Visibility.Visible && time>=store.CompletionStart(current,currentDuration);
+            NextPanel.Visibility=visible?Visibility.Visible:Visibility.Collapsed;CreditsChip.Visibility=Visibility.Collapsed;
         }
     }
     async Task FlushPlayback(){try{await store.FlushPendingAsync();}catch(Exception error){store.Log(error);}}
@@ -318,34 +317,35 @@ public partial class MainWindow
         nextItem=store.QueuedNext(current,items)??LibraryStore.Next(current,items,store.State);
         PlayerMessage.Text="Episode finished";PlayerMessage.Visibility=Visibility.Visible;
         if(nextItem==null) { ShowFinishedOptions(current);return; }
-        NextLabel.Text="UP NEXT";NextPlay.Content="Play now";endAction=null;
-        NextTitle.Text=nextItem.EpisodeLabel+(nextItem.EpisodeTitle.Length>0?" · "+nextItem.EpisodeTitle:"");
+        var running=nextTimer?.IsEnabled==true;
+        if(!running) ShowUpNext(nextItem,PL("Ready when you are.","جاهزة متى شئت."));
         NextPanel.Visibility=Visibility.Visible;PlayerMessage.Visibility=Visibility.Collapsed;
-        if(!store.State.AutoNext) { NextCountdown.Text="Ready when you are.";return; }
-        countdown=8;NextCountdown.Text=$"Playing in {countdown} seconds";
-        nextTimer ??=new DispatcherTimer { Interval=TimeSpan.FromSeconds(1) };
-        nextTimer.Tick-=CountdownTick;nextTimer.Tick+=CountdownTick;nextTimer.Start();
+        if(store.State.AutoNext&&!running) StartCountdown();
     }
-    void CountdownTick(object? sender,EventArgs e)
-    {
-        countdown--;NextCountdown.Text=$"Playing in {countdown} seconds";
-        if(countdown<=0) { nextTimer?.Stop();var item=nextItem;if(item!=null) _ = PlayVideo(item); }
-    }
-    void CancelNext() { nextTimer?.Stop();NextPanel.Visibility=CreditsChip.Visibility=Visibility.Collapsed; }
+    VideoItem? streamNext;StreamOption? currentStream;
+    void CancelNext() { nextTimer?.Stop();streamNext=null;NextPanel.Visibility=CreditsChip.Visibility=StillWatchingPanel.Visibility=Visibility.Collapsed;SetRing(0); }
     void CreditsChip_Click(object sender,RoutedEventArgs e){creditsExpanded=true;CreditsChip.Visibility=Visibility.Collapsed;NextPanel.Visibility=Visibility.Visible;ShowControls();}
-    void CancelNext_Click(object sender,RoutedEventArgs e) { creditsPromptDismissed=true;CancelNext();if(ended) {PlayerMessage.Text="Episode finished. Your place is saved.";PlayerMessage.Visibility=Visibility.Visible;} }
+    void CancelNext_Click(object sender,RoutedEventArgs e) { stillWatching.UserInput();creditsPromptDismissed=true;CancelNext();if(ended) {PlayerMessage.Text="Episode finished. Your place is saved.";PlayerMessage.Visibility=Visibility.Visible;} }
     Action? endAction;
     // Nothing local to play next: offer the useful step instead of a dead end.
     void ShowFinishedOptions(VideoItem finished)
     {
         var up=finished.IsMovie?null:store.UpNextFor(store.EpisodesFor(finished.GroupKey));
-        NextPanel.Visibility=Visibility.Visible;PlayerMessage.Visibility=Visibility.Collapsed;
+        NextPanel.Visibility=Visibility.Visible;PlayerMessage.Visibility=Visibility.Collapsed;NextMedia.Visibility=Visibility.Collapsed;
         if(up is {Kind:UpNextKind.NotOnPc} missing)
         {
             var job=ActiveDownload(missing.Item);
             NextLabel.Text="UP NEXT · NOT ON THIS PC";NextTitle.Text=missing.Item.EpisodeLabel+(missing.Item.EpisodeTitle.Length>0&&!store.State.HideSpoilers?" · "+missing.Item.EpisodeTitle:"");
+            var item=missing.Item;
+            if(job==null&&CanStream)
+            {
+                // Streaming continues the evening without waiting for a download.
+                NextCountdown.Text="Stream it now through AIOStreams, or download it from the title page.";NextPlay.Content="▶ Stream next";endAction=()=>StreamItem(item);
+                SetNextStill(item);if(currentStream!=null&&store.State.AutoNext){nextItem=null;streamNext=item;StartCountdown();}
+                return;
+            }
             NextCountdown.Text=job!=null?"Already downloading. It will appear in your library when ready.":"Find a release and download it to this PC.";
-            NextPlay.Content=job!=null?"View download":"Download";var item=missing.Item;
+            NextPlay.Content=job!=null?"View download":"Download";
             endAction=job!=null?()=>{ReturnToLibrary();Navigate("Downloads");}:()=>FindDownloads(item);
         }
         else if(up is {Kind:UpNextKind.Upcoming} soon)
@@ -361,7 +361,7 @@ public partial class MainWindow
             NextPlay.Content=rated>0?"View diary":"Rate it";endAction=()=>OpenDiary(finished);
         }
     }
-    void NextNow_Click(object sender,RoutedEventArgs e) { if(endAction!=null&&ended){endAction();return;}var next=nextItem;if(next!=null) _ = PlayVideo(next); }
+    void NextNow_Click(object sender,RoutedEventArgs e) { stillWatching.UserInput();if(endAction!=null&&ended){endAction();return;}var stream=streamNext;if(stream!=null){CancelNext();StreamItem(stream);return;}var next=nextItem;if(next!=null) _ = PlayVideo(next); }
     void Pause_Click(object sender,RoutedEventArgs e)=>TogglePause();
     void TogglePause()
     {
@@ -379,10 +379,10 @@ public partial class MainWindow
     }
     async void ReturnToLibrary()
     {
-        SavePlayback();CancelNext();tick?.Stop();DetachEvents();serial++;
+        SavePlayback();CancelNext();tick?.Stop();DetachEvents();serial++;streamSubtitleCancellation?.Cancel();streamRequest++;
         HidePreview();
         SetSleep(null);
-        var native=player;current=null;pendingTarget=null;ended=false;clickTimer?.Stop();HidePlayerHint(null,EventArgs.Empty);
+        var native=player;current=null;pendingTarget=null;ended=false;HidePlayerHint(null,EventArgs.Empty);
         if(fullscreen) ToggleFullscreen();
         hideTimer?.Stop();if(trackMenu!=null) trackMenu.IsOpen=false;
         PlayerOverlay.Visibility=Visibility.Collapsed;
@@ -401,12 +401,12 @@ public partial class MainWindow
     void Seek_DragCompleted(object sender,DragCompletedEventArgs e) { seeking=false;SeekAbsolute(SeekBar.Value); }
     void Rewind_Click(object sender,RoutedEventArgs e)=>SeekAbsolute(SeekOrigin-10);
     void Forward_Click(object sender,RoutedEventArgs e)=>SeekAbsolute(SeekOrigin+10);
-    void SkipIntro_Click(object sender,RoutedEventArgs e) { e.Handled=true;SkipKnownIntro(); }
+    void SkipIntro_Click(object sender,RoutedEventArgs e) { e.Handled=true;stillWatching.UserInput();SkipPillClicked(); }
     void SkipKnownIntro() { if(current!=null && store.GetIntro(current) is {Valid:true} intro && lastPosition>=intro.Start && lastPosition<intro.End) SeekAbsolute(intro.End); }
     void Volume_Changed(object sender,RoutedPropertyChangedEventArgs<double> e)
     {
         if(!ready) return;
-        if(player!=null) player.Volume=(int)e.NewValue;
+        if(player!=null) player.Volume=PlaybackPrefs.NativeVolume(e.NewValue,Prefs.VolumeBoost);
         store.State.Volume=(int)e.NewValue;
     }
     void Audio_Click(object sender,RoutedEventArgs e)
@@ -448,7 +448,12 @@ public partial class MainWindow
             if(dialog.ShowDialog(this)==true) player.AddSlave(MediaSlaveType.Subtitle,new Uri(dialog.FileName).AbsoluteUri,true);
         };
         menu.Items.Add(add);
-        if(current!=null){var item=current;var fetch=new MenuItem{Header="Download English / Arabic subtitles…"};fetch.Click+=(_,_)=>DownloadSubtitleFiles(item);menu.Items.Add(fetch);var sync=new MenuItem{Header="Auto-sync saved subtitles…"};sync.Click+=(_,_)=>DownloadSubtitleFiles(item,true);menu.Items.Add(sync);}
+        if(current!=null){var item=current;var fetch=new MenuItem{Header="Download English / Arabic subtitles…"};fetch.Click+=(_,_)=>DownloadSubtitleFiles(item);menu.Items.Add(fetch);if(currentStream==null){var sync=new MenuItem{Header="Auto-sync saved subtitles…"};sync.Click+=(_,_)=>DownloadSubtitleFiles(item,true);menu.Items.Add(sync);}
+            else foreach(var sub in MobileSubtitles.Find(SubtitleDownloads.StreamTarget(store.DataDirectory,item,currentStream.Name),requireVideo:false)){
+                var saved=sub;var choice=new MenuItem{Header="Use saved "+(SubtitleDownloads.SidecarLanguage(saved.Path)=="ar"?"Arabic":"English")+" subtitles"};
+                choice.Click+=(_,_)=>{if(player.AddSlave(MediaSlaveType.Subtitle,new Uri(saved.Path).AbsoluteUri,true)){Preference(item).SubtitleTrack=SubtitleDownloads.SidecarLanguage(saved.Path)=="ar"?"Arabic":"English";store.Save();}};menu.Items.Add(choice);
+            }
+        }
         return menu;
     }
     void Languages_Click(object sender,RoutedEventArgs e)
@@ -463,6 +468,8 @@ public partial class MainWindow
         Add(store.State.FillVideo?"Picture · Fill (switch to Fit)":"Picture · Fit (switch to Fill)",()=>PictureMode_Click(sender,e));
         Add(SleepButton.Content?.ToString()??"Sleep timer",()=>Sleep_Click(sender,e));
         Add("Edit intro & credits times",()=>Intro_Click(sender,e));
+        if(chapterMarks.Count>1){Add(PL("Previous chapter  (Shift+←)","الفصل السابق  (Shift+←)"),()=>JumpChapter(-1));Add(PL("Next chapter  (Shift+→)","الفصل التالي  (Shift+→)"),()=>JumpChapter(1));}
+        if(currentStream!=null&&current is {} streamItem)Add("Choose another stream…",()=>StreamItem(streamItem,true));
         menu.Items.Add(new Separator());menu.Items.Add(new MenuItem{Header="Space: pause · Arrows: seek / volume · F: fullscreen",IsEnabled=false});OpenTrackMenu(menu,(Button)sender);
     }
     void OpenTrackMenu(ContextMenu menu,Button target)
@@ -473,28 +480,27 @@ public partial class MainWindow
     }
     void Video_Click(object sender,MouseButtonEventArgs e)
     {
-        if(PlayerHeader.IsMouseOver || PlayerFooter.IsMouseOver || NextPanel.IsMouseOver || CreditsChip.IsMouseOver || SkipIntro.IsMouseOver) return;
+        stillWatching.UserInput();
+        if(PlayerHeader.IsMouseOver || PlayerFooter.IsMouseOver || NextPanel.IsMouseOver || CreditsChip.IsMouseOver || SkipIntro.IsMouseOver || StillWatchingPanel.IsMouseOver) return;
         HandleVideoClick(e.ClickCount);e.Handled=true;
     }
     void HandleVideoClick(int clicks)
     {
-        if(clicks==2){clickTimer?.Stop();ToggleFullscreen(false);HideControls();pointerSuppressedUntil=DateTime.UtcNow.AddMilliseconds(450);}
+        if(clicks==2){ToggleFullscreen(false);HideControls();pointerSuppressedUntil=DateTime.UtcNow.AddMilliseconds(450);}
         else{
-            clickTimer?.Stop();
+            // Show controls at once; waiting out the double-click time made clicks feel ignored.
             if(ControlsVisible){HideControls();pointerSuppressedUntil=DateTime.UtcNow.AddMilliseconds(450);}
-            else{clickTimer??=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(GetDoubleClickTime())};clickTimer.Tick-=CommitVideoClick;clickTimer.Tick+=CommitVideoClick;clickTimer.Start();}
+            else ShowControls();
         }
     }
     void ToggleControls() { if(ControlsVisible) HideControls();else ShowControls(); }
-    void CommitVideoClick(object? sender,EventArgs e){clickTimer?.Stop();if(current!=null&&!closing)ToggleControls();}
     void HideControls()
     {
         HidePreview();
         hideTimer?.Stop();
         lastPointer=Mouse.GetPosition(PlayerOverlay);
         PlayerHeader.Visibility=PlayerFooter.Visibility=Visibility.Collapsed;
-        SkipIntro.Visibility=CreditsChip.Visibility=Visibility.Collapsed;
-        if(!ended) NextPanel.Visibility=Visibility.Collapsed;
+        CreditsChip.Visibility=Visibility.Collapsed;
         PlayerOverlay.Cursor=Cursors.None;
     }
     void Fullscreen_Click(object sender,RoutedEventArgs e)=>ToggleFullscreen();
@@ -516,7 +522,7 @@ public partial class MainWindow
         var pointer=e.GetPosition(PlayerOverlay);
         if(DateTime.UtcNow<pointerSuppressedUntil){lastPointer=pointer;return;}
         if(lastPointer is Point previous && (pointer-previous).Length<4) return;
-        lastPointer=pointer;
+        lastPointer=pointer;stillWatching.UserInput();
         ShowControls();
     }
     void Video_SizeChanged(object sender,SizeChangedEventArgs e) => ApplyPictureMode();
@@ -538,13 +544,17 @@ public partial class MainWindow
     {
         if(PlayerRoot.Visibility!=Visibility.Visible) return;
         if(e.OriginalSource is TextBox) return;
+        stillWatching.UserInput();
+        if(Keyboard.Modifiers==ModifierKeys.Shift&&e.Key is Key.Left or Key.Right){JumpChapter(e.Key==Key.Right?1:-1);e.Handled=true;return;}
         switch(e.Key)
         {
             case Key.Space: TogglePause();break;
             case Key.Left: SeekAbsolute(SeekOrigin-10,false);ShowPlayerHint("−10 seconds");break;
             case Key.Right: SeekAbsolute(SeekOrigin+10,false);ShowPlayerHint("+10 seconds");break;
-            case Key.Up: VolumeBar.Value=Math.Min(100,VolumeBar.Value+5);ShowPlayerHint("Volume · "+(int)VolumeBar.Value+"%");break;
-            case Key.Down: VolumeBar.Value=Math.Max(0,VolumeBar.Value-5);ShowPlayerHint("Volume · "+(int)VolumeBar.Value+"%");break;
+            case Key.Up: VolumeBar.Value=Math.Min(100,VolumeBar.Value+5);ShowPlayerHint("Volume · "+PlaybackPrefs.NativeVolume(VolumeBar.Value,Prefs.VolumeBoost)+"%");break;
+            case Key.Down: VolumeBar.Value=Math.Max(0,VolumeBar.Value-5);ShowPlayerHint("Volume · "+PlaybackPrefs.NativeVolume(VolumeBar.Value,Prefs.VolumeBoost)+"%");break;
+            case Key.OemPeriod when Keyboard.Modifiers==ModifierKeys.Shift: StepSpeed(1);break;
+            case Key.OemComma when Keyboard.Modifiers==ModifierKeys.Shift: StepSpeed(-1);break;
             case Key.F: ToggleFullscreen();break;
             case Key.Escape: if(fullscreen) ToggleFullscreen();else ReturnToLibrary();break;
             case Key.M: muted=!muted;if(player!=null) player.Mute=muted;break;

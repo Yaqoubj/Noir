@@ -8,14 +8,18 @@ if(Test-Path "$androidTools/gradle-8.11.1/bin/gradle.bat") {
     if(!$env:JAVA_HOME -or !$env:ANDROID_HOME) {throw 'Install JDK 17+, Gradle 8.11.1 and Android SDK 36, then set JAVA_HOME and ANDROID_HOME.'}
 }
 $env:PATH="$env:JAVA_HOME/bin;$env:PATH"
+$releaseVersion=[regex]::Match([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Noir.Android/app/build.gradle')),"versionName '([0-9.]+)'").Groups[1].Value
+if(!$releaseVersion){throw 'Could not read Android version'}
+$phonePackage="Noir-Android-$releaseVersion-Standalone.apk"
+$universalPackage="Noir-Android-$releaseVersion-Standalone-All.apk"
 & "$PSScriptRoot/scripts/sign-android.ps1"
 Push-Location (Join-Path $PSScriptRoot 'Noir.Android')
 try {
     & $gradleExecutable --no-daemon --no-watch-fs assembleRelease lintRelease
     if($LASTEXITCODE -ne 0) {throw 'Android release build failed'}
     New-Item -ItemType Directory -Force "$PSScriptRoot/outputs/Android" | Out-Null
-    Copy-Item app/build/outputs/apk/release/app-release.apk "$PSScriptRoot/outputs/Android/Noir-Android-All.apk" -Force
+    Copy-Item app/build/outputs/apk/release/app-release.apk "$PSScriptRoot/outputs/Android/$universalPackage" -Force
     & $gradleExecutable --no-daemon --no-watch-fs '-PnoirAbi=arm64-v8a' assembleRelease
     if($LASTEXITCODE -ne 0) {throw 'Android phone build failed'}
-    Copy-Item app/build/outputs/apk/release/app-release.apk "$PSScriptRoot/outputs/Android/Noir-Android.apk" -Force
+    Copy-Item app/build/outputs/apk/release/app-release.apk "$PSScriptRoot/outputs/Android/$phonePackage" -Force
 } finally {Pop-Location}

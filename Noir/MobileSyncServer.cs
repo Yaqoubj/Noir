@@ -12,8 +12,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
 namespace Noir;
-public sealed class MobilePeer {public string Name {get;set;}="Android";public string Hash {get;set;}="";public DateTimeOffset PairedAt {get;set;}}
-public sealed class MobileHostConfig {public bool Enabled {get;set;}=true;public List<MobilePeer> Peers {get;set;}=[];public DateTimeOffset? LastSyncAt {get;set;}}
+public sealed class MobilePeer {public string Name {get;set;}="Android";public string Hash {get;set;}="";public DateTimeOffset PairedAt {get;set;}public HashSet<string> ProfileAccess {get;set;}=[];}
+public sealed class MobileHostConfig {public HashSet<string> MigratedConfigs {get;set;}=[];public bool Enabled {get;set;}=true;public List<MobilePeer> Peers {get;set;}=[];public DateTimeOffset? LastSyncAt {get;set;}}
 public sealed class MobileSyncServer : IAsyncDisposable
 {
     public const int Port=443;
@@ -28,6 +28,9 @@ public sealed class MobileSyncServer : IAsyncDisposable
     readonly int port;
     readonly PcDownloads? downloads;
     readonly MobileSubtitleTools subtitleTools;
+    readonly Func<string,CancellationToken,Task<bool>>? confirmSettingsShare;
+    readonly SemaphoreSlim settingsShare=new(1,1);
+    readonly PhoneCloudDownloads? phoneCloud;
     readonly Dictionary<string,(int Count,DateTimeOffset Since)> attempts=[];
     WebApplication? app;
     string pairCode="";
@@ -36,10 +39,11 @@ public sealed class MobileSyncServer : IAsyncDisposable
     public string Status {get;private set;}="Starting…";
     public bool Running=>app!=null;
     public string Pin=>Convert.ToHexString(SHA256.HashData(certificate.RawData));
-    public MobileSyncServer(LibraryStore store,Func<MobileSnapshot> snapshot,Func<List<MobileOperation>,List<string>> merge,int port=Port,PcDownloads? downloads=null)
+    public MobileSyncServer(LibraryStore store,Func<MobileSnapshot> snapshot,Func<List<MobileOperation>,List<string>> merge,int port=Port,PcDownloads? downloads=null,Func<string,CancellationToken,Task<bool>>? confirmSettingsShare=null,bool ephemeralCertificate=false)
     {
-        this.store=store;this.snapshot=snapshot;this.merge=merge;this.port=port;this.downloads=downloads;subtitleTools=new(store);
-        configPath=Path.Combine(store.DataDirectory,"mobile-host.json");
+        this.store=store;this.snapshot=snapshot;this.merge=merge;this.port=port;this.downloads=downloads;subtitleTools=new(store);this.confirmSettingsShare=confirmSettingsShare;phoneCloud=downloads==null?null:new(store,downloads);
+        var shared=MobileProfiles.Root(store.DataDirectory);Directory.CreateDirectory(shared);
+        configPath=Path.Combine(shared,"mobile-peers.json");
         if(File.Exists(configPath))
         {
             // Never replace saved pairing data merely because a scanner briefly locks the file.
@@ -47,9 +51,29 @@ public sealed class MobileSyncServer : IAsyncDisposable
             try {Config=JsonSerializer.Deserialize<MobileHostConfig>(File.ReadAllText(configPath),Json)??throw new InvalidDataException("Stored phone pairing data is empty.");break;}
             catch(IOException) when(attempt<4) {Thread.Sleep(40*(attempt+1));}
         }
-        else Config=new();
-        var certPath=Path.Combine(store.DataDirectory,"mobile-certificate.dpapi");
-        if(File.Exists(certPath)) certificate=X509CertificateLoader.LoadPkcs12(ProtectedData.Unprotect(File.ReadAllBytes(certPath),null,DataProtectionScope.CurrentUser),null);
+        else
+        {
+            var legacy=Path.Combine(store.DataDirectory,"mobile-host.json");if(!File.Exists(legacy))legacy=Path.Combine(shared,"mobile-host.json");
+            Config=File.Exists(legacy)?JsonSerializer.Deserialize<MobileHostConfig>(File.ReadAllText(legacy),Json)??throw new InvalidDataException("Stored phone pairing data is empty."):new();
+        }
+        var sources=new List<string>{Path.Combine(shared,"mobile-host.json"),Path.Combine(store.DataDirectory,"mobile-host.json")};
+        var profilesDir=Path.Combine(shared,"profiles");if(Directory.Exists(profilesDir))sources.AddRange(Directory.EnumerateDirectories(profilesDir).Select(d=>Path.Combine(d,"mobile-host.json")));
+        foreach(var source in sources.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var key=Path.GetRelativePath(shared,source);if(Config.MigratedConfigs.Contains(key)||!File.Exists(source))continue;
+            var legacy=JsonSerializer.Deserialize<MobileHostConfig>(File.ReadAllText(source),Json)??throw new InvalidDataException("Stored pairing data is empty.");
+            foreach(var peer in legacy.Peers){var profileId=Path.GetDirectoryName(source)==shared?"default":Path.GetFileName(Path.GetDirectoryName(source)!);peer.ProfileAccess.Add(profileId);var existing=Config.Peers.FirstOrDefault(p=>p.Hash==peer.Hash);if(existing==null)Config.Peers.Add(peer);else existing.ProfileAccess.UnionWith(peer.ProfileAccess);}
+            Config.MigratedConfigs.Add(key);
+        }
+        SaveConfig();
+        var certificateStorage=ephemeralCertificate?X509KeyStorageFlags.EphemeralKeySet:X509KeyStorageFlags.DefaultKeySet;
+        var certPath=Path.Combine(shared,"mobile-shared-certificate.dpapi");
+        if(!File.Exists(certPath))
+        {
+            var legacy=Path.Combine(shared,"mobile-certificate.dpapi");if(!File.Exists(legacy))legacy=Path.Combine(store.DataDirectory,"mobile-certificate.dpapi");
+            if(File.Exists(legacy))File.Copy(legacy,certPath,false);
+        }
+        if(File.Exists(certPath)) certificate=X509CertificateLoader.LoadPkcs12(ProtectedData.Unprotect(File.ReadAllBytes(certPath),null,DataProtectionScope.CurrentUser),null,certificateStorage);
         else
         {
             using var rsa=RSA.Create(2048);var req=new CertificateRequest("CN=Noir local sync",rsa,HashAlgorithmName.SHA256,RSASignaturePadding.Pkcs1);
@@ -57,7 +81,7 @@ public sealed class MobileSyncServer : IAsyncDisposable
             req.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature|X509KeyUsageFlags.KeyEncipherment,true));
             using var issued=req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1),DateTimeOffset.UtcNow.AddYears(10));
             var pfx=issued.Export(X509ContentType.Pfx);
-            certificate=X509CertificateLoader.LoadPkcs12(pfx,null);
+            certificate=X509CertificateLoader.LoadPkcs12(pfx,null,certificateStorage);
             File.WriteAllBytes(certPath,ProtectedData.Protect(pfx,null,DataProtectionScope.CurrentUser));
         }
     }
@@ -95,6 +119,8 @@ public sealed class MobileSyncServer : IAsyncDisposable
         {
             var builder=WebApplication.CreateSlimBuilder(new WebApplicationOptions {Args=[],ContentRootPath=store.DataDirectory});
             builder.Logging.ClearProviders();
+            // Imported histories make the library snapshot large; phones accept gzip transparently.
+            builder.Services.AddResponseCompression(o=>{o.EnableForHttps=true;o.MimeTypes=["application/json"];});
             builder.WebHost.ConfigureKestrel(o=>
             {
                 o.Limits.MaxRequestBodySize=1024*1024;
@@ -103,6 +129,7 @@ public sealed class MobileSyncServer : IAsyncDisposable
                 if(port==Port) o.ListenAnyIP(LegacyPort,l=>l.UseHttps(certificate));
             });
             host=builder.Build();
+            host.UseResponseCompression();
             host.Use(async(ctx,next)=>
             {
                 if(!IsLocal(ctx.Connection.RemoteIpAddress)) {ctx.Response.StatusCode=403;return;}
@@ -116,6 +143,13 @@ public sealed class MobileSyncServer : IAsyncDisposable
                 {
                     var limit=ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
                     if(limit is {IsReadOnly:false})limit.MaxRequestBodySize=6*1024*1024;
+                }
+                var requested=ctx.Request.Headers["X-Noir-Profile"].ToString();
+                if(ctx.Request.Path!="/v1/pair"&&!ctx.Request.Path.StartsWithSegments("/v1/profiles"))
+                {
+                    if(!MobileProfiles.Matches(requested,store.DataDirectory)||ctx.Request.Headers["X-Noir-Host"].ToString() is {Length:>0} requestedHost&&requestedHost!=MobileProfiles.HostId(store.DataDirectory))
+                    {var active=MobileProfiles.Active(store.DataDirectory);ctx.Response.StatusCode=409;await ctx.Response.WriteAsJsonAsync(new{activeProfileId=active.Id,activeProfileName=active.Name,hostId=MobileProfiles.HostId(store.DataDirectory)},Json);return;}
+                    if(requested.Length>0&&!ProfileAllowed(ctx,requested)){ctx.Response.StatusCode=403;return;}
                 }
                 await next(ctx);
             });
@@ -132,10 +166,17 @@ public sealed class MobileSyncServer : IAsyncDisposable
                     if(input==null||pairCode.Length==0||DateTimeOffset.UtcNow>pairExpires||!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(input.Code),Encoding.UTF8.GetBytes(pairCode))) return Results.Unauthorized();
                     token=Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
                     if(Config.Peers.Count>=16) return Results.BadRequest();
-                    Config.Peers.Add(new(){Name=input.Name[..Math.Min(input.Name.Length,80)],Hash=Hash(token),PairedAt=DateTimeOffset.UtcNow});pairCode="";SaveConfig();
+                    Config.Peers.Add(new(){Name=input.Name[..Math.Min(input.Name.Length,80)],Hash=Hash(token),PairedAt=DateTimeOffset.UtcNow,ProfileAccess=[MobileProfiles.Active(store.DataDirectory).Id]});pairCode="";SaveConfig();
                 }
-                return Results.Json(new {token,instance=snapshot().Instance},Json);
+                var identity=snapshot();return Results.Json(new {token,instance=identity.Instance,hostId=identity.HostId,profileId=identity.ProfileId,profileName=identity.ProfileName,profileColor=identity.ProfileColor},Json);
             });
+            host.MapGet("/v1/profiles",()=>Results.Json(MobileProfiles.List(store.DataDirectory),Json));
+            host.MapPost("/v1/profiles",(ProfileInput input)=>
+            {var p=MobileProfiles.Update(store.DataDirectory,null,input.Name,input.Color);return p==null?Results.BadRequest():Results.Json(new{id=p.Id,name=p.Name,color=p.Color,hostId=MobileProfiles.HostId(store.DataDirectory)},Json);});
+            host.MapPost("/v1/profiles/{id}",(string id,ProfileInput input,HttpContext ctx)=>
+            {if(!ProfileAllowed(ctx,id))return Results.StatusCode(403);var p=MobileProfiles.Update(store.DataDirectory,id,input.Name,input.Color);return p==null?Results.BadRequest():Results.Json(new{id=p.Id,name=p.Name,color=p.Color,hostId=MobileProfiles.HostId(store.DataDirectory)},Json);});
+            host.MapPost("/v1/profiles/{id}/unlock",(string id,ProfileUnlock input,HttpContext ctx)=>
+            {var status=UnlockProfile(ctx.Request.Headers.Authorization.ToString()[7..],id,input.Pin);return Results.Json(new{unlocked=status==200},Json,statusCode:status);});
             host.MapGet("/v1/library",()=>Results.Json(snapshot(),Json));
             host.MapPost("/v1/discover/save",async(DiscoverInput input,HttpContext ctx)=>
             {
@@ -156,6 +197,15 @@ public sealed class MobileSyncServer : IAsyncDisposable
                 if(downloads==null)return Results.Json(new{error="PC downloads are unavailable. Update and configure Noir on the PC."},Json,statusCode:503);
                 try{return Results.Json(await action(),Json);}catch(Exception){return Results.Json(new{error="Couldn't complete this request. Check PC download settings, connection, and whether these choices have expired."},Json,statusCode:400);}
             }
+            string Peer(HttpContext ctx)=>Hash(ctx.Request.Headers.Authorization.ToString()[7..]);
+            host.MapPost("/v1/phone-downloads/settings",async(HttpContext ctx)=>
+            {
+                var reply=await ShareDownloadSettings(ctx.Request.Headers.Authorization.ToString()[7..],ctx.RequestAborted);
+                return reply.Settings==null?Results.StatusCode(reply.Status):Results.Json(reply.Settings,Json);
+            });
+            host.MapGet("/v1/phone-downloads/search/{id}",(string id,HttpContext ctx)=>DownloadApi(async()=>await phoneCloud!.Search(id,Peer(ctx),ctx.RequestAborted)));
+            host.MapPost("/v1/phone-downloads/prepare",(PhonePrepare input,HttpContext ctx)=>DownloadApi(async()=>await phoneCloud!.Prepare(input,Peer(ctx),ctx.RequestAborted)));
+            host.MapGet("/v1/phone-downloads/content/{token}",async(string token,HttpContext ctx)=>{if(phoneCloud==null){ctx.Response.StatusCode=503;return;}try{await phoneCloud.Send(token,Peer(ctx),ctx);}catch(Exception){if(!ctx.Response.HasStarted)ctx.Response.StatusCode=502;else ctx.Abort();}});
             host.MapGet("/v1/pc-downloads",()=>Results.Json(new{configured=downloads?.Configured??false,jobs=downloads?.PublicJobs()??[]},Json));
             host.MapGet("/v1/pc-downloads/search/{id}",(string id,bool? season,HttpContext ctx)=>DownloadApi(async()=>await downloads!.SearchDetailed(id,season==true,null,ctx.RequestAborted)));
             host.MapPost("/v1/pc-downloads/plan/{id}",(string id,DownloadPlanRequest input,HttpContext ctx)=>DownloadApi(async()=>await downloads!.Plan(id,input.ReleaseIds,ctx.RequestAborted)));
@@ -163,13 +213,28 @@ public sealed class MobileSyncServer : IAsyncDisposable
             host.MapGet("/v1/pc-downloads/files/{id}",(string id,HttpContext ctx)=>DownloadApi(async()=>new{files=await downloads!.Files(id,ctx.RequestAborted)}));
             host.MapPost("/v1/pc-downloads",(DownloadRequest input)=>DownloadApi(()=>Task.FromResult<object>(new{ids=downloads!.Enqueue(input)})));
             host.MapPost("/v1/pc-downloads/control",(DownloadControl input)=>DownloadApi(()=>{downloads!.Control(input.Id,input.Action);return Task.FromResult<object>(new{ok=true});}));
+            // Media servers and Kodi known to this PC, read for the phone; the phone matches and logs the rows itself.
+            host.MapGet("/v1/history/servers",()=>Results.Json(new{servers=(downloads?.Config.Servers??[]).Select(x=>new{name=x.Name.Length>0?x.Name:x.Kind,kind=x.Kind}).Concat(KodiAccount()!=null?[new{name="Kodi",kind="Kodi"}]:[])},Json));
+            host.MapPost("/v1/history/server-watched",async(ServerPick input,HttpContext ctx)=>
+            {
+                try
+                {
+                    List<ImportRow> rows;
+                    if(input.Name=="Kodi"&&KodiAccount() is {} k)rows=await new MediaServers().KodiWatched(k.Address,k.User,k.Password,ctx.RequestAborted);
+                    else if((downloads?.Config.Servers??[]).FirstOrDefault(x=>(x.Name.Length>0?x.Name:x.Kind)==input.Name) is {} server)rows=await new MediaServers().Watched(server,ctx.RequestAborted);
+                    else return Results.Json(new{error="That server isn't set up on the PC any more."},Json,statusCode:404);
+                    return Results.Json(new{service=input.Name,rows=rows.Select(r=>new{title=r.Title,year=r.Year,movie=r.IsMovie,imdb=r.ImdbId,season=r.Season,episode=r.Episode,episodeTitle=r.EpisodeTitle,at=r.WatchedAt?.ToUnixTimeMilliseconds()??0})},Json);
+                }
+                catch(OperationCanceledException)when(ctx.RequestAborted.IsCancellationRequested){return Results.StatusCode(499);}
+                catch(Exception e){return Results.Json(new{error=e is IOException&&downloads!=null?DownloadSecurity.SafeText(e.Message,downloads.Config):"The PC couldn't read that server."},Json,statusCode:502);}
+            });
             host.MapPost("/v1/sync",async(HttpContext ctx)=>
             {
                 var ops=await ctx.Request.ReadFromJsonAsync<List<MobileOperation>>(Json);
                 if(ops==null||ops.Count>500) return Results.BadRequest();
-                var acknowledged=merge(ops);var library=snapshot();
-                lock(gate) {Config.LastSyncAt=DateTimeOffset.UtcNow;SaveConfig();}
-                return Results.Json(new {acknowledged,library},Json);
+                var result=SyncProfile(ctx.Request.Headers["X-Noir-Profile"].ToString(),ops,ctx.Request.Headers["X-Noir-Host"].ToString());
+                if(result.Status!=200){var active=MobileProfiles.Active(store.DataDirectory);return Results.Json(new{activeProfileId=active.Id,activeProfileName=active.Name},Json,statusCode:409);}
+                return Results.Json(new {acknowledged=result.Acknowledged,library=result.Library},Json);
             });
             host.MapGet("/v1/art/{name}",(string name)=>
             {
@@ -182,6 +247,11 @@ public sealed class MobileSyncServer : IAsyncDisposable
                 LastMediaRequest=DateTime.UtcNow;
                 var item=store.Archive.FirstOrDefault(i=>i.Id==id);
                 return item!=null&&File.Exists(item.Path)?Results.File(item.Path,"application/octet-stream",lastModified:File.GetLastWriteTimeUtc(item.Path),entityTag:new Microsoft.Net.Http.Headers.EntityTagHeaderValue("\""+new FileInfo(item.Path).Length+"-"+File.GetLastWriteTimeUtc(item.Path).Ticks+"\""),enableRangeProcessing:true):Results.NotFound();
+            });
+            host.MapGet("/v1/preview-frame/{id}/{seconds}",async(string id,double seconds,HttpContext ctx)=>
+            {
+                var (status,path)=await PreviewFrameFor(ctx.Request.Headers.Authorization.ToString()[7..],id,seconds,ctx.RequestAborted);
+                return status==200?Results.File(path!,"image/png"):Results.StatusCode(status);
             });
             host.MapGet("/v1/subtitles/{id}/{subtitle}",(string id,string subtitle)=>
             {
@@ -203,13 +273,86 @@ public sealed class MobileSyncServer : IAsyncDisposable
         }
         catch(Exception e) {if(host!=null) await host.DisposeAsync();store.Log(e);Status=$"Couldn't start sync on port {port}. Check that another app isn't using the port, then enable sync again.";}
     }
-    bool Authorized(string token) {if(token.Length!=64) return false;var hash=Hash(token);lock(gate) return Config.Enabled&&Config.Peers.Any(p=>p.Hash==hash);}
+    public async Task<(int Status,PhoneDownloadSettingsPayload? Settings)> ShareDownloadSettings(string token,CancellationToken cancellation=default)
+    {
+        if(!Authorized(token))return(401,null);
+        if(downloads==null||confirmSettingsShare==null)return(403,null);
+        if(!await settingsShare.WaitAsync(0,cancellation))return(429,null);
+        try{
+            string name;lock(gate)name=Config.Peers.FirstOrDefault(p=>p.Hash==Hash(token))?.Name??"";
+            if(name.Length==0)return(401,null);
+            using var timeout=CancellationTokenSource.CreateLinkedTokenSource(cancellation);timeout.CancelAfter(TimeSpan.FromMinutes(2));
+            bool approved;try{approved=await confirmSettingsShare(name,timeout.Token).WaitAsync(timeout.Token);}catch(OperationCanceledException){return(403,null);}
+            if(!approved||timeout.IsCancellationRequested)return(403,null);
+            if(!Authorized(token))return(401,null);
+            var c=downloads.Config;
+            return(200,new(){SubtitleAddonUrl=c.SubtitleAddonUrl,SubtitleAddonOnly=c.SubtitleAddonOnly,Manifest=c.Manifest,TorBoxKey=c.TorBoxKey.Length>0?c.TorBoxKey:c.Service=="TorBox"?c.Key:"",RealDebridKey=c.RealDebridKey.Length>0?c.RealDebridKey:c.Service=="Real-Debrid"?c.Key:"",PreferredResolution=c.PreferredResolution,Language=c.BrowseLanguage=="All"?"Any":c.BrowseLanguage,MaxEpisodeBytes=c.MaxEpisodeBytes});
+        }catch(Exception){return(403,null);}finally{settingsShare.Release();}
+    }
+    bool ProfileAllowed(HttpContext ctx,string id)
+    {
+        var p=Profiles.Load(MobileProfiles.Root(store.DataDirectory)).Profiles.FirstOrDefault(p=>p.Id==id);if(p==null)return false;if(p.PinHash.Length==0)return true;
+        var hash=Hash(ctx.Request.Headers.Authorization.ToString()[7..]);lock(gate)return Config.Peers.Any(peer=>peer.Hash==hash&&peer.ProfileAccess.Contains(id));
+    }
+    public int UnlockProfile(string token,string id,string pin)
+    {
+        if(!Authorized(token))return 401;
+        lock(gate){var key="unlock:"+Hash(token)+":"+id;var failed=attempts.GetValueOrDefault(key);var now=DateTimeOffset.UtcNow;
+            if(now-failed.Since>TimeSpan.FromMinutes(5))failed=(0,now);if(failed.Count>=5)return 429;
+            var p=Profiles.Load(MobileProfiles.Root(store.DataDirectory)).Profiles.FirstOrDefault(p=>p.Id==id);if(p==null)return 404;
+            if(pin.Length>128||!Profiles.CheckPin(p,pin)){attempts[key]=(failed.Count+1,failed.Since);return 403;}
+            attempts.Remove(key);Config.Peers.First(peer=>peer.Hash==Hash(token)).ProfileAccess.Add(id);SaveConfig();return 200;}
+    }
+    sealed class ProfileInput {public string Name {get;set;}="";public string Color {get;set;}="#E4C084";}
+    sealed class ProfileUnlock {public string Pin {get;set;}="";}
+    public (int Status,List<string> Acknowledged,MobileSnapshot? Library) SyncProfile(string profile,List<MobileOperation> operations,string hostId="")
+    {
+        if(!MobileProfiles.Matches(profile,store.DataDirectory)||hostId.Length>0&&hostId!=MobileProfiles.HostId(store.DataDirectory))return(409,[],null);
+        var acknowledged=merge(operations);var library=snapshot();lock(gate){Config.LastSyncAt=DateTimeOffset.UtcNow;SaveConfig();}return(200,acknowledged,library);
+    }
+    public bool Authorized(string token) {if(token.Length!=64) return false;var hash=Hash(token);lock(gate) return Config.Enabled&&Config.Peers.Any(p=>p.Hash==hash);}
     static string Hash(string token)=>Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
-    public async ValueTask DisposeAsync() {if(app!=null){await app.StopAsync();await app.DisposeAsync();app=null;}certificate.Dispose();}
+    public async ValueTask DisposeAsync() {if(app!=null){await app.StopAsync();await app.DisposeAsync();app=null;}certificate.Dispose();phoneCloud?.Dispose();}
     sealed class PairInput {public string Code {get;set;}="";public string Name {get;set;}="Android";}
     sealed class DownloadControl {public string Id {get;set;}="";public string Action {get;set;}="";}
+    sealed class ServerPick {public string Name {get;set;}="";}
+    (string Address,string User,string Password)? KodiAccount()
+    {
+        try
+        {
+            var path=Path.Combine(store.DataDirectory,"kodi.dpapi");if(!File.Exists(path))return null;
+            var json=System.Text.Json.JsonDocument.Parse(System.Text.Encoding.UTF8.GetString(System.Security.Cryptography.ProtectedData.Unprotect(File.ReadAllBytes(path),null,System.Security.Cryptography.DataProtectionScope.CurrentUser))).RootElement;
+            return(json.GetProperty("a").GetString()??"",json.GetProperty("u").GetString()??"",json.GetProperty("p").GetString()??"");
+        }
+        catch(Exception){return null;}
+    }
     public event Action? Discovered;
     // Phones stream with repeated range requests; used to keep the PC awake while one is watching.
     public DateTime LastMediaRequest {get;private set;}=DateTime.MinValue;
+    // Scrub thumbnails for phones playing PC files; MainWindow supplies the PNG from its preview cache.
+    public Func<VideoItem,double,CancellationToken,Task<string?>>? PreviewFrame {get;set;}
+    public async Task<(int Status,string? Path)> PreviewFrameFor(string token,string id,double seconds,CancellationToken cancellation=default)
+    {
+        if(!Authorized(token)) return(401,null);
+        var item=store.Archive.FirstOrDefault(i=>i.Id==id);
+        if(item==null||PreviewFrame==null||!double.IsFinite(seconds)||seconds<0||seconds>86400||!File.Exists(item.Path)) return(404,null);
+        try{
+            using var timeout=CancellationTokenSource.CreateLinkedTokenSource(cancellation);timeout.CancelAfter(TimeSpan.FromSeconds(12));
+            var path=await PreviewFrame(item,seconds,timeout.Token);
+            return path!=null&&File.Exists(path)&&new FileInfo(path).Length<=2*1024*1024?(200,path):(404,null);
+        }catch(Exception e) when(e is OperationCanceledException or IOException){return(404,null);}
+    }
     sealed class DiscoverInput {public string Id {get;set;}="";public string Type {get;set;}="movie";public int Season {get;set;}=1;public int Episode {get;set;}=1;public bool Watchlist {get;set;}}
+}
+
+public sealed class PhoneDownloadSettingsPayload
+{
+    public string SubtitleAddonUrl {get;set;}="";
+    public bool SubtitleAddonOnly {get;set;}=true;
+    public string Manifest {get;set;}="";
+    public string TorBoxKey {get;set;}="";
+    public string RealDebridKey {get;set;}="";
+    public string PreferredResolution {get;set;}="1080p";
+    public string Language {get;set;}="Any";
+    public long MaxEpisodeBytes {get;set;}
 }

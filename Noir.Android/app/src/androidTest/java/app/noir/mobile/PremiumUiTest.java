@@ -32,8 +32,8 @@ public final class PremiumUiTest {
         test.waitForIdleSync();capture("redesign-home.png");
         test.runOnMainSync(()->home.nav.getChildAt(4).performClick());test.waitForIdleSync();
         assertEquals("More is a destination, not a popup","More",home.page);
-        assertNotNull(find(home.body,"Downloads"));assertNotNull(find(home.body,"Settings"));capture("redesign-more.png");
-        test.runOnMainSync(()->find(home.body,"Settings").performClick());assertEquals("Settings",home.page);
+        assertNotNull(find(home.body,"Downloads"));assertNotNull(find(home.body,"Profile"));assertNotNull(find(home.body,"Playback"));capture("redesign-more.png");
+        test.runOnMainSync(()->find(home.body,"Profile").performClick());assertEquals("Profile hook stays on More until wired","More",home.page);
         test.runOnMainSync(()->{home.page="Library";home.open(item);home.options(item);});test.waitForIdleSync();
         assertNotNull(home.titleActions.dialog);assertTrue(home.titleActions.dialog.isShowing());
         View sheet=home.titleActions.dialog.getWindow().getDecorView();

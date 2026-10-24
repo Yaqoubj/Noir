@@ -1,11 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    <application android:name=".NoirApp" android:label="Noir" android:icon="@drawable/noir_icon" android:theme="@style/NoirTheme" android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:networkSecurityConfig="@xml/network_security">
+    <application android:name=".NoirApp" android:label="Noir" android:supportsRtl="true" android:icon="@drawable/noir_icon" android:theme="@style/NoirTheme" android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:networkSecurityConfig="@xml/network_security">
         <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
             <intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="noir" android:host="pair"/></intent-filter>
@@ -14,8 +15,22 @@
         <activity android:name=".ReviewsActivity" android:exported="false" />
         <activity android:name=".DownloadsActivity" android:exported="false"/>
         <activity android:name=".DiscoverActivity" android:exported="false"/>
+        <activity android:name=".ShareToLogActivity" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.SEND"/><category android:name="android.intent.category.DEFAULT"/><data android:mimeType="text/plain"/></intent-filter>
+        </activity>
+        <activity android:name=".LogActivity" android:exported="false"/>
+        <activity android:name=".ProfilesActivity" android:exported="false"/>
+        <activity android:name=".HistoryToolsActivity" android:exported="false"/>
         <activity android:name=".DownloadHubActivity" android:exported="false"/>
+        <activity android:name=".PhoneDownloadsActivity" android:exported="false"/>
+        <activity android:name=".PhoneDownloadSettingsActivity" android:exported="false"/>
         <activity android:name=".PcDownloadsActivity" android:exported="false"/>
+        <activity android:name=".PersonActivity" android:exported="false"/>
+        <activity android:name=".YearStoryActivity" android:exported="false" android:screenOrientation="portrait"/>
+        <receiver android:name=".NextUpWidget" android:exported="false">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE"/></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/next_up_widget"/>
+        </receiver>
         <service android:name=".DownloadService" android:exported="false" android:foregroundServiceType="dataSync"/>
         <service android:name=".SyncJobService" android:exported="true" android:permission="android.permission.BIND_JOB_SERVICE"/>
     </application>

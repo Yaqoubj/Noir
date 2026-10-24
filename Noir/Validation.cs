@@ -10,9 +10,19 @@ public partial class MainWindow
 {
     async Task ValidatePlayback()
     {
+        if(Environment.GetCommandLineArgs().Contains("--stream-subtitles-only")){await ValidateStreamingSubtitles();Close();return;}
+        if(Environment.GetCommandLineArgs().Contains("--history-tracker-only")){await ValidateHistoryTracker();Close();return;}
+        if(Environment.GetCommandLineArgs().Contains("--tracker-mode-only")){await ValidateTrackerMode();Close();return;}
+        if(Environment.GetCommandLineArgs().Contains("--settings-only")){await ValidateSettings();Close();return;}
+        if(Environment.GetCommandLineArgs().Contains("--pages-only")){await ValidatePages();Close();return;}
+        if(Environment.GetCommandLineArgs().Contains("--perf-only")){await ValidatePerf();Close();return;}
+        if(Environment.GetCommandLineArgs().Contains("--stream-probe")){await ProbeStream();Close();return;}
+        if(Environment.GetCommandLineArgs().Contains("--aio-probe")){await ProbeAio();Close();return;}
+        if(Environment.GetCommandLineArgs().Contains("--removal-discover-only")){await ValidateRemovalDiscover();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--premium-redesign-only")){await ValidatePremiumRedesign();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--navigation-only")){await ValidateNavigationDiscover();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--ux-only")){await ValidateUx();Close();return;}
+        if(Environment.GetCommandLineArgs().Contains("--player-only")){await ValidatePlayer();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--smoothness-only")){await ValidatePlayerSmoothness();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--downloads-only")) {await ValidateDownloads();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--premium-only")) {await ValidatePremium();Close();return;}
@@ -29,10 +39,16 @@ public partial class MainWindow
         if(Environment.GetCommandLineArgs().Contains("--render-only"))
         {
             if(Environment.GetCommandLineArgs().Contains("--enrich")) await RefreshMetadata(true);
+            // Give title logos, ratings and the Top 10 a moment to arrive before the first picture.
+            Render();await Task.Delay(6000);RenderQuiet();await Task.Delay(1500);
             UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"library.png"));
-            Navigate("History");UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"history.png"));
+            ContentScroll.ScrollToVerticalOffset(ContentScroll.ViewportHeight*.8);await Task.Delay(300);UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"library-rows.png"));
+            var language=store.State.Language;SetLanguage("ar");await Task.Delay(1500);ContentScroll.ScrollToTop();UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"library-ar.png"));
+            ContentScroll.ScrollToVerticalOffset(ContentScroll.ViewportHeight*.8);await Task.Delay(300);UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"library-ar-rows.png"));
+            WindowState=WindowState.Normal;Width=900;Height=760;await Task.Delay(900);ContentScroll.ScrollToTop();UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"library-ar-900.png"));Width=1320;SetLanguage(language);await Task.Delay(300);ContentScroll.ScrollToTop();
+            Navigate("History");await Task.Delay(600);UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"history.png"));
             detailKey=items.First(x=>!x.IsMovie).GroupKey;Render();UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"episodes.png"));
-            Navigate("History");historyFilter="Unavailable";Render();UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"history-filter.png"));historyFilter="All";
+            trackerTab="Shows";Navigate("History");UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"history-filter.png"));trackerTab="Up next";
             Navigate("Settings");UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"settings.png"));Close();return;
         }
         var results=new List<string>();

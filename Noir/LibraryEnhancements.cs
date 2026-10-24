@@ -8,7 +8,7 @@ public partial class MainWindow
 {
     string episodeFilter="All episodes",genreFilter="All genres";
     static bool CanPlay(VideoItem item) => item.Available&&System.IO.File.Exists(item.Path);
-    DateTimeOffset HistoryDate(VideoItem item) => new[]{store.GetProgress(item)?.UpdatedAt??DateTimeOffset.MinValue,store.ViewingHistory(item).FirstOrDefault()?.WatchedAt??DateTimeOffset.MinValue}.Max();
+    DateTimeOffset HistoryDate(VideoItem item) => store.LastActivity(item);
     VideoItem ChoiceFor(List<VideoItem> group)
     {
         var playable=group.Where(CanPlay).ToList();
@@ -38,7 +38,7 @@ public partial class MainWindow
     }
     FrameworkElement ContinueShelf(IEnumerable<UpNext> videos,string label="Continue Watching",string subtitle="Pick up from your saved time, or play the next episode.")
     {
-        return Rail(label,subtitle,videos.Select(entry=>Lift(ContinueCard(entry.Item,entry))).ToList());
+        return Rail(label,subtitle,videos.Select(entry=>HoverCard(Lift(ContinueCard(entry.Item,entry)),store.EpisodesFor(entry.Item.GroupKey))).ToList());
     }
     void RenderEpisodeAvailability(VideoItem item)
     {
