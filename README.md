@@ -1,30 +1,58 @@
 # Noir
 
-**A TV Time–style watch tracker and a personal cinema, in one app for Windows and Android.**
+**A personal cinema and watch tracker for Windows and Android.** Play your own files or streams, and keep your whole viewing history in one place.
 
-[**Download Noir**](https://github.com/Yaqoubj/Noir/releases/latest)
+[**Download Noir**](https://github.com/Yaqoubj/Noir/releases/latest) · Windows 0.14.0 · Android 0.6.0
 
-## What makes it different
+![Home](docs/screenshots/home.jpg)
 
-- **Your history is the product.** Track every show and movie you watch, anywhere (Netflix, cinema, years ago), with no files needed. Use it as a tracker only, or add your own video library on top.
-- **It thinks like you do.** Check off S2E8 and Noir asks about the earlier episodes. Untick one and it offers to untick the later ones. It also notices skipped episodes, new seasons and shows you've stopped watching, and offers a rating when you finish a season.
-- **Back-filling never gets in the way.** Add years of history by tapping through popular titles, pasting a list, or importing from Netflix, Trakt, TV Time, Letterboxd, IMDb, Simkl, Stremio, Plex, Jellyfin, Emby or Kodi. Old history fills your stats and diary but never crowds Up next or Recently watched.
-- **Honest dates.** Choose "just now", "when it aired", a date, "around 2019", a range of years, or "don't remember". Guessed dates never count toward streaks.
-- **Upcoming calendar and alerts.** See air dates for the shows you follow, and get notified on PC and phone when a new episode comes out.
-- **Phone and PC share everything.** History, ratings, lists and resume points sync over home Wi-Fi. The phone tracker also works offline.
-- **From "it's out" to watching in one step.** Plan a whole season or show from AIOStreams with TorBox or Real-Debrid, stream directly in Noir, or play your own files. The VLC-based player supports intro skipping, saved progress, and English/Arabic subtitles during streaming as well as offline playback.
+## Highlights
+
+- **Track everything.** Log any show or movie, check off episodes, rate with half stars, and pick four favorites. You can also import from Netflix, Trakt, TV Time, Letterboxd, IMDb, Plex, Jellyfin, Kodi and more.
+- **Watch here.** Play local files or streams from AIOStreams (TorBox / Real-Debrid) in a VLC-based player with English and Arabic subtitles.
+- **Phone and PC together.** Profiles, history, ratings and resume points sync over home Wi‑Fi. The phone also works on its own.
+
+## Player
+
+![Up Next card](docs/screenshots/player.jpg)
+
+- An Up Next card with a countdown ring, and a "Still watching?" check.
+- Skip intros, recaps and credits automatically or with a button, each with Undo.
+- Chapter marks on the seek bar, speed from 0.5× to 2×, and a volume boost up to 200%.
+- Thumbnails while scrubbing, on PC and phone.
+
+## Browsing and detail pages
+
+<img src="docs/screenshots/hover.jpg" width="230" align="right" alt="Hover card">
+
+- Hover cards that expand with a muted trailer or clip. Previews can be turned off.
+- Labels such as "New season" and "Finale".
+- Discover opens a quick side panel (a bottom sheet on the phone).
+- Home rows you can reorder and hide; Continue Watching always stays first.
+- Poster, landscape or list views.
+- Cast and crew with person pages, plus trailers and extras.
+
+<br clear="right">
+
+![Show page](docs/screenshots/show.jpg)
+
+## History
+
+![History](docs/screenshots/stats.jpg)
+
+<img src="docs/screenshots/story.jpg" width="260" align="right" alt="Year story">
+
+- **"Your viewing life":** streaks, a weekly goal with neutral pacing, a diary with hearts and half stars, and season ratings with a mood map.
+- **Year in review:** shareable story slides, each one saved as a PNG.
+- **On the phone:** an Android home-screen widget for the next episode, with a ✓ check-off.
+- **Upcoming:** an Upcoming calendar with alerts and `.ics` export.
+
+<br clear="right">
 
 ## Get started
 
 1. Run **Noir.exe** and choose **Track what I watch** or **Play my files**.
-2. Install the Android APK and pair it in **Settings → Phone Sync**.
-3. Optional: connect TorBox or Real-Debrid and AIOStreams in **Settings → Downloads**.
-
-## Roadmap
-
-- Two-way Trakt sync (needs a Trakt API client ID).
-- Quick add and paste-a-list on the phone.
-- The faster season planner for Real-Debrid.
-- Casting to a TV, household profiles, auto-update.
+2. Install the Android APK. Optionally pair it in **Settings → Phone Sync**.
+3. Optionally add TorBox or Real-Debrid and AIOStreams in **Settings → Downloads**.
 
 [Windows guide & building](Noir/README.md) · [Android guide & building](Noir.Android/README.md) · [MIT license](LICENSE)
