@@ -2,7 +2,7 @@
 
 **A personal cinema and watch tracker for Windows and Android.** Play your own files or streams, and keep your whole viewing history in one place.
 
-[**Download Noir**](https://github.com/Yaqoubj/Noir/releases/latest) · Windows 0.14.0 · Android 0.6.0
+[**Download Noir**](https://github.com/Yaqoubj/Noir/releases/latest) · Windows 0.15.0 · Android 0.7.0
 
 ![Home](docs/screenshots/home.jpg)
 
@@ -35,6 +35,20 @@
 <br clear="right">
 
 ![Show page](docs/screenshots/show.jpg)
+
+## Noir knows you
+
+Every feature here works on both Windows and Android.
+
+- **Keep ready:** Noir keeps the next episodes of your shows downloaded, using only sources your service already has ready.
+  - It stays within a storage budget and never deletes an unwatched episode.
+  - Removing watched episodes after 7 days is optional.
+  - The phone downloads overnight, only on Wi‑Fi while charging.
+- **Smart lists:** Home rows that build themselves: Unfinished business, Comfort rewatches, Directors you love, and Short tonight. Each title says why it's there.
+- **Catch me up:** coming back to a show after a break shows a short recap of the last episodes you watched, never anything past where you stopped.
+- **Compare taste:** share a QR code or a `noir://taste` link with a friend to see how well your tastes match, what you both loved, and what they loved that you haven't seen.
+  - You review exactly what's included before sharing.
+  - Nothing is uploaded.
 
 ## History
 

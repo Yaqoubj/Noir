@@ -83,7 +83,9 @@ public partial class MainWindow
             var sizeLabel=sizes.FirstOrDefault(p=>p.Value==preference.MaxEpisodeBytes).Key??DownloadNaming.Size(preference.MaxEpisodeBytes)+" max";sizes[sizeLabel]=preference.MaxEpisodeBytes;
             var sizeGroup=PreferenceGroup("MAXIMUM PER EPISODE",2);sizeGroup.Children.Add(CompactChips(sizes.Keys.ToArray(),sizeLabel,value=>{preference.MaxEpisodeBytes=sizes[value];SavePreference();OptionsChanged();}));
             var auto=new CheckBox{Content="Auto-download new episodes",IsChecked=preference.AutoDownload,Margin=new(0,12,0,4),Foreground=Brush("#E4C084")};
-            auto.Checked+=(_,_)=>{preference.AutoDownload=true;SavePreference();};auto.Unchecked+=(_,_)=>{preference.AutoDownload=false;SavePreference();};controls.Children.Add(auto);
+            auto.Content=T("Auto-download new episodes","تنزيل الحلقات الجديدة تلقائيًا");
+            auto.Checked+=(_,_)=>{preference.AutoDownload=true;preference.KeepReadyEnabled=true;SavePreference();ShowKeepReady(item);};auto.Unchecked+=(_,_)=>{preference.AutoDownload=false;preference.KeepReadyEnabled=false;SavePreference();};controls.Children.Add(auto);
+            controls.Children.Add(ActionButton(T("Keep ready · choose episodes & storage","إبقاء الحلقات جاهزة · اختيار العدد والمساحة"),()=>ShowKeepReady(item)));
             controls.Children.Add(Body("Preferences are remembered for this show. Automatic downloads use ready files; other new episodes still send an alert.",12));
         }
         void UpdateSummary()

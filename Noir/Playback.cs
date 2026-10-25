@@ -310,7 +310,7 @@ public partial class MainWindow
         if(current==null || player==null || ended) return;
         // Reaching credits records completion without stopping playback. Only the natural end advances automatically.
         ended=true;pendingTarget=null;tick?.Stop();CreditsChip.Visibility=Visibility.Collapsed;
-        creditsReached=true;store.Record(current,currentDuration,currentDuration,true,deferSave:true);
+        creditsReached=true;store.Record(current,currentDuration,currentDuration,true,deferSave:true);if(!current.IsMovie)keepReadyCandidate=current;
         SavedLabel.Text="Watched";SetPlayState("Replay");Elapsed.Text=LibraryStore.Time(currentDuration);UpdateTotalLabel(currentDuration);SeekBar.Value=SeekBar.Maximum;
         SkipIntro.Visibility=Visibility.Collapsed;ShowControls();
         if(sleepPlan?.EpisodeEnded()==true) {StopForSleep();return;}
@@ -377,6 +377,8 @@ public partial class MainWindow
         if(current==null) return;
         var key=current.GroupKey;ReturnToLibrary();detailKey=key;detailSeason=null;Render();ContentScroll.ScrollToTop();
     }
+    // Keep ready is offered once, back in the library, never over the Up Next countdown.
+    VideoItem? keepReadyCandidate;
     async void ReturnToLibrary()
     {
         SavePlayback();CancelNext();tick?.Stop();DetachEvents();serial++;streamSubtitleCancellation?.Cancel();streamRequest++;
@@ -395,6 +397,7 @@ public partial class MainWindow
         PlayerRoot.Visibility=Visibility.Collapsed;LibraryRoot.Visibility=Visibility.Visible;Title="Noir";Render();
         if(restoreLibraryView){ContentScroll.ScrollToVerticalOffset(libraryScroll);restoreLibraryView=false;if(libraryFocusName.Length>0)ViewElements(ContentPanel).FirstOrDefault(e=>System.Windows.Automation.AutomationProperties.GetName(e)==libraryFocusName)?.Focus();}
         try{if(native!=null)await StopPlayer(native);await store.FlushPendingAsync();}catch(Exception error){store.Log(error);Status.Text="Couldn't finish saving playback. Check library storage.";}
+        if(keepReadyCandidate is {} finished&&!validationMode){keepReadyCandidate=null;OfferKeepReady(finished);}
     }
     void Seek_Begin(object sender,MouseButtonEventArgs e) { seeking=true; }
     void Seek_End(object sender,MouseButtonEventArgs e) { if(seeking) { seeking=false;SeekAbsolute(SeekBar.Value); } }

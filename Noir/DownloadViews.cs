@@ -8,13 +8,14 @@ public partial class MainWindow
     PcDownloads? downloads;
     Action? downloadPageUpdate;
     int lastDownloadCount=-1;
-    void DownloadChanged()=>Dispatcher.BeginInvoke(()=>{if(closing)return;UpdateDownloadBadge();UpdateBackgroundState();if(!hiddenInTray)downloadPageUpdate?.Invoke();});
+    void DownloadChanged(){void Update(){if(closing)return;UpdateDownloadBadge();UpdateBackgroundState();if(!hiddenInTray){downloadPageUpdate?.Invoke();if(page=="Downloads")readyCentreUpdate?.Invoke();}}if(Dispatcher.CheckAccess())Update();else Dispatcher.BeginInvoke(Update,DispatcherPriority.DataBind);}
     void UpdateDownloadBadge(){var count=downloads?.Jobs().Count(j=>j.Status is "Queued" or "Preparing" or "Downloading" or "Subtitles")??0;if(count==lastDownloadCount)return;lastDownloadCount=count;SetNavIcon(DownloadsNav,DownloadIcon(count));UpdateNavSelection();if(!railCompact)DownloadsNav.ToolTip=count>0?$"{T("Downloads")} · {count}":null;}
     void StartDownloads()
     {
         try
         {
             downloads=new(store);downloads.Completed+=QueueFolderScan;downloads.Changed+=DownloadChanged;UpdateDownloadBadge();
+            var manager=downloads;store.WatchCompleted+=()=>_=manager.PrepareReady("Episode finished");manager.Completed+=()=>_=manager.PrepareReady("Download finished");_=manager.PrepareReady("Startup");
         }
         catch(Exception){Status.Text="Download settings could not be loaded. Your library is unchanged.";}
     }
@@ -25,6 +26,7 @@ public partial class MainWindow
         ContentPanel.Children.Add(Heading("Downloads on this PC","Find releases through AIOStreams, your download service and your media servers. Completed downloads join your local library."));
         if(downloads==null){ContentPanel.Children.Add(Body("Downloads are unavailable until Noir restarts."));return;}
         var c=downloads.Config;
+        ContentPanel.Children.Add(ReadySettingsPanel());
         var manifest=Secret(c.Manifest);
         var key=Secret(c.Key);
         ContentPanel.Children.Add(Body("AIOStreams installation URL (manifest.json)",12));ContentPanel.Children.Add(manifest);
@@ -144,6 +146,10 @@ public partial class MainWindow
         ContentPanel.Children.Add(Heading("Your download queue","Movies and episodes from this PC or your paired phone. Finished files join your library automatically."));
         var tools=new WrapPanel{Margin=new(0,0,0,12)};tools.Children.Add(ActionButton("Find something new",()=>Navigate("Discover"),true));var settings=ActionButton("Download settings",()=>{settingsSection="Downloads";Navigate("Settings");});settings.Margin=new(10,0,0,0);tools.Children.Add(settings);ContentPanel.Children.Add(tools);
         if(downloads==null){ContentPanel.Children.Add(Body("Downloads are starting. Reopen this tab shortly."));return;}
+        readyCentreHost=new Border{Child=PreparationCentre()};ContentPanel.Children.Add(readyCentreHost);
+#if NOIR_VALIDATE
+        QueueReadyValidation();
+#endif
         var body=new StackPanel();ContentPanel.Children.Add(body);downloadPageUpdate=BuildDownloadQueue(body);downloadPageUpdate();
     }
     Action BuildDownloadQueue(StackPanel body)

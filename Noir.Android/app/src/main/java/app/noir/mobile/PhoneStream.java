@@ -30,6 +30,7 @@ final class PhoneStream {
   Toast(a,"Finding a stream…");
   NoirApp.data.network.execute(()->{try{
    List<JSONObject> options=rank(new PhoneDownloadProvider(s).search(item),s.optString("preferredResolution","1080p"),item.optBoolean("movie"));
+   SmartLists.rememberStream(NoirApp.data.profileId,item.optString("id"),options.stream().anyMatch(o->o.optBoolean("cached")));
    a.runOnUiThread(()->{if(a.isDestroyed()||a.isFinishing()||requests.getOrDefault(a,0)!=request)return;if(options.isEmpty()){Toast(a,"AIOStreams has no playable stream for this right now.");return;}
     if(choose||!options.get(0).optBoolean("cached"))pick(a,item,options);else play(a,item,options.get(0));});
   }catch(Exception e){a.runOnUiThread(()->{if(!a.isDestroyed()&&!a.isFinishing()&&requests.getOrDefault(a,0)==request)Toast(a,e.getMessage()==null?"AIOStreams couldn't be reached.":PhoneDownloadSettings.safe(e.getMessage(),s));});}});

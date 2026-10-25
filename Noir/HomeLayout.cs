@@ -13,7 +13,7 @@ public sealed class HomeRowSetting
 }
 public sealed class HomeLayout
 {
-    public static readonly string[] Defaults=["continue","list","top10","because","genres","collections","recently-added","services","recently-watched","shows","movies","queue","upcoming"];
+    public static readonly string[] Defaults=["continue","ready","unfinished","comfort","directors","short-tonight","list","top10","because","genres","collections","recently-added","services","recently-watched","shows","movies","queue","upcoming"];
     public List<HomeRowSetting> Rows {get;set;}=[];
     public List<HomeRowSetting> Resolve(IEnumerable<string> available)
     {
@@ -31,12 +31,12 @@ public partial class MainWindow
     Dictionary<string,Action>? homeRowBuilders;
     readonly Dictionary<string,string> homeRowNames=new();
     void HomeRow(string id,Action render){if(homeRowBuilders!=null)homeRowBuilders[id]=render;else render();}
-    string HomeRowName(string id)=>homeRowNames.GetValueOrDefault(id)??T(id switch{"continue"=>"Continue Watching","list"=>"My List","top10"=>"Top 10 this week","because"=>"Because you watched…","genres"=>"Genres","collections"=>"Collections","recently-added"=>"Recently added","services"=>"Your services","recently-watched"=>"Recently watched","shows"=>"Your shows","movies"=>"Your movies","queue"=>"Your play queue","upcoming"=>"Coming up",_=>id});
+    string HomeRowName(string id)=>SmartLists.Ids.Contains(id)?SmartName(id):homeRowNames.GetValueOrDefault(id)??T(id switch{"continue"=>"Continue Watching","list"=>"My List","top10"=>"Top 10 this week","because"=>"Because you watched…","genres"=>"Genres","collections"=>"Collections","recently-added"=>"Recently added","services"=>"Your services","recently-watched"=>"Recently watched","shows"=>"Your shows","movies"=>"Your movies","queue"=>"Your play queue","upcoming"=>"Coming up",_=>id});
     void RenderHomeRows(List<List<VideoItem>> groups)
     {
         foreach(var g in groups)lastWatched[g[0].GroupKey]=g.Max(HistoryDate);
         var library=store.LibraryGroups();var local=groups.Where(g=>library.Contains(g[0].GroupKey)).ToList();var watched=groups.Where(g=>LastWatched(g)>DateTimeOffset.MinValue).OrderByDescending(LastWatched).ToList();
-        homeRowBuilders=new();homeRowNames.Clear();
+        homeRowBuilders=new();homeRowNames.Clear();RegisterSmartRows(groups);homeRowNames["ready"]=T("Ready","جاهز");HomeRow("ready",()=>{if(ReadyShelf() is {} shelf)ContentPanel.Children.Add(shelf);});
         HomeRow("services",RenderServices);HomeRow("top10",RenderTopTen);RenderHomeExtras(groups);
         HomeRow("list",()=>RailCatalog(groups.Where(g=>store.State.Watchlist.Contains(g[0].GroupKey)).ToList(),"My List","",()=>Navigate("My List")));
         HomeRow("recently-watched",()=>RailCatalog(watched.Take(12).ToList(),"Recently watched","",()=>{trackerTab="Shows";Navigate("History");}));

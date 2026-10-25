@@ -133,6 +133,7 @@ public partial class MainWindow : Window
         UpdateNavSelection();
         if(offset==0&&!quietRender)PageEntrance();
         if(welcome){RenderWelcome();return;}
+        if(page=="Taste"){RenderTaste();return;}
         if(page=="Downloads"){RenderDownloads();return;}
         if(page=="Discover"){RenderDiscover();return;}
         if (page == "Settings") { RenderSettings(); return; }

@@ -1,0 +1,36 @@
+package app.noir.mobile;
+import org.json.*;
+import java.util.*;
+import java.time.*;
+import java.util.function.Predicate;
+final class SmartLists {
+ static final java.util.concurrent.ConcurrentHashMap<String,Long> streams=new java.util.concurrent.ConcurrentHashMap<>();
+ static void rememberStream(String profile,String item,boolean confirmed){rememberStream(profile,item,confirmed,System.currentTimeMillis());}
+ static void rememberStream(String profile,String item,boolean confirmed,long now){String key=profile+"\0"+item;if(confirmed)streams.put(key,now);else streams.remove(key);if(streams.size()>11000)for(Map.Entry<String,Long> pair:streams.entrySet())if(pair.getValue()<now-1800000)streams.remove(pair.getKey(),pair.getValue());}
+ static boolean streamReady(String profile,String item,long now){Long at=streams.get(profile+"\0"+item);return at!=null&&at<=now&&at>=now-1800000;}
+ static final long DAY=86400000L;
+ static final String[] IDS={"unfinished","comfort","directors","short-tonight"};
+ static final String[] NAMES={"Unfinished business","Comfort rewatches","Directors you love","Short tonight"};
+ static String name(String id){for(int n=0;n<IDS.length;n++)if(IDS[n].equals(id))return NAMES[n];return id;}
+ static final class Episode {
+  String id,summary;int season,episode,watches,rating10;boolean watched,started,playable;long lastViewed,airsAt;double minutes;
+  Episode(String id,int s,int e,boolean watched,boolean started,int watches,int rating,long last,double minutes,boolean playable,long air,String summary){this.id=id;season=s;episode=e;this.watched=watched;this.started=started;this.watches=watches;rating10=rating;lastViewed=last;this.minutes=minutes;this.playable=playable;airsAt=air;this.summary=summary;}
+ }
+ static final class Title {String key;boolean movie,dropped;List<Episode> episodes;List<String> directors;Title(String key,boolean movie,boolean dropped,List<Episode> eps,List<String> directors){this.key=key;this.movie=movie;this.dropped=dropped;episodes=eps;this.directors=directors;}}
+ static final class Pick {String key,reason,episodeId;Pick(String key,String reason,String id){this.key=key;this.reason=reason;episodeId=id;}}
+ static String label(Episode ep){return "S"+ep.season+"E"+ep.episode;}
+ static String ago(long at,long now,boolean ar){long days=Math.max(0,(now-at)/DAY);return days>=14?(ar?"قبل "+days/7+" أسابيع":days/7+" weeks ago"):(ar?"قبل "+days+" أيام":days+" days ago");}
+ static boolean before(Episode a,Episode b){return a.season<b.season||a.season==b.season&&a.episode<b.episode;}
+ static Map<String,List<Pick>> build(Iterable<Title> titles,long now,boolean ar){Map<String,List<Pick>> rows=new LinkedHashMap<>();for(String id:IDS)rows.put(id,new ArrayList<>());Map<String,Integer> loved=new HashMap<>();List<Title> candidates=new ArrayList<>();long sixMonths=Instant.ofEpochMilli(now).atZone(ZoneOffset.UTC).minusMonths(6).toInstant().toEpochMilli();
+  for(Title title:titles){if(title.episodes.isEmpty())continue;Episode latest=null,next=null;long last=0;int rating=0,rewatches=Integer.MAX_VALUE,regular=0;boolean started=false,watched=false;for(Episode ep:title.episodes){if((title.movie||ep.season>0)&&(ep.watched||ep.started)&&(latest==null||ep.lastViewed>latest.lastViewed||ep.lastViewed==latest.lastViewed&&before(latest,ep)))latest=ep;last=Math.max(last,ep.lastViewed);rating=Math.max(rating,ep.rating10);started|=ep.started||ep.watched;watched|=ep.watched;if(title.movie||ep.season>0){regular++;rewatches=Math.min(rewatches,ep.watches);if(!ep.watched&&(next==null||before(ep,next)))next=ep;}}
+   if(!title.movie&&latest!=null){next=latest.started?latest:null;if(!latest.started)for(Episode ep:title.episodes)if(ep.season>0&&!ep.watched&&before(latest,ep)&&(next==null||before(ep,next)))next=ep;}
+   if(title.dropped)continue;if(!title.directors.isEmpty()){candidates.add(title);if(rating>=8){Set<String> unique=new HashSet<>();for(String director:title.directors)if(!director.trim().isEmpty()&&unique.add(director.toLowerCase(Locale.ROOT)))loved.put(director.toLowerCase(Locale.ROOT),loved.getOrDefault(director.toLowerCase(Locale.ROOT),0)+1);}}
+   boolean available=next!=null&&(next.playable||next.airsAt>0&&next.airsAt<=now),aired=next==null||next.airsAt==0||next.airsAt<=now;
+   if(!title.movie&&started&&last>0&&last<=now-14*DAY&&available&&aired)rows.get("unfinished").add(new Pick(title.key,ar?"توقفت "+ago(last,now,true)+" · التالية "+label(next):"Stalled "+Math.max(2,(now-last)/DAY/7)+" weeks · next is "+label(next),next.id));
+   boolean twice=regular>0&&rewatches>=2;if(twice||watched&&rating>=9&&last>0&&last<=sixMonths)rows.get("comfort").add(new Pick(title.key,twice?(ar?"شاهدته مرتين أو أكثر":"Watched at least twice"):(ar?"تقييمك ★ "+rating/2.0+" · "+ago(last,now,true):"Your ★ "+rating/2.0+" · "+ago(last,now,false)),title.episodes.get(0).id));
+   if(next!=null&&next.playable&&aired&&next.minutes>0&&next.minutes<(title.movie?100:30)&&(!title.movie||!started))rows.get("short-tonight").add(new Pick(title.key,ar?(int)Math.ceil(next.minutes)+" دقيقة · جاهز للمشاهدة":(int)Math.ceil(next.minutes)+" min · ready to play",next.id));
+  }
+  for(Title title:candidates)for(String director:title.directors)if(loved.getOrDefault(director.toLowerCase(Locale.ROOT),0)>=2){int count=loved.get(director.toLowerCase(Locale.ROOT));rows.get("directors").add(new Pick(title.key,ar?director+" · قيّمت "+count+" من أعماله بأربع نجوم أو أكثر":director+" · "+count+" titles you rated ★ 4+",title.episodes.get(0).id));break;}return rows;
+ }
+ static Title read(List<JSONObject> group,JSONObject settings,List<String> directors,Predicate<JSONObject> playable){JSONObject first=group.get(0),schedules=settings.optJSONObject("schedules");Map<String,JSONObject> schedule=new HashMap<>();for(JSONObject ep:DataStore.objects(schedules==null?null:schedules.optJSONArray(first.optString("group"))))schedule.put(ep.optInt("season")+":"+ep.optInt("episode"),ep);List<Episode> eps=new ArrayList<>();for(JSONObject item:group){JSONObject p=item.optJSONObject("progress"),known=schedule.get(item.optInt("season")+":"+item.optInt("episode"));boolean watched=DataStore.watched(item);JSONArray views=item.optJSONArray("viewings");long at=DataStore.recent(item);double minutes=item.optDouble("duration",0)/60;if(minutes<=0&&known!=null)minutes=known.optDouble("runtime",0);if(minutes<=0)minutes=item.optDouble("runtime",0);if(minutes<=0&&settings.optJSONObject("showRuntimes")!=null)minutes=settings.optJSONObject("showRuntimes").optDouble(first.optString("group"),0);long air=DataStore.date(item.optString("airsAt"));if(known!=null)air=DataStore.date(known.optString("airsAt"));eps.add(new Episode(item.optString("id"),item.optInt("season"),item.optInt("episode"),watched,p!=null&&!p.optBoolean("completed")&&p.optDouble("position",0)>0,Math.max(views==null?0:views.length(),watched?1:0),settings.optJSONObject("showRatings")!=null&&settings.optJSONObject("showRatings").optInt(first.optString("group"))>0?settings.optJSONObject("showRatings").optInt(first.optString("group"))*2:DataStore.rating10(item),at,minutes,playable.test(item),air,item.optString("episodeSummary",known==null?"":known.optString("summary"))));}return new Title(first.optString("group"),first.optBoolean("movie"),first.optString("status").equals("Dropped"),eps,directors);}
+}

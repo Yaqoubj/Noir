@@ -29,6 +29,7 @@ public partial class MainWindow
         {
             using var http=DownloadSecurity.Client(TimeSpan.FromSeconds(40));
             var options=StreamSources.Rank(await StreamSources.Find(downloads!.Config,item,http,CancellationToken.None),downloads.Config.PreferredResolution,item.IsMovie);
+            SmartLists.RememberStream(store.DataDirectory,item.Id,options.Any(o=>o.Cached));
             if(request!=streamRequest||closing)return;
             if(options.Count==0){Status.Text="AIOStreams has no playable stream for "+item.Label+" right now.";return;}
             streamChoices=options;

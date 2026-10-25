@@ -49,8 +49,9 @@ public partial class MainWindow
         }
         var genres=groups.SelectMany(g=>g[0].Genres.Split('·',StringSplitOptions.TrimEntries|StringSplitOptions.RemoveEmptyEntries)).Distinct().Order().ToList();
         if(genreFilter!="All genres"&&!genres.Contains(genreFilter))genreFilter="All genres";
+        var smartFilter=SmartLists.Ids.Contains(libraryFilter)?BuildSmartRows(groups)[libraryFilter].Select(p=>p.Key).ToHashSet():null;
         var shown=groups.Where(g=>genreFilter=="All genres"||g[0].Genres.Split('·',StringSplitOptions.TrimEntries).Contains(genreFilter))
-            .Where(g=>libraryFilter=="All"||(libraryFilter=="Still planned"?store.TitleStatus(g)=="Planned"&&!g.Any(store.EverWatched):libraryFilter=="On this PC"?g.Any(CanPlay):LibraryState(g)==libraryFilter)).ToList();
+            .Where(g=>libraryFilter=="All"||(smartFilter!=null?smartFilter.Contains(g[0].GroupKey):libraryFilter=="Still planned"?store.TitleStatus(g)=="Planned"&&!g.Any(store.EverWatched):libraryFilter=="On this PC"?g.Any(CanPlay):LibraryState(g)==libraryFilter)).ToList();
         shown=(librarySort switch
         {
             "Recently watched"=>shown.OrderByDescending(g=>g.Max(HistoryDate)),
@@ -100,12 +101,12 @@ public partial class MainWindow
         var left=new WrapPanel{VerticalAlignment=VerticalAlignment.Center};dock.Children.Add(left);
         void Segment(string label,bool on,Action pick)
         {
-            var b=new Button{Content=label=="Still planned"?StatusText(label):T(label),Padding=new(13,6,13,6),Margin=new(0,0,6,0),FontSize=12.5,Background=Brush(on?"#E4C084":"Transparent"),Foreground=Brush(on?"#16120C":"#C7C2BC"),FontWeight=on?FontWeights.SemiBold:FontWeights.Normal,Style=(Style)FindResource("Pill"),BorderBrush=Brush(on?"#E4C084":"#26FFFFFF")};
-            System.Windows.Automation.AutomationProperties.SetName(b,label=="Still planned"?StatusText(label):T(label));b.Click+=(_,_)=>pick();left.Children.Add(b);
+            var b=new Button{Content=SmartLists.Ids.Contains(label)?SmartName(label):label=="Still planned"?StatusText(label):T(label),Padding=new(13,6,13,6),Margin=new(0,0,6,0),FontSize=12.5,Background=Brush(on?"#E4C084":"Transparent"),Foreground=Brush(on?"#16120C":"#C7C2BC"),FontWeight=on?FontWeights.SemiBold:FontWeights.Normal,Style=(Style)FindResource("Pill"),BorderBrush=Brush(on?"#E4C084":"#26FFFFFF")};
+            System.Windows.Automation.AutomationProperties.SetName(b,SmartLists.Ids.Contains(label)?SmartName(label):label=="Still planned"?StatusText(label):T(label));b.Click+=(_,_)=>pick();left.Children.Add(b);
         }
         if(page=="My List")foreach(var t in new[]{"All","Shows","Movies"}){var v=t;Segment(v=="All"?"Everything":v,listType==v,()=>{listType=v;Render();});}
         if(page=="My List")left.Children.Add(new Border{Width=1,Height=20,Background=Brush("#26FFFFFF"),Margin=new(4,0,10,0)});
-        foreach(var f in LibraryFilters.Concat(page=="My List"?new[]{"Still planned"}:Array.Empty<string>())){var v=f;Segment(v,libraryFilter==v,()=>{libraryFilter=v;Render();});}
+        foreach(var f in LibraryFilters.Concat(SmartLists.Ids).Concat(page=="My List"?new[]{"Still planned"}:Array.Empty<string>())){var v=f;Segment(v,libraryFilter==v,()=>{libraryFilter=v;Render();});}
         var count=new TextBlock{Text=shown==total?$"{total} {T("titles")}":$"{shown} {T("of")} {total}",Foreground=Brush("#8F8A83"),FontSize=12,VerticalAlignment=VerticalAlignment.Center,Margin=new(8,0,0,0)};left.Children.Add(count);
         return bar;
     }

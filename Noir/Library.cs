@@ -123,6 +123,9 @@ public sealed class ShowDownloadPreference
     public string Language {get;set;}="All";
     public long MaxEpisodeBytes {get;set;}
     public bool AutoDownload {get;set;}
+    public int KeepReadyCount {get;set;}=2;
+    public bool? KeepReadyEnabled {get;set;}
+    public bool AlsoDownload {get;set;}
 }
 public sealed class ViewingRecord
 {

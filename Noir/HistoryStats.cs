@@ -78,7 +78,7 @@ public partial class MainWindow
     void RenderHistoryStats()
     {
         var views=AllViewings();
-        var story=ActionButton(T("Your {0} story ›","حكايتك في {0} ›",historyReviewYear),()=>OpenYearStory(historyReviewYear),true);story.Margin=new(0,14,0,0);ContentPanel.Children.Add(story);
+        var story=ActionButton(T("Your {0} story ›","حكايتك في {0} ›",historyReviewYear),()=>OpenYearStory(historyReviewYear),true);story.Margin=new(0,14,0,0);ContentPanel.Children.Add(story);var taste=ActionButton(T("Compare taste with a friend ›","قارن ذوقك مع صديق ›"),()=>OpenTaste());taste.Margin=new(0,10,0,0);taste.HorizontalAlignment=HorizontalAlignment.Left;ContentPanel.Children.Add(taste);
         if(views.Count==0)
         {
             ContentPanel.Children.Add(Heading(T("Your stats start with your first story","إحصاءاتك تبدأ بأول حكاية"),T("Log a favourite, or bring your history from Netflix, Trakt and more.","سجّل عملاً تحبه أو استورد سجلك من نتفليكس وتراكت وغيرها.")));HistoryEmptyActions();

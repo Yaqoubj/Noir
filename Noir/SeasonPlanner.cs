@@ -6,6 +6,8 @@ namespace Noir;
 public sealed record SeasonEpisode(int Season,int Episode);
 public sealed class EpisodeDownloadOption
 {
+    public long ReleaseBytes {get;set;}
+    public bool IsPack {get;set;}
     public string ReleaseId {get;set;}="";
     public string Release {get;set;}="";
     public string Source {get;set;}="";
@@ -84,7 +86,7 @@ public sealed partial class PcDownloads
         }
         return selected.ToList();
     }
-    public async Task<DownloadPlan> PlanSeason(string itemId,DownloadPlanRequest request,IProgress<DownloadSourceStatus>? progress=null,CancellationToken ct=default)
+    public async Task<DownloadPlan> PlanSeason(string itemId,DownloadPlanRequest request,IProgress<DownloadSourceStatus>? progress=null,CancellationToken ct=default,bool readyOnly=false)
     {
         var searchId=Guid.NewGuid().ToString("N");lock(gate)plannerSearches[searchId]=[];
         try{
@@ -105,7 +107,7 @@ public sealed partial class PcDownloads
         Task<List<DownloadFileChoice>?> FilesOnce(string id)=>fileLists.GetOrAdd(id,key=>new(async()=>
         {
             await fileSlots.WaitAsync(ct);
-            try{return await Files(key,ct);}
+            try{if(readyOnly){lock(gate)if(!releases.TryGetValue(key,out var r)||!ConfirmedReady(r.Release.Choice))return [];}return await Files(key,ct);}
             catch(OperationCanceledException)when(ct.IsCancellationRequested){throw;}
             catch(Exception e)when(e is IOException or System.Net.Http.HttpRequestException or JsonException or OperationCanceledException){failed.Add(key);return null;}
             finally{fileSlots.Release();}
@@ -147,6 +149,7 @@ public sealed partial class PcDownloads
             (IndexedRelease Release,VideoItem Item,bool Season,DateTimeOffset Expires,string Service) indexed;
             lock(gate)if(!releases.TryGetValue(id,out indexed)||indexed.Expires<DateTimeOffset.UtcNow||indexed.Item.GroupKey!=item.GroupKey)continue;
             var release=indexed.Release;ReleasePresentation.Enrich(release.Choice);
+            if(readyOnly&&!ConfirmedReady(release.Choice))continue;
             // Random public IDs must never affect planning order or cause duplicate file-list calls.
             var identity=indexed.Service+"|"+indexed.Item.Season+"|"+(release.Direct==null?release.Hash:string.Join(";",release.Direct.Select(d=>d.ServerId+"|"+d.Name+"|"+d.Season+"|"+d.Episode+"|"+d.Size+"|"+d.Url)));
             if(aio!=null&&!fileLists.ContainsKey(id))identity+="|episode:"+indexed.Item.Episode;
@@ -159,7 +162,7 @@ public sealed partial class PcDownloads
                 var language=direct?.Language is {Length:>0} audio&&audio!="Unknown"?audio:release.Choice.Languages;
                 if(preference.MaxEpisodeBytes>0&&(f.Size<=0||f.Size>preference.MaxEpisodeBytes))continue;
                 if(preference.Language is not ("All" or "Any" or "")&&!language.Contains(preference.Language,StringComparison.OrdinalIgnoreCase))continue;
-                options.Add(new(){ReleaseId=id,Release=release.Choice.Name,Source=release.Choice.Sources.Count>0?string.Join(" / ",release.Choice.Sources):indexed.Service,Resolution=resolution.Length>0?resolution:"Unknown",Language=language,CacheState=release.Choice.CacheStatus=="On your server"?"On your server":release.Choice.Cached||release.Choice.CacheStatus=="Ready"?"Ready":"Needs fetching",File=f});
+                options.Add(new(){ReleaseBytes=Math.Max(release.Choice.Size,files.Sum(file=>file.Size)),IsPack=release.Choice.SizeKind=="Pack"||files.Count(file=>DownloadNaming.Video(file.Name))>1,ReleaseId=id,Release=release.Choice.Name,Source=release.Choice.Sources.Count>0?string.Join(" / ",release.Choice.Sources):indexed.Service,Resolution=resolution.Length>0?resolution:"Unknown",Language=language,CacheState=release.Choice.CacheStatus=="On your server"?"On your server":ConfirmedReady(release.Choice)?"Ready":"Needs fetching",File=f});
             }
         }
         foreach(var episode in plan.Episodes.Where(e=>e.State=="Not found")){
@@ -273,16 +276,179 @@ public sealed partial class PcDownloads
     }
     public async Task<bool> TryAutoDownload(string itemId,CancellationToken ct=default)
     {
-        var item=Item(itemId);
-        if(!SeasonPreferences(itemId).AutoDownload||item.IsMovie||Future(item)||store.EverWatched(item)||OnPc(item)||IsQueued(item))return false;
-        var plan=await PlanSeason(itemId,new(){Scope="Specific episodes",SpecificEpisodes=[new(item.Season,item.Episode)]},ct:ct);
-        var ready=plan.Episodes.SingleOrDefault()?.Alternatives.FirstOrDefault(o=>o.CacheState is "Ready" or "On your server"&&o.File.Size>0);
-        if(ready==null)return false;
-        try{return EnqueuePlan(new(){PlanId=plan.Id,RequestId=Guid.NewGuid().ToString(),FileIds=[ready.File.Id]}).Count>0;}catch(IOException){return false;}
+        return await Task.Run(async()=>{
+            InitializeReady();await readyRun.WaitAsync(ct);
+            try{var item=Item(itemId);var preference=SeasonPreferences(itemId);
+                if(ReadyPaused||!NoirReadyPolicy.Enabled(preference)||item.IsMovie||Future(item)||store.EverWatched(item)||OnPc(item)||IsQueued(item)||!(store.State.EpisodeSchedules.GetValueOrDefault(item.GroupKey)?.Any(e=>e.Season==item.Season&&e.Episode==item.Episode&&e.AirsAt<=DateTimeOffset.UtcNow)??false))return false;
+                var plan=await PlanSeason(itemId,new(){Scope="Specific episodes",SpecificEpisodes=[new(item.Season,item.Episode)]},ct:ct,readyOnly:true);
+                var options=plan.Episodes.SingleOrDefault()?.Alternatives??[];var decision=NoirReadyPolicy.Choose(options.Select(o=>new ReadySource(o.File.Id,o.ReleaseId,o.File.Size,o.ReleaseBytes,o.IsPack,o.CacheState is "Ready" or "On your server",o.Resolution)),ReadyState,MeasureReadyStorage(plan.Folder),preference.Resolution);
+                if(decision.Source==null){lock(readyGate){ready!.Log(decision.Reason,item.Title);SaveReady();}return false;}
+                if(ReadyState.Paused||!NoirReadyPolicy.Enabled(SeasonPreferences(itemId))||store.EverWatched(item))return false;
+                var ids=EnqueuePlan(new(){PlanId=plan.Id,RequestId=Guid.NewGuid().ToString(),FileIds=[decision.Source.Id]});var byId=Jobs().ToDictionary(j=>j.Id);
+                lock(readyGate){foreach(var id in ids){var job=byId[id];ready!.ManagedFiles.Add(new(){JobId=id,ItemId=job.Target.Id,Group=item.GroupKey,Path=job.Destination,Title=job.Name,ChargedBytes=decision.Charge});ready.Log("Queued confirmed ready file",job.Name);}SaveReady();}return ids.Count>0;
+            }catch(IOException){return false;}finally{readyRun.Release();}
+        },ct);
     }
+    static bool ConfirmedReady(DownloadChoice choice)=>choice.Cached||choice.CacheStatus is "Ready" or "On your server";
+
+    readonly object readyGate=new();
+    readonly SemaphoreSlim readyRun=new(1,1);
+    int readyPending;
+    NoirReadyState? ready;
+    ReadyStorage readyStorage=new(0,0,0,0);
+    string ReadyPath=>Path.Combine(store.DataDirectory,"noir-ready.json");
+    public NoirReadyState ReadyState {get{lock(readyGate)return Copy(ready??new());}}
+    public ReadyStorage ReadyStorage {get{lock(readyGate)return readyStorage;}}
+    public bool ReadyPaused {get{lock(readyGate)return ready?.Paused==true;}}
+    public NoirReadyState ReadyViewState {get{lock(readyGate){var s=ready??new();return new(){BudgetBytes=s.BudgetBytes,KeepFreeBytes=s.KeepFreeBytes,Paused=s.Paused,CleanupWatched=s.CleanupWatched,Titles=s.Titles.Values.Where(t=>t.Episodes.Count>0||t.State=="Blocked").Take(40).ToDictionary(t=>t.Group,t=>Copy(t)),ManagedFiles=s.ManagedFiles.TakeLast(60).Select(Copy).ToList(),Why=s.Why.TakeLast(200).Select(Copy).ToList()};}}}
+    public bool ReadyOfferShown(string group){lock(readyGate)return ready?.Offered.Contains(group)==true;}
+    public void InitializeReady()
+    {
+        lock(readyGate){if(ready!=null)return;
+            if(File.Exists(ReadyPath))ready=JsonSerializer.Deserialize<NoirReadyState>(File.ReadAllText(ReadyPath))??throw new IOException("Preparation state could not be read");else ready=new();
+            if(!ready.Migrated){store.MigrateReadyPreferences();ready.Migrated=true;ready.Log("Migrated keep ready preferences");SaveReady();}
+        }
+    }
+    void SaveReady()=>Atomic(ReadyPath,JsonSerializer.SerializeToUtf8Bytes(ready,Json));
+    public Task ChangeReady(Action<NoirReadyState> change)=>Task.Run(()=>{InitializeReady();bool paused;List<string> resume;lock(readyGate){var wasPaused=ready!.Paused;change(ready);ready.BudgetBytes=Math.Max(NoirReadyPolicy.GB,ready.BudgetBytes);ready.KeepFreeBytes=Math.Max(10*NoirReadyPolicy.GB,ready.KeepFreeBytes);paused=ready.Paused;resume=wasPaused&&!paused?ready.PausedJobs.ToList():[];if(!paused)ready.PausedJobs.Clear();SaveReady();}
+        var state=ReadyState;var owned=state.ManagedFiles.Select(f=>f.JobId).ToHashSet();foreach(var job in Jobs().Where(j=>owned.Contains(j.Id))){if(paused&&job.Status is "Queued" or "Preparing" or "Downloading"){Control(job.Id,"pause");lock(readyGate){ready!.PausedJobs.Add(job.Id);SaveReady();}}else if(resume.Contains(job.Id)&&job.Status=="Paused")Control(job.Id,"resume");}Changed?.Invoke();});
+    public ReadyTitlePlan? PreparedTitle(string group){lock(readyGate)return ready?.Titles.GetValueOrDefault(group) is {} title?Copy(title):null;}
+    public bool ReadyRecheckDue {get{lock(readyGate)return ready!=null&&!ready.Paused&&ready.Titles.Values.Any(t=>t.RecheckAt<=DateTimeOffset.UtcNow);}}
+    public Task EpisodeFinished(VideoItem finished)=>PrepareReady("Episode finished");
+    public Task PrepareReady(string trigger,CancellationToken ct=default)=>Task.Run(async()=>{
+        using var linked=CancellationTokenSource.CreateLinkedTokenSource(ct,stop.Token);var token=linked.Token;
+        if(!await readyRun.WaitAsync(0,token)){if(trigger is "Episode finished" or "Download finished" or "Preferences changed")Interlocked.Exchange(ref readyPending,1);return;}
+        try{InitializeReady();await PrepareReadyCore(trigger,token);}
+        catch(OperationCanceledException)when(token.IsCancellationRequested){}
+        catch(Exception e){store.Log(e);lock(readyGate){if(ready!=null){ready.Log("Preparation could not finish",detail:"Check download settings and connection");SaveReady();}}}
+        finally{lock(readyGate){if(ready!=null)SaveReady();}readyRun.Release();Changed?.Invoke();if(Interlocked.Exchange(ref readyPending,0)==1&&!stop.IsCancellationRequested)_=PrepareReady("Episode finished");}
+    },ct);
+    async Task PrepareReadyCore(string trigger,CancellationToken ct)
+    {
+        var state=ReadyState;if(state.Paused)return;
+        var now=DateTimeOffset.UtcNow;var input=store.ReadyInputs(now);var preferences=input.GroupBy(x=>x.Episode.Group).ToDictionary(g=>g.Key,g=>g.First().Preference);var active=preferences.Keys.ToHashSet();
+        lock(readyGate){foreach(var key in ready!.Titles.Keys.Where(k=>!active.Contains(k)).ToList())ready.Titles.Remove(key);foreach(var group in input.GroupBy(x=>x.Episode.Group))if(!ready.Titles.ContainsKey(group.Key))ready.Titles[group.Key]=new(){Group=group.Key,Title=group.First().Episode.Title,ItemId=group.First().Episode.ItemId};ready.Log("Preparation check",detail:trigger);SaveReady();}
+        ReconcileReadyFiles(now);
+        var worked=0;
+        foreach(var group in NoirReadyPolicy.OrderShows(input.Select(x=>x.Episode))){
+            ct.ThrowIfCancellationRequested();if(ReadyPaused)break;
+            var preference=preferences[group.Key];
+            var episodes=group.First().Season==0?group.Where(e=>!e.Watched).Take(1).ToList():NoirReadyPolicy.Next(group,preference.KeepReadyCount,now);
+            var cached=PreparedTitle(group.Key);if(cached!=null&&cached.RecheckAt>now&&cached.Episodes.SequenceEqual(episodes)&&trigger is not ("Episode finished" or "Preferences changed" or "Download finished"))continue;
+            if(worked++>=12)break;
+            var representative=episodes.FirstOrDefault()??group.First();var title=new ReadyTitlePlan{Group=group.Key,Title=representative.Title,ItemId=representative.ItemId,Episodes=episodes,Quality=preference.Resolution,RecheckAt=now.AddHours(6)};
+            var automatic=NoirReadyPolicy.Enabled(preference)||preference.AlsoDownload;
+            var missing=episodes.Where(e=>!e.Local).ToList();
+            if(episodes.Count==0){title.State="Waiting";title.Reason="Waiting for an aired unwatched episode";PublishReady(title);continue;}
+            if(missing.Count==0){title.State="Offline";title.Reason="Playable offline";PublishReady(title);continue;}
+            var pending=Jobs().Where(j=>j.Target.GroupKey==group.Key&&j.Status is not ("Completed" or "Cancelled" or "Failed")).ToList();
+            missing.RemoveAll(e=>pending.Any(j=>j.Target.Season==e.Season&&j.Target.Episode==e.Episode));
+            if(missing.Count==0){title.State="Preparing";title.Reason=pending.Any(j=>j.Status=="Paused")?"Download paused":"Preparing on this PC";PublishReady(title);continue;}
+            if(!Configured){title.State="Blocked";title.Reason="Connect a download source in Settings";RetryReady(title,cached,now);continue;}
+            try{
+                var plan=await PlanReadyTitle(missing,ct);var options=plan.Episodes.SelectMany(e=>e.Alternatives).ToDictionary(o=>o.File.Id);
+                long impact=0,previewDisk=0;bool queued=false;bool blocked=false;var previewPacks=new Dictionary<string,long>();
+                foreach(var episode in missing){
+                    var choices=plan.Episodes.FirstOrDefault(e=>e.ItemId==episode.ItemId)?.Alternatives??[];
+                    var disk=MeasureReadyStorage(plan.Folder);state=ReadyState;
+                    // A preview reserves earlier choices too; it cannot promise a season that exceeds the budget.
+                    if(!automatic)disk=disk with{ReservedBytes=disk.ReservedBytes+impact,DiskReservedBytes=disk.DiskReservedBytes+previewDisk};
+                    var allowance=ReadyReleaseAllowances();
+                    var decision=NoirReadyPolicy.Choose(choices.Select(o=>new ReadySource(o.File.Id,o.ReleaseId,o.File.Size,o.ReleaseBytes,o.IsPack,o.CacheState is "Ready" or "On your server",o.Resolution,o.IsPack?Math.Max(allowance.GetValueOrDefault(ReadyReleaseKey(o)),previewPacks.GetValueOrDefault(ReadyReleaseKey(o))):0)),state,disk,preference.Resolution);
+                    if(decision.Source==null){title.Reason=decision.Reason;blocked=true;continue;}
+                    var source=options[decision.Source.Id];impact+=decision.Charge;previewDisk+=source.File.Size;title.Quality=source.Resolution;var releaseKey=ReadyReleaseKey(source);if(source.IsPack)previewPacks[releaseKey]=Math.Max(source.ReleaseBytes,source.File.Size);
+                    if(!automatic)continue;
+                    // Recheck consent and progress immediately before committing. No uncached selection enters the worker.
+                    var current=SeasonPreferences(episode.ItemId);if(ReadyState.Paused||!(NoirReadyPolicy.Enabled(current)||current.AlsoDownload)||store.ReadyWatched(episode.ItemId))break;
+                    var ids=group.First().Season==0?Enqueue(new(){RequestId=Guid.NewGuid().ToString(),Selections=[new(){ReleaseId=source.ReleaseId,FileIds=[source.File.Id]}]}):EnqueuePlan(new(){PlanId=plan.Id,RequestId=Guid.NewGuid().ToString(),FileIds=[source.File.Id]});
+                    var jobsById=Jobs().ToDictionary(j=>j.Id);
+                    lock(readyGate){foreach(var id in ids){var job=jobsById[id];ready!.ManagedFiles.Add(new(){JobId=id,ItemId=job.Target.Id,Group=group.Key,Path=job.Destination,Title=job.Name,ReleaseKey=source.IsPack?releaseKey:"",ChargedBytes=source.IsPack?Math.Max(source.ReleaseBytes,source.File.Size):decision.Charge});ready.Log("Queued confirmed ready file",job.Name,source.Resolution+" · "+DownloadNaming.Size(decision.Charge));}SaveReady();}queued|=ids.Count>0;
+                }
+                title.Bytes=impact;title.State=blocked?"Blocked":queued?"Preparing":"Ready";
+                if(!blocked)title.Reason=queued?"Preparing on this PC":"Ready to download";
+                if(blocked)RetryReady(title,cached,now);else PublishReady(title);
+            }catch(OperationCanceledException)when(ct.IsCancellationRequested){throw;}
+            catch(Exception){title.State="Blocked";title.Reason="Source check failed; recheck scheduled";RetryReady(title,cached,now);}
+        }
+    }
+    void RetryReady(ReadyTitlePlan title,ReadyTitlePlan? before,DateTimeOffset now){title.Attempts=(before?.Attempts??0)+1;title.RecheckAt=NoirReadyPolicy.Backoff(now,title.Attempts);PublishReady(title);}
+    void PublishReady(ReadyTitlePlan title){lock(readyGate){ready!.Titles[title.Group]=title;ready.Log(title.Reason,title.Title,title.State=="Blocked"?title.RecheckAt.ToString("O"):"");}Changed?.Invoke();}
+    async Task<DownloadPlan> PlanReadyTitle(List<ReadyEpisode> episodes,CancellationToken ct)
+    {
+        var first=episodes[0];if(first.Season!=0)return await PlanSeason(first.ItemId,new(){Scope="Specific episodes",SpecificEpisodes=episodes.Select(e=>new SeasonEpisode(e.Season,e.Episode)).ToList()},ct:ct,readyOnly:true);
+        var result=await SearchDetailed(first.ItemId,false,ct:ct);var item=Item(first.ItemId);var plan=new DownloadPlan{Folder=Root(item)};var episode=new PlannedEpisode{ItemId=item.Id};plan.Episodes.Add(episode);
+        foreach(var release in result.Choices.Where(ConfirmedReady))foreach(var f in await Files(release.Id,ct))if(f.Selectable)episode.Alternatives.Add(new(){ReleaseId=release.Id,Release=release.Name,Resolution=release.Resolution,ReleaseBytes=release.Size,IsPack=release.SizeKind=="Pack",CacheState="Ready",File=f});
+        return plan;
+    }
+    static long ReadyLength(string path){try{return File.Exists(path)?new FileInfo(path).Length:0;}catch(IOException){return 0;}}
+    ReadyStorage MeasureReadyStorage(string root)
+    {
+        var all=Jobs();var state=ReadyState;long partial=Directory.EnumerateFiles(parts,"*.part").Sum(ReadyLength);
+        long used=partial,reserved=0;
+        var byId=all.ToDictionary(j=>j.Id);
+        foreach(var group in state.ManagedFiles.GroupBy(f=>f.ReleaseKey.Length>0?f.ReleaseKey:f.JobId)){
+            long transferred=0,charge=0;bool active=false;foreach(var file in group){var bytes=ReadyLength(file.Path);used+=bytes;transferred+=Math.Max(bytes,ReadyLength(Path.Combine(parts,file.JobId+".part")));charge=Math.Max(charge,file.ChargedBytes);if(byId.TryGetValue(file.JobId,out var job)&&job.Status is not ("Completed" or "Cancelled" or "Failed"))active=true;}if(active)reserved+=Math.Max(0,charge-transferred);
+        }
+        var diskReserved=all.Where(j=>j.Status is not ("Completed" or "Cancelled" or "Failed")).Sum(j=>Math.Max(0,j.Size-Math.Max(j.Bytes,ReadyLength(Path.Combine(parts,j.Id+".part")))));
+        var measured=new ReadyStorage(used,reserved,Math.Min(FreeSpace(root),FreeSpace(parts)),diskReserved);lock(readyGate)readyStorage=measured;return measured;
+    }
+    string ReadyReleaseKey(EpisodeDownloadOption option){lock(gate)return releases.TryGetValue(option.ReleaseId,out var r)?r.Item.GroupKey+"|"+r.Service+"|"+(r.Release.Hash.Length>0?r.Release.Hash:option.Release):option.ReleaseId;}
+    Dictionary<string,long> ReadyReleaseAllowances(){var state=ReadyState;var all=Jobs().ToDictionary(j=>j.Id);return state.ManagedFiles.Where(f=>f.ReleaseKey.Length>0).GroupBy(f=>f.ReleaseKey).ToDictionary(g=>g.Key,g=>{var transferred=g.Sum(f=>Math.Max(ReadyLength(f.Path),ReadyLength(Path.Combine(parts,f.JobId+".part"))));return g.Any(f=>all.TryGetValue(f.JobId,out var j)&&j.Status is not ("Completed" or "Cancelled" or "Failed"))?Math.Max(transferred,g.Max(f=>f.ChargedBytes)):transferred;});}
+    public List<(PlannedEpisode Episode,ReadyDecision Decision)> PreviewReadyChoices(DownloadPlan plan)
+    {
+        InitializeReady();var state=ReadyState;var disk=MeasureReadyStorage(plan.Folder);var allowances=ReadyReleaseAllowances();var result=new List<(PlannedEpisode,ReadyDecision)>();
+        foreach(var episode in plan.Episodes){var decision=NoirReadyPolicy.Choose(episode.Alternatives.Select(o=>new ReadySource(o.File.Id,o.ReleaseId,o.File.Size,o.ReleaseBytes,o.IsPack,o.CacheState is "Ready" or "On your server",o.Resolution,o.IsPack?allowances.GetValueOrDefault(ReadyReleaseKey(o)):0)),state,disk,plan.Preferences.Resolution);result.Add((episode,decision));if(decision.Source is {} chosen){var option=episode.Alternatives.First(o=>o.File.Id==chosen.Id);disk=disk with{ReservedBytes=disk.ReservedBytes+decision.Charge,DiskReservedBytes=disk.DiskReservedBytes+option.File.Size};if(option.IsPack)allowances[ReadyReleaseKey(option)]=Math.Max(option.ReleaseBytes,option.File.Size);}}
+        return result;
+    }
+    void ReconcileReadyFiles(DateTimeOffset now)
+    {
+        var state=ReadyState;var all=Jobs().ToDictionary(j=>j.Id);var inputs=store.ReadyCleanupInputs(state.ManagedFiles.Select(f=>f.ItemId));
+        foreach(var file in state.ManagedFiles){
+            if(!all.TryGetValue(file.JobId,out var job)||job.Status!="Completed"||!file.Path.Equals(job.Destination,StringComparison.OrdinalIgnoreCase))continue;
+            var info=new FileInfo(file.Path);if(!info.Exists)continue;
+            if(file.LastWriteUtc==null){file.FileBytes=info.Length;file.LastWriteUtc=info.LastWriteTimeUtc;}
+            var watched=inputs.GetValueOrDefault(file.ItemId);var others=ReadyOtherProfiles(job.Target);
+            bool eligible=state.CleanupWatched&&watched.Watched&&!file.Pinned&&!file.CleanupCancelled&&watched.At!=null&&others.All(x=>x==true);
+            if(!eligible){file.RemoveAt=null;}
+            else if(file.RemoveAt==null){var due=watched.At!.Value.AddDays(7);file.RemoveAt=due>now?due:now.AddDays(1);lock(readyGate)ready!.Log("Watched file removal scheduled",file.Title);}
+            else if(file.RemoveAt<=now&&NoirReadyPolicy.CanRemove(state.CleanupWatched,true,watched.Watched,file.Pinned,file.CleanupCancelled,watched.At,others,now)){
+                // Ownership and identity must still match. A changed file belongs to the user.
+                if(info.Length==file.FileBytes&&info.LastWriteTimeUtc==file.LastWriteUtc){var latest=store.ReadyCleanupInputs([file.ItemId]).GetValueOrDefault(file.ItemId);lock(readyGate){var current=ready!.ManagedFiles.FirstOrDefault(f=>f.JobId==file.JobId);if(ready.Paused||!ready.CleanupWatched||current==null||current.Pinned||current.CleanupCancelled||!latest.Watched)continue;DownloadNaming.Validate(job.Root,file.Path);File.Delete(file.Path);file.RemoveAt=null;ready.Log("Removed watched managed file",file.Title);}}
+                else{file.CleanupCancelled=true;file.RemoveAt=null;lock(readyGate)ready!.Log("File changed; removal cancelled",file.Title);}
+            }
+            lock(readyGate){var current=ready!.ManagedFiles.FirstOrDefault(f=>f.JobId==file.JobId);if(current!=null){current.FileBytes=file.FileBytes;current.LastWriteUtc=file.LastWriteUtc;if(!current.Pinned&&!current.CleanupCancelled){current.RemoveAt=file.RemoveAt;current.CleanupCancelled=file.CleanupCancelled;}}SaveReady();}
+        }
+        var root=Config.ShowsRoot;if(root.Length==0)root=store.State.Roots.FirstOrDefault()?.Path??parts;MeasureReadyStorage(root);
+    }
+    List<bool?> ReadyOtherProfiles(VideoItem item)
+    {
+        try{
+            var directory=Path.GetFullPath(store.DataDirectory);var parent=Directory.GetParent(directory);var root=parent?.Name=="profiles"?parent.Parent!.FullName:directory;
+            var registry=Path.Combine(root,"profiles.json");if(!File.Exists(registry))return [null];
+            var list=JsonSerializer.Deserialize<ProfileList>(File.ReadAllText(registry));if(list==null||list.Profiles.Count==0)return [null];var result=new List<bool?>();
+            foreach(var profile in list.Profiles){if(!Profiles.ValidId(profile.Id)){result.Add(null);continue;}var folder=profile.Id=="default"?root:Path.Combine(root,"profiles",profile.Id);if(Path.GetFullPath(folder).Equals(directory,StringComparison.OrdinalIgnoreCase))continue;
+                var path=Path.Combine(folder,"library.json");if(!File.Exists(path)){result.Add(null);continue;}var other=JsonSerializer.Deserialize<PlayerState>(File.ReadAllText(path));var entry=other?.Catalog.Values.FirstOrDefault(e=>(e.Item.GroupKey==item.GroupKey||item.ImdbId.Length>0&&e.Item.ImdbId==item.ImdbId)&&e.Item.Season==item.Season&&e.Item.Episode==item.Episode);
+                result.Add(entry==null?null:entry.Progress is {Completed:false}?false:entry.Progress?.Completed==true||other!.Viewings.GetValueOrDefault(entry.Item.Id)?.Count>0);
+            }return result;
+        }catch(Exception e)when(e is IOException or JsonException or UnauthorizedAccessException){return [null];}
+    }
+    public Task CheckReadyStorage()=>Task.Run(async()=>{if(!await readyRun.WaitAsync(0))return;try{InitializeReady();var root=Config.ShowsRoot;if(root.Length==0)root=parts;var disk=MeasureReadyStorage(root);var state=ReadyState;var reason=disk.UsedBytes+disk.ReservedBytes>state.BudgetBytes?"Preparation budget reached":disk.FreeBytes-disk.DiskReservedBytes<Math.Max(10*NoirReadyPolicy.GB,state.KeepFreeBytes)?"Keeping free space available":"";if(reason.Length==0)return;var owned=state.ManagedFiles.Select(f=>f.JobId).ToHashSet();foreach(var job in Jobs().Where(j=>owned.Contains(j.Id)&&j.Status is "Queued" or "Preparing" or "Downloading")){Control(job.Id,"pause");lock(readyGate){ready!.Log(reason,job.Name);if(ready.Titles.TryGetValue(job.Target.GroupKey,out var title)){title.State="Blocked";title.Reason=reason;title.RecheckAt=DateTimeOffset.UtcNow.AddMinutes(15);}SaveReady();}}}catch(Exception e)when(e is IOException or UnauthorizedAccessException){store.Log(e);}finally{readyRun.Release();}});
 }
 public sealed partial class LibraryStore
 {
+    public List<ReadyEpisode> ReadyPreview(string key){lock(gate){var schedule=(State.EpisodeSchedules.GetValueOrDefault(key)??[]).GroupBy(e=>(e.Season,e.Episode)).ToDictionary(g=>g.Key,g=>g.First().AirsAt);return EpisodesFor(key).Select(i=>new ReadyEpisode(i.Id,key,i.Title,i.Season,i.Episode,EverWatched(i),GetProgress(i) is {Completed:false,Position:>0},i.Available&&File.Exists(i.Path),schedule.GetValueOrDefault((i.Season,i.Episode)))).ToList();}}
+    public void MigrateReadyPreferences(){lock(gate){foreach(var p in State.ShowDownloads.Values){if(p.KeepReadyEnabled==null){p.KeepReadyEnabled=p.AutoDownload;p.KeepReadyCount=2;}}Save();}}
+    public bool ReadyWatched(string id){lock(gate)return State.Catalog.TryGetValue(id,out var e)&&EverWatched(e.Item);}
+    public List<(ReadyEpisode Episode,ShowDownloadPreference Preference)> ReadyInputs(DateTimeOffset now)
+    {
+        lock(gate){var result=new List<(ReadyEpisode,ShowDownloadPreference)>();var keys=State.ShowDownloads.Where(x=>NoirReadyPolicy.Enabled(x.Value)||x.Value.AlsoDownload).Select(x=>x.Key).Concat(State.Watchlist).Distinct();
+            foreach(var key in keys){var preference=GetShowDownloadPreference(key)??new();if(State.HiddenTitles.Contains(key))continue;var episodes=EpisodesFor(key);if(episodes.Count==0||TitleStatus(episodes)=="Dropped")continue;
+                var schedule=(State.EpisodeSchedules.GetValueOrDefault(key)??[]).GroupBy(e=>(e.Season,e.Episode)).ToDictionary(g=>g.Key,g=>g.First().AirsAt);
+                foreach(var item in episodes){var p=GetProgress(item);result.Add((new(item.Id,key,item.Title,item.IsMovie?0:item.Season,item.Episode,EverWatched(item),p is {Completed:false,Position:>0},item.Available&&File.Exists(item.Path),schedule.GetValueOrDefault((item.Season,item.Episode))),preference));}
+            }return result;
+        }
+    }
+    public Dictionary<string,(bool Watched,DateTimeOffset? At)> ReadyCleanupInputs(IEnumerable<string> ids){lock(gate)return ids.Distinct().ToDictionary(id=>id,id=>{if(!State.Catalog.TryGetValue(id,out var e))return(false,(DateTimeOffset?)null);var p=GetProgress(e.Item);return(EverWatched(e.Item)&&p is not {Completed:false},ViewingHistory(e.Item).FirstOrDefault()?.WatchedAt??(p?.Completed==true?p.UpdatedAt:null));});}
     public ShowDownloadPreference? GetShowDownloadPreference(string group){lock(gate)return State.ShowDownloads.TryGetValue(group,out var preference)?JsonSerializer.Deserialize<ShowDownloadPreference>(JsonSerializer.Serialize(preference)):null;}
     public void SetShowDownloadPreference(string group,ShowDownloadPreference preference){lock(gate){State.ShowDownloads[group]=preference;Save();}}
 }

@@ -67,6 +67,7 @@ public partial class MainWindow
             _=>""
         };
         if(status.Length>0){var line=Body(status,11);line.Margin=new(2,4,0,0);panel.Children.Add(line);}
+        if(next!=null&&CatchUpCard(store.EpisodesFor(item.GroupKey),true) is {} recap)panel.Children.Add(recap);
         LazyMenu(panel,item);return Lift(panel,edge);
     }
     FrameworkElement Badge(string text)=>new Border
@@ -80,8 +81,11 @@ public partial class MainWindow
         var choice=ChoiceFor(group);PageTitle.Text=choice.Title;
         var backPage=page is "History" or "My List"?page:choice.IsMovie?"Movies":"Shows";
         ContentPanel.Children.Add(Hero(choice,group,store.ContinueFor(group)!=null));
+        if(CatchUpCard(group) is {} recap)ContentPanel.Children.Add(recap);
         var back=ActionButton("←  Back to "+backPage,()=>Navigate(backPage));back.Background=Brush("Transparent");back.Foreground=Brush("#AAA6A0");back.Padding=new(0,4,0,4);back.HorizontalAlignment=HorizontalAlignment.Left;
         ContentPanel.Children.Add(DetailActions(choice,group,back));
+        if(ReadyTitleInfo(choice.GroupKey) is {} readyInfo)ContentPanel.Children.Add(Body(readyInfo,12));
+        if(downloads!=null&&!TrackerOnly&&store.State.Watchlist.Contains(choice.GroupKey))ContentPanel.Children.Add(AlsoDownloadToggle(choice));
         if(!choice.IsMovie&&group.Any(i=>i.Season>0))ContentPanel.Children.Add(SeasonStrip(group));
         ContentPanel.Children.Add(DetailPeople(choice));
         if(!group.Any(CanPlay))ContentPanel.Children.Add(WatchOptions(choice.ImdbId,choice.IsMovie,choice.Title,choice.IsMovie?0:(store.UpNextFor(group)?.Item??choice).Season,choice.IsMovie?0:(store.UpNextFor(group)?.Item??choice).Episode));
@@ -235,6 +239,7 @@ public partial class MainWindow
         ContentPanel.Children.Add(Body("A short countdown starts after the episode finishes. You can cancel it.",12));
         ContentPanel.Children.Add(PlaybackPrefsPanel());
         ContentPanel.Children.Add(PreviewSettingsPanel());
+        ContentPanel.Children.Add(CatchUpSettingsRow());
         var credits=new CheckBox{Content="Mark watched when credits begin",IsChecked=store.State.MarkWatchedAtCredits};
         credits.Click+=(_,_)=>{store.State.MarkWatchedAtCredits=credits.IsChecked==true;store.Save();};ContentPanel.Children.Add(credits);
         ContentPanel.Children.Add(Body("Uses labelled ending chapters or saved credits times. Without a marker, uses the final 5% (up to 90 seconds for episodes or 3 minutes for movies). Credits keep playing; auto-next waits until the actual end.",12));

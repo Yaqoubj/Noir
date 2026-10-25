@@ -12,6 +12,8 @@ var special=new VideoItem { Path="special.mkv",Title="Test",Season=0,Episode=1,D
 var all=episodes.Append(special).ToList();
 var results=new List<string>();
 void Check(bool condition,string label) { if(!condition) throw new Exception("FAIL: "+label);results.Add("PASS: "+label);Console.WriteLine(results[^1]); }
+TasteCodeChecks.Run(Check);
+SmartListChecks.Run(root,Check);
 MobileChecks.Run(root,Check);
 BrowsingChecks.Run(root,Check);
 LetterboxdChecks.Run(root,Check);
@@ -35,6 +37,7 @@ await UxChecks.Run(caseRoot,Check);
 var post="https://old.reddit.com/r/television/comments/abc123/episode_discussion/comment42/?context=3";
 Check(RedditDiscussion.Reddit(post)=="https://www.reddit.com/r/television/comments/abc123/episode_discussion/comment42/","Reddit discussion links preserve the exact comment and remove tracking parameters");
 Check(new[]{"https://www.reddit.com/search/?q=test","https://reddit.com.evil.test/r/t/comments/abc123/","https://evil.test@reddit.com/r/t/comments/abc123/","http://reddit.com/r/t/comments/abc123/","https://reddit.com:444/r/t/comments/abc123/","https://reddit.com/r/t/comments/abc123/%22script/"}.All(u=>RedditDiscussion.Reddit(u)==null),"Discussion links reject searches, spoofed domains, credentials, insecure URLs and injected paths");
+await NoirReadyChecks.Run(root,Check);
 await RefreshChecks.Run(root,Check);
 store.Record(episodes[1],37.42,100);
 Check(store.ContinueFor(all)?.Path==episodes[1].Path,"Continue selects the interrupted episode, not episode one");

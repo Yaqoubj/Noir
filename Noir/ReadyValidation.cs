@@ -1,0 +1,40 @@
+#if NOIR_VALIDATE
+using System.IO;
+using System.Text.Json;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+
+namespace Noir;
+public partial class MainWindow
+{
+    bool readyValidationQueued;
+    void QueueReadyValidation()
+    {
+        if(readyValidationQueued||!Environment.GetCommandLineArgs().Contains("--downloads-only"))return;readyValidationQueued=true;
+        _=Dispatcher.InvokeAsync(async()=>await ValidateReadySurfaces());
+    }
+    public async Task ValidateReadySurfaces()
+    {
+        var checks=new List<string>();Window? sheet=null;
+        void Check(bool ok,string name){checks.Add((ok?"PASS: ":"FAIL: ")+name);}
+        void Picture(FrameworkElement element,string name){element.UpdateLayout();var w=(int)element.ActualWidth;var h=(int)element.ActualHeight;if(w<1||h<1)return;var bitmap=new RenderTargetBitmap(w,h,96,96,PixelFormats.Pbgra32);var visual=new DrawingVisual();using(var context=visual.RenderOpen())context.DrawRectangle(new VisualBrush(element),null,new Rect(0,0,w,h));bitmap.Render(visual);var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));using var stream=File.Create(Path.Combine(store.DataDirectory,name));encoder.Save(stream);}
+        try{
+            if(downloads==null)throw new IOException("No validation downloads");var manager=downloads;var item=store.Archive.First(i=>!i.IsMovie);var snapshot=manager.ReadyState;
+            await manager.ChangeReady(s=>{
+                s.Titles[item.GroupKey]=new(){Group=item.GroupKey,Title=item.Title,ItemId=item.Id,State="Preparing",Reason="Preparing on this PC",Bytes=2*NoirReadyPolicy.GB,Quality="1080p",Episodes=[new(item.Id,item.GroupKey,item.Title,1,2,false,false,false,DateTimeOffset.UtcNow.AddDays(-1))]};
+                s.Titles["ready-budget-fixture"]=new(){Group="ready-budget-fixture",Title="Evening watch",State="Blocked",Reason="Preparation budget reached",Quality="1080p",Episodes=[]};
+                s.ManagedFiles.Add(new(){JobId="ready-validation",Title=item.Title+" · S01 E01",RemoveAt=DateTimeOffset.Now.AddDays(7)});s.Log("Queued confirmed ready file",item.Title);s.Log("Watched file removal scheduled",item.Title);
+            });
+            RefreshReadyCentre();Check(Descendants(readyCentreHost!).OfType<TextBlock>().Any(t=>t.Text=="Preparation centre"),"Preparation centre is visible in Downloads");Check(Descendants(readyCentreHost!).OfType<TextBlock>().Any(t=>t.Text=="Preparation budget reached"),"Preparation centre explains exact storage block");
+            var expander=Descendants(readyCentreHost!).OfType<Expander>().First();expander.IsExpanded=true;UpdateLayout();Picture(readyCentreHost!,"ready-preparation-centre.png");
+            Check(Descendants(readyCentreHost!).OfType<Button>().Any(b=>b.Content as string=="Keep file")&&Descendants(readyCentreHost!).OfType<Button>().Any(b=>b.Content as string=="Cancel removal"),"Scheduled removal offers Keep and Cancel");
+            var visualItem=new VideoItem{Id="ready-visual-fixture",CollectionKey="ready-visual-fixture",Title="The Northwater",Season=1,Episode=1,ImdbId="tt123",Available=false};store.State.Catalog[visualItem.Id]=new(){Item=visualItem};store.State.EpisodeSchedules[visualItem.GroupKey]=[new(){Season=1,Episode=1,AirsAt=DateTimeOffset.UtcNow.AddDays(-2)},new(){Season=1,Episode=2,AirsAt=DateTimeOffset.UtcNow.AddDays(-1)}];
+            ShowKeepReady(visualItem);sheet=OwnedWindows.Cast<Window>().Last(w=>w.Title=="Keep ready");if(keepReadyPreviewTask!=null)await Task.WhenAny(keepReadyPreviewTask,Task.Delay(180));sheet.UpdateLayout();Picture((FrameworkElement)sheet.Content,"ready-keep-ready-sheet.png");
+            Check(Descendants((DependencyObject)sheet.Content).OfType<ComboBox>().Any(c=>c.Items.Count==4),"Keep ready offers 1, 2, 3 and whole season");Check(Descendants((DependencyObject)sheet.Content).OfType<CheckBox>().Any(c=>c.Content as string=="Remove watched after 7 days"),"Keep ready cleanup requires explicit consent");
+            sheet.Close();sheet=null;store.State.Catalog.Remove(visualItem.Id);store.State.EpisodeSchedules.Remove(visualItem.GroupKey);await manager.ChangeReady(s=>{s.Titles=snapshot.Titles;s.ManagedFiles=snapshot.ManagedFiles;s.Why=snapshot.Why;});RefreshReadyCentre();
+        }catch(Exception e){checks.Add("FAIL: "+e.Message);}finally{sheet?.Close();File.WriteAllText(Path.Combine(store.DataDirectory,"ready-ui-checks.json"),JsonSerializer.Serialize(checks));}
+    }
+}
+#endif

@@ -33,6 +33,7 @@ public partial class App : Application
             else if(e.Args[i]=="--play" && i+1<e.Args.Length) playPath=e.Args[++i];
             else if(e.Args[i]=="--page" && i+1<e.Args.Length) initialPage=e.Args[++i];
         }
+        var tasteLink=e.Args.FirstOrDefault(a=>a.StartsWith(TasteCode.Prefix,StringComparison.OrdinalIgnoreCase));
         if(validate && dataDirectory==null) { Shutdown(2);return; }
         if(validate)Profiles.RootOverride=Path.GetFullPath(dataDirectory!);
         // Profiles share one running instance: a folder given on the command line is a separate
@@ -43,7 +44,10 @@ public partial class App : Application
         var showSignal=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\NoirPlayerShow_" + Environment.UserName + instanceSuffix);
         // After "Replace & restart" the old window may still be closing; wait for it.
         if(!first&&e.Args.Contains("--restarted"))try{first=single.WaitOne(TimeSpan.FromSeconds(30));}catch(AbandonedMutexException){first=true;}
-        if (!first) { if(!e.Args.Contains("--minimized")) {AllowSetForegroundWindow(-1);showSignal.Set();} Shutdown(); return; }
+        // A taste link opened while Noir runs is handed over beside the show signal.
+        var tasteHandoff=Path.Combine(Path.GetTempPath(),"noir-taste-"+Environment.UserName+instanceSuffix+".txt");
+        if (!first) { if(tasteLink!=null)try{File.WriteAllText(tasteHandoff,tasteLink);}catch(IOException){} if(!e.Args.Contains("--minimized")||tasteLink!=null) {AllowSetForegroundWindow(-1);showSignal.Set();} Shutdown(); return; }
+        if(!validate)RegisterTasteLinks();
         if(dataDirectory==null&&!validate)
         {
             var profiles=Profiles.Load();var current=profiles.Profiles.First(p=>p.Id==profiles.Current);
@@ -63,8 +67,23 @@ public partial class App : Application
         if(validate) { window.ShowActivated=false;window.Title="Noir validation"; }
         MainWindow = window;
         if(e.Args.Contains("--minimized")) { window.ShowActivated=false;window.WindowState=WindowState.Minimized;window.StartHidden=true; }
-        new Thread(()=>{while(showSignal.WaitOne())Dispatcher.BeginInvoke(()=>window.ShowFromTray());}){IsBackground=true,Name="Noir activation"}.Start();
+        new Thread(()=>{while(showSignal.WaitOne()){string? link=null;try{if(File.Exists(tasteHandoff)){link=File.ReadAllText(tasteHandoff).Trim();File.Delete(tasteHandoff);}}catch(IOException){}Dispatcher.BeginInvoke(()=>{window.ShowFromTray();if(link?.StartsWith(TasteCode.Prefix,StringComparison.OrdinalIgnoreCase)==true)window.OpenTaste(link);});}}){IsBackground=true,Name="Noir activation"}.Start();
+        if(tasteLink!=null)window.Loaded+=(_,_)=>window.OpenTaste(tasteLink);
         window.Show();
+    }
+    // noir:// links open this copy of Noir (per user, no admin). Kept current when Noir moves.
+    static void RegisterTasteLinks()
+    {
+        try
+        {
+            var exe=Environment.ProcessPath;if(exe==null||!exe.EndsWith("Noir.exe",StringComparison.OrdinalIgnoreCase))return;
+            var command=$"\"{exe}\" \"%1\"";
+            using var key=Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Classes\noir");
+            using var open=key.CreateSubKey(@"shell\open\command");
+            if(open.GetValue("") as string==command)return;
+            key.SetValue("","URL:Noir link");key.SetValue("URL Protocol","");open.SetValue("",command);
+        }
+        catch(Exception){/* Links just won't open Noir. */}
     }
     protected override void OnExit(ExitEventArgs e) { single?.Dispose(); base.OnExit(e); }
 }

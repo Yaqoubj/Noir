@@ -33,10 +33,12 @@ public partial class MainWindow
         awakeTimer=new DispatcherTimer(TimeSpan.FromSeconds(20),DispatcherPriority.Background,(_,_)=>UpdateBackgroundState(),Dispatcher);awakeTimer.Start();
         UpdateBackgroundState();
         // Schedules change while Noir sits in the tray; refresh them so new episodes are noticed.
-        scheduleTimer=new DispatcherTimer(TimeSpan.FromHours(6),DispatcherPriority.Background,async(_,_)=>{await RefreshMetadata();CheckNewEpisodes();},Dispatcher);scheduleTimer.Start();
+        scheduleTimer=new DispatcherTimer(TimeSpan.FromHours(6),DispatcherPriority.Background,async(_,_)=>{await RefreshMetadata();CheckNewEpisodes();if(downloads!=null)_=downloads.PrepareReady("Six-hour refresh");},Dispatcher);scheduleTimer.Start();
+        readyTimer=new DispatcherTimer(TimeSpan.FromMinutes(1),DispatcherPriority.Background,(_,_)=>{if(downloads?.ReadyRecheckDue==true)_=downloads.PrepareReady("Retry");},Dispatcher);readyTimer.Start();
         _=Dispatcher.InvokeAsync(async()=>{await Task.Delay(TimeSpan.FromSeconds(20));CheckNewEpisodes();},DispatcherPriority.ApplicationIdle);
     }
     DispatcherTimer? scheduleTimer;
+    DispatcherTimer? readyTimer;
     string? lastBalloonPage;
     Action? lastBalloonAction;
     void Notify(string title,string text,string? page=null,Action? action=null)
@@ -57,6 +59,7 @@ public partial class MainWindow
     {
         if(tray==null||closing||checkingNewEpisodes) return;
         checkingNewEpisodes=true;
+        if(downloads!=null)_=downloads.PrepareReady("New episode");
         try{
         var followed=store.Archive.GroupBy(i=>i.GroupKey).Where(g=>!g.First().IsMovie&&store.TitleStatus(g)!="Dropped"&&!store.State.HiddenContinue.Contains(g.Key)&&!store.State.HiddenTitles.Contains(g.Key)).ToList();
         var next=followed
@@ -70,7 +73,7 @@ public partial class MainWindow
         var notices=new List<VideoItem>();
         foreach(var episode in fresh){
             bool queued=false;
-            if(downloads!=null)try{queued=await downloads.TryAutoDownload(episode.Id);}catch(Exception){/* Fall back to the usual new-episode notice. */}
+            if(downloads!=null)queued=downloads.Jobs().Any(j=>j.Target.GroupKey==episode.GroupKey&&j.Target.Season==episode.Season&&j.Target.Episode==episode.Episode&&j.Status is not ("Failed" or "Cancelled"));
             if(!queued)notices.Add(episode);
         }
         if(!hiddenInTray&&page is "Home" or "History"&&current==null) Render();
@@ -86,6 +89,7 @@ public partial class MainWindow
     {
         if(tray==null||closing) return;
         var jobs=downloads?.Jobs()??[];
+        if(downloads!=null)_=downloads.CheckReadyStorage();
         var active=jobs.Where(j=>j.Status is "Queued" or "Preparing" or "Downloading" or "Subtitles").ToList();
         var text=active.Count==0?"Noir":active.Count==1&&active[0].Size>0?$"Noir · Downloading {Math.Clamp(active[0].Bytes*100/active[0].Size,0,100)}%":$"Noir · {active.Count} downloads in progress";
         tray.Text=text.Length>63?text[..63]:text;
@@ -124,7 +128,7 @@ public partial class MainWindow
     void QuitFromTray(){quitting=true;if(!IsVisible)hiddenInTray=false;Close();}
     void DisposeBackgroundServices()
     {
-        awakeTimer?.Stop();scheduleTimer?.Stop();SetThreadExecutionState(EsContinuous);
+        awakeTimer?.Stop();scheduleTimer?.Stop();readyTimer?.Stop();SetThreadExecutionState(EsContinuous);
         if(tray!=null){tray.Visible=false;tray.Dispose();tray=null;}
     }
     static bool StartsWithWindows()

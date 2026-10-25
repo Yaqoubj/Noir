@@ -70,6 +70,7 @@ public partial class MainWindow
             var left=Text(Loc.MinutesLeft(Math.Max(1,(int)Math.Ceiling((pro.Duration-pro.Position)/60))),12,"#D9D4CC");left.Margin=new(14,0,0,0);DockPanel.SetDock(left,Dock.Right);progress.Children.Add(left);
             progress.Children.Add(new ProgressBar{Value=pro.Position,Maximum=pro.Duration,Height=4,Width=300,VerticalAlignment=VerticalAlignment.Center,Background=Brush("#55FFFFFF")});panel.Children.Add(progress);
         }
+        if(!detail&&continuing&&CatchUpCard(group,true) is {} catchUp)panel.Children.Add(catchUp);
         var actions=new WrapPanel{Orientation=Orientation.Horizontal,Margin=new(0,26,0,0)};
         if(justFinished)
         {

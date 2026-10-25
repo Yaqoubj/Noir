@@ -91,6 +91,7 @@ final class NoirUi {
   art.setContentDescription(action(n)+" · "+i.optString("title")+" "+MainActivity.episode(i));art.setOnClickListener(v->act(n));card.addView(art);
   TextView title=a.text(i.optString("title"),15,MainActivity.WHITE);title.setTypeface(null,Typeface.BOLD);title.setSingleLine();title.setEllipsize(TextUtils.TruncateAt.END);title.setPadding(0,a.dp(9),0,a.dp(2));title.setOnClickListener(v->a.open(i));card.addView(title);
   TextView sub=a.text(MainActivity.episode(i)+" · "+action(n),12,n.kind.equals(MISSING)?MainActivity.GOLD:MainActivity.MUTED);sub.setSingleLine();sub.setEllipsize(TextUtils.TruncateAt.END);card.addView(sub);
+  View recap=PhoneCatchUp.card(a,a.group(i.optString("group")),true);if(recap!=null)card.addView(recap);
   card.setOnLongClickListener(v->{if(!i.optBoolean("placeholder"))a.options(i);return true;});return card;
  }
  View posterCard(List<JSONObject> g){
@@ -115,7 +116,7 @@ final class NoirUi {
   if(!onDetail)actions.addView(chip(i.optBoolean("movie")?"Details":"Episodes",()->a.open(i),false));
   TextView list=chip(i.optBoolean("listed")?"✓ My List":"+ My List",()->{},false);list.setTag("my-list:"+i.optString("group"));list.setOnClickListener(v->{JSONObject fresh=a.data.item(i.optString("id"));boolean listed=fresh!=null&&fresh.optBoolean("listed");JSONObject op=a.data.operation(i.optString("id"),"list");DataStore.put(op,"value",!listed);a.data.queue(op);a.data.syncSoon();a.listBadges(i.optString("group"),!listed);Motion.pop(list);Motion.haptic(list);a.updateStatus();});actions.addView(list);
   HorizontalScrollView actionRow=row(actions);info.addView(actionRow);hero.addView(info,ip);
-  LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(-1,a.dp(onDetail?360:420));hp.setMargins(0,a.dp(4),0,a.dp(4));host.addView(hero,hp);
+  LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(-1,a.dp(onDetail?360:420));hp.setMargins(0,a.dp(4),0,a.dp(4));host.addView(hero,hp);if(!onDetail){View recap=PhoneCatchUp.card(a,g,true);if(recap!=null)host.addView(recap);}
  }
 
  // ---- Calendar cards for announced episodes ----
