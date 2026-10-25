@@ -17,7 +17,7 @@ public static class StreamSources
         if(Manifest(c).Length==0)throw new IOException("Add your AIOStreams link in Settings → Downloads to stream.");
         if(!Regex.IsMatch(item.ImdbId,@"^tt\d+$"))throw new IOException("This title needs a verified match before it can stream.");
         using var request=new HttpRequestMessage(HttpMethod.Get,TorboxProvider.StreamUri(Manifest(c),item));
-        request.Headers.UserAgent.ParseAdd("AIO-Noir/0.15.0");
+        request.Headers.UserAgent.ParseAdd("AIO-Noir/0.15.1");
         HttpResponseMessage received;
         try{received=await http.SendAsync(request,ct);}catch(OperationCanceledException)when(!ct.IsCancellationRequested){throw new IOException("AIOStreams took too long. Try again shortly.");}catch(HttpRequestException){throw new IOException("Couldn't connect to AIOStreams.");}
         using var response=received;if(!response.IsSuccessStatusCode)throw new IOException($"AIOStreams couldn't find streams ({(int)response.StatusCode}).");

@@ -41,6 +41,7 @@ public partial class MainWindow
             var toStream=season.Where(e=>e.Season>0&&!CanPlay(e)&&store.Aired(e,DateTimeOffset.UtcNow)).OrderBy(e=>store.EverWatched(e)).ThenBy(e=>e.Episode).FirstOrDefault();
             if(StreamOffered&&toStream!=null)Tile("▶","Stream "+toStream.EpisodeLabel.Replace(" · "," "),()=>StreamItem(toStream),"Stream it now through AIOStreams");
             Tile("↓","Download season",()=>FindDownloads(season.FirstOrDefault()??item,true),"Find this season's episodes for TorBox");
+            var keeping=downloads!=null&&NoirReadyPolicy.Enabled(downloads.SeasonPreferences(item.Id));Tile("⟳",keeping?T("Keeping ready · change","جاهزة · تغيير"):T("Keep ready","إبقاء الحلقات جاهزة"),()=>{if(downloads==null)Status.Text="Downloads are starting. Try again shortly.";else ShowKeepReady(season.FirstOrDefault()??item);},T("Keep the next episodes downloaded on this PC","إبقاء الحلقات التالية منزّلة على هذا الكمبيوتر"));
             var released=season.Where(e=>e.Season>0&&store.Aired(e,DateTimeOffset.UtcNow)).ToList();var allSeen=released.Count>0&&released.All(store.EverWatched);
             if(released.Count>0)Tile(allSeen?"✓":"○",allSeen?"Season watched":"Mark season watched",()=>{if(allSeen)UncheckAll(released,$"Season {released[0].Season} unmarked");else BulkCheckOff(released,$"{item.Title} season {released[0].Season} marked watched");},"Every released episode in this season");
             var whole=ShowEpisodes(item);var wholeSeen=whole.Count>0&&whole.All(store.EverWatched);

@@ -1,4 +1,4 @@
-Noir 0.7.0 uses the following components from their official distributions:
+Noir 0.7.1 uses the following components from their official distributions:
 
 VideoLAN.LibVLC.Windows 3.0.24
 License: LGPL-2.1-or-later
