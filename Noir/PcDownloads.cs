@@ -22,6 +22,8 @@ public sealed partial class PcDownloads : IDisposable
     readonly Dictionary<string,(IndexedRelease Release,VideoItem Item,bool Season,DateTimeOffset Expires,string Service)> releases=[];
     readonly Dictionary<string,(string Release,DownloadFileChoice Choice,DirectDownloadSource? Direct)> choices=[];
     readonly Dictionary<string,CancellationTokenSource> running=[];
+    DateTime progressSaved=DateTime.MinValue;
+    public int ActiveCount {get{lock(gate)return jobs.Count(j=>j.Status is "Queued" or "Preparing" or "Downloading" or "Subtitles");}}
     public event Action? Changed;
     public event Action? Completed;
     static readonly JsonSerializerOptions Json=new(){WriteIndented=true};
@@ -206,7 +208,7 @@ public sealed partial class PcDownloads : IDisposable
         while(!stop.IsCancellationRequested)
         {
             PcDownloadJob? job;lock(gate)job=jobs.FirstOrDefault(j=>(j.Status is "Queued" or "Preparing" or "Subtitles")&&(j.NextAttempt==null||j.NextAttempt<=DateTimeOffset.UtcNow));
-            if(job==null){try{await wake.WaitAsync(TimeSpan.FromSeconds(2),stop.Token);}catch(OperationCanceledException){break;}continue;}
+            if(job==null){TimeSpan delay;lock(gate){var next=jobs.Where(j=>j.Status is "Queued" or "Preparing" or "Subtitles").Select(j=>j.NextAttempt).OfType<DateTimeOffset>().Order().FirstOrDefault();delay=next==default?Timeout.InfiniteTimeSpan:TimeSpan.FromMilliseconds(Math.Clamp((next-DateTimeOffset.UtcNow).TotalMilliseconds,0,int.MaxValue));}try{await wake.WaitAsync(delay,stop.Token);}catch(OperationCanceledException){break;}continue;}
             using var ct=CancellationTokenSource.CreateLinkedTokenSource(stop.Token);lock(gate)running[job.Id]=ct;
             try
             {
@@ -233,8 +235,8 @@ public sealed partial class PcDownloads : IDisposable
                 }
                 await FinishSubtitles(job,assets,ct.Token);
             }
-            catch(OperationCanceledException){lock(gate){if(job.Status is "Downloading" or "Preparing"||stop.IsCancellationRequested&&job.Status=="Queued")job.Status="Paused";Save();}}
-            catch(Exception){Update(job,"Failed","Download stopped. Check connection, source availability and disk space, then Resume. No completed file was overwritten.");}
+            catch(OperationCanceledException)when(ct.IsCancellationRequested){lock(gate){if(job.Status is "Downloading" or "Preparing"||stop.IsCancellationRequested&&job.Status=="Queued")job.Status="Paused";Save();}}
+            catch(Exception e){var secrets=new List<string>();if(job.ProtectedDirectSource.Length>0)try{secrets.AddRange(DownloadSecurity.SourceSecrets(DownloadSecurity.Unprotect(job.ProtectedDirectSource)));}catch{}var message=DownloadSecurity.SafeText(e.Message,Config,secrets).Trim();if(e is not (IOException or HttpRequestException or TimeoutException or OperationCanceledException))try{store.Log(new Exception(DownloadSecurity.SafeText(e.ToString(),Config,secrets)));}catch{}Update(job,"Failed",message.Length>0?message:store.State.Language=="ar"?"توقف التنزيل. تحقق من الاتصال والمصدر ومساحة القرص ثم استأنف.":"Download stopped. Check connection, source availability and disk space, then Resume.");}
             finally {lock(gate)running.Remove(job.Id);Changed?.Invoke();}
         }
     }
@@ -251,6 +253,12 @@ public sealed partial class PcDownloads : IDisposable
         lock(gate){job.Status="Completed";job.Message="Saved to the PC library";Save();}Completed?.Invoke();
     }
     public async Task Transfer(PcDownloadJob job,string link,CancellationToken ct,IReadOnlyDictionary<string,string>? headers=null,string serverId="")
+    {
+        for(int attempt=0;;attempt++)try{await TransferOnce(job,link,ct,headers,serverId);return;}
+        catch(Exception e)when(attempt<2&&!ct.IsCancellationRequested&&(e is TimeoutException or TransferReadException||e is HttpRequestException h&&(h.StatusCode==null||h.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests||(int)h.StatusCode>=500))){await Task.Delay(TimeSpan.FromSeconds(2*(attempt+1)),ct);}
+    }
+    sealed class TransferReadException(string message,Exception? inner=null):IOException(message,inner);
+    async Task TransferOnce(PcDownloadJob job,string link,CancellationToken ct,IReadOnlyDictionary<string,string>? headers,string serverId)
     {
         var server=Config.Servers.FirstOrDefault(s=>s.Id==serverId);if(!DownloadSecurity.ValidUrl(link,server?.BaseUrl))throw new IOException("The source returned an invalid download link.");if(headers!=null)DownloadSecurity.ValidateHeaders(headers);
         DownloadNaming.Validate(job.Root,job.Destination);if(File.Exists(job.Destination))throw new IOException("The episode already exists.");
@@ -273,16 +281,23 @@ public sealed partial class PcDownloads : IDisposable
         await using(var output=new FileStream(part,start>0?FileMode.Append:FileMode.Create,FileAccess.Write,FileShare.Read,65536,true))
         await using(var input=await response.Content.ReadAsStreamAsync(ct))
         {
-            var buf=new byte[131072];var saved=DateTime.UtcNow;int count;
-            while((count=await input.ReadAsync(buf,ct))>0)
+            var buf=new byte[131072];var saved=DateTime.UtcNow;
+            using var idle=CancellationTokenSource.CreateLinkedTokenSource(ct);
+            while(true)
             {
+                int count;idle.CancelAfter(TimeSpan.FromSeconds(60));
+                try{count=await input.ReadAsync(buf,idle.Token);}
+                catch(OperationCanceledException)when(!ct.IsCancellationRequested){throw new TimeoutException(store.State.Language=="ar"?"لم تصل بيانات التنزيل لمدة 60 ثانية. أعد المحاولة.":"No download data arrived for 60 seconds. Retry the download.");}
+                catch(IOException e){throw new TransferReadException(e.Message,e);}
+                finally{idle.CancelAfter(Timeout.InfiniteTimeSpan);}
+                if(count==0)break;
                 if(job.Bytes+count>expected)throw new IOException("Download exceeded its expected size.");
                 await output.WriteAsync(buf.AsMemory(0,count),ct);job.Bytes+=count;
-                if(DateTime.UtcNow-saved>TimeSpan.FromSeconds(1)){lock(gate)Save();Changed?.Invoke();saved=DateTime.UtcNow;}
+                if(DateTime.UtcNow-saved>TimeSpan.FromSeconds(1)){lock(gate)if(DateTime.UtcNow-progressSaved>=TimeSpan.FromSeconds(10))Save();Changed?.Invoke();saved=DateTime.UtcNow;}
             }
             await output.FlushAsync(ct);output.Flush(true);
         }
-        ct.ThrowIfCancellationRequested();if(new FileInfo(part).Length!=expected)throw new IOException("The download is incomplete.");
+        ct.ThrowIfCancellationRequested();if(new FileInfo(part).Length!=expected)throw new TransferReadException(store.State.Language=="ar"?"التنزيل غير مكتمل.":"The download is incomplete.");
         DownloadNaming.Validate(job.Root,job.Destination);File.Move(part,job.Destination,false);store.RegisterDownload(job.Target,job.Destination);
     }
     async Task<HttpResponseMessage> Request(string link,long start,string etag,IReadOnlyDictionary<string,string>? headers,string? serverBase,CancellationToken ct)
@@ -293,14 +308,15 @@ public sealed partial class PcDownloads : IDisposable
             using var request=new HttpRequestMessage(HttpMethod.Get,link);var uri=new Uri(link);
             if(headers!=null&&uri.Scheme==origin.Scheme&&uri.Authority==origin.Authority)foreach(var h in headers)request.Headers.TryAddWithoutValidation(h.Key,h.Value);
             if(start>0){request.Headers.Range=new RangeHeaderValue(start,null);request.Headers.TryAddWithoutValidation("If-Range",etag);}
-            var response=await transfer.SendAsync(request,HttpCompletionOption.ResponseHeadersRead,ct);
+            using var deadline=CancellationTokenSource.CreateLinkedTokenSource(ct);deadline.CancelAfter(TimeSpan.FromSeconds(60));HttpResponseMessage response;
+            try{response=await transfer.SendAsync(request,HttpCompletionOption.ResponseHeadersRead,deadline.Token);}catch(OperationCanceledException)when(!ct.IsCancellationRequested){throw new TimeoutException(store.State.Language=="ar"?"انتهت مهلة اتصال التنزيل. أعد المحاولة.":"Download connection timed out. Retry the download.");}
             if((int)response.StatusCode is not (301 or 302 or 303 or 307 or 308))return response;
             var location=response.Headers.Location;response.Dispose();if(location==null)throw new IOException("The download redirect was incomplete.");link=new Uri(uri,location).AbsoluteUri;
         }
         throw new IOException("The download returned too many redirects.");
     }
     void Update(PcDownloadJob j,string status,string message){lock(gate){if(j.Status is "Paused" or "Cancelled")return;j.Status=status;j.Message=message;Save();}Changed?.Invoke();}
-    void Save()=>Atomic(jobsPath,JsonSerializer.SerializeToUtf8Bytes(jobs,Json));
+    void Save(){Atomic(jobsPath,JsonSerializer.SerializeToUtf8Bytes(jobs,Json));progressSaved=DateTime.UtcNow;}
     static void Atomic(string path,byte[] bytes){var temp=path+".tmp";using(var f=new FileStream(temp,FileMode.Create,FileAccess.Write,FileShare.None)){f.Write(bytes);f.Flush(true);}for(int attempt=0;;attempt++){try{File.Move(temp,path,true);break;}catch(Exception e)when(attempt<5&&(e is IOException or UnauthorizedAccessException)){Thread.Sleep(40*(attempt+1));}}}
     public void Dispose(){stop.Cancel();Signal();}
 }

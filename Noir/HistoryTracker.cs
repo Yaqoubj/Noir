@@ -94,6 +94,7 @@ public partial class MainWindow
         var actions=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Bottom};DockPanel.SetDock(actions,Dock.Right);header.Children.Add(actions);
         var log=ActionButton(T("＋  Log what you watched","＋  سجّل ما شاهدته"),()=>OpenLog(null),true);log.Padding=new(20,11,22,11);log.ToolTip="Add movies and episodes you watched anywhere, without downloading them";actions.Children.Add(log);
         var import=ActionButton(T("⇅  Add history","⇅  أضف سجلّك"),()=>{trackerTab="Add history";Render();});import.Padding=new(18,11,20,11);import.Margin=new(10,0,0,0);import.ToolTip="Bring in Netflix, Trakt, TV Time, Letterboxd, Stremio…";actions.Children.Add(import);
+        var extras=ActionButton("⋯",()=>{});extras.Padding=new(14,6,14,12);extras.FontSize=17;extras.Margin=new(10,0,0,0);extras.ToolTip=T("More: year story, compare taste, calendar, backup","المزيد: حكاية العام ومقارنة الذوق والتقويم والنسخ الاحتياطي");System.Windows.Automation.AutomationProperties.SetName(extras,"More history tools");extras.Click+=(_,_)=>ShowHistoryMore(extras);actions.Children.Add(extras);
         header.Children.Add(Text(T("Every story, remembered.","كل حكاية تبقى."),14,"#C7C2BC"));ContentPanel.Children.Add(header);
         ContentPanel.Children.Add(HistoryProfileHeader());
         RenderViewingLife(views);
@@ -209,7 +210,7 @@ public partial class MainWindow
         else if(!TrackerOnly&&StreamOffered){var stream=SmallRound("▶","Stream "+next.EpisodeLabel,()=>StreamItem(next));tools.Children.Add(stream);}
         tools.Children.Add(CheckCircle(false,"Mark "+next.EpisodeLabel+" watched",()=>{historyContinued=show.GroupKey;LogBatch([new(next,DateTimeOffset.UtcNow)],$"{show.Title} {next.EpisodeLabel.Replace(" · "," ")} watched",next);},54));
         if(historyContinued==show.GroupKey){historyContinued="";card.Loaded+=(_,_)=>HistoryPop(card);}
-        if(!TrackerOnly)LazyMenu(card,next);card.MouseEnter+=(_,_)=>card.BorderBrush=Brush("#40E4C084");card.MouseLeave+=(_,_)=>card.BorderBrush=Brush("#00000000");
+        if(!TrackerOnly){LazyMenu(card,next);tools.Children.Add(MoreButton(next));}card.MouseEnter+=(_,_)=>card.BorderBrush=Brush("#40E4C084");card.MouseLeave+=(_,_)=>card.BorderBrush=Brush("#00000000");
         return card;
     }
     Button SmallRound(string glyph,string tip,Action act)
@@ -344,6 +345,9 @@ public partial class MainWindow
     FrameworkElement Stars(VideoItem item,double size=16)=>HalfRatePicker(item,size);
     string historyMonthTracker="All time";bool hideLoggedHistory;
     readonly HashSet<string> expandedUndated=[];
+    int undatedGroupLimit=40;
+    readonly Dictionary<string,int> undatedViewingLimits=[];
+    Button UndatedMore(int remaining,Action more){var button=ActionButton(T("Show more ({0})","عرض المزيد ({0})",remaining),more);button.Style=(Style)FindResource("Pill");button.Padding=new(20,10,20,10);button.HorizontalAlignment=HorizontalAlignment.Center;button.Margin=new(0,16,0,0);return button;}
     void RenderTrackerDiary()
     {
         var records=store.Archive.Where(TrackerFits).SelectMany(i=>store.ViewingHistory(i).Select(v=>(Item:i,View:v))).Where(r=>historyType switch{"Movies"=>r.Item.IsMovie,"Shows"=>!r.Item.IsMovie,_=>true}).Where(r=>!hideLoggedHistory||!r.View.Backfill).ToList();
@@ -372,7 +376,8 @@ public partial class MainWindow
         if(undated.Count>0&&historyMonthTracker=="All time")
         {
             ContentPanel.Children.Add(Heading("Date unknown",$"{undated.Count} logged without a date. Set one any time with ✎."));
-            foreach(var group in undated.GroupBy(r=>r.Item.GroupKey).Take(40))
+            var undatedGroups=undated.GroupBy(r=>r.Item.GroupKey).ToList();
+            foreach(var group in undatedGroups.Take(undatedGroupLimit))
             {
                 var first=group.First().Item;var key=first.GroupKey;var views=group.ToList();
                 if(views.Count==1){ContentPanel.Children.Add(DiaryRow(first,views[0].View));continue;}
@@ -391,8 +396,13 @@ public partial class MainWindow
                 var text=new StackPanel{VerticalAlignment=VerticalAlignment.Center};text.Children.Add(Text(first.Title,15,weight:FontWeights.SemiBold));
                 text.Children.Add(Text(first.IsMovie?"Movie":$"{group.Count()} episode{(group.Count()==1?"":"s")} · "+string.Join(", ",group.GroupBy(r=>r.Item.Season).Select(s=>$"Season {s.Key} ({s.Count()})")),12,"#9F9A93"));dock.Children.Add(text);
                 ContentPanel.Children.Add(row);
-                if(expandedUndated.Contains(key))foreach(var r in views.Take(200))ContentPanel.Children.Add(DiaryRow(r.Item,r.View));
+                if(expandedUndated.Contains(key))
+                {
+                    var limit=undatedViewingLimits.GetValueOrDefault(key,200);foreach(var r in views.Take(limit))ContentPanel.Children.Add(DiaryRow(r.Item,r.View));
+                    if(views.Count>limit)ContentPanel.Children.Add(UndatedMore(views.Count-limit,()=>{undatedViewingLimits[key]=limit+200;RenderQuiet();}));
+                }
             }
+            if(undatedGroups.Count>undatedGroupLimit)ContentPanel.Children.Add(UndatedMore(undatedGroups.Count-undatedGroupLimit,()=>{undatedGroupLimit+=40;RenderQuiet();}));
         }
     }
     static string SourceLabel(string source)=>source.StartsWith("Imported from ")?source[14..]:source switch{"Playback"=>"Played in Noir","Android playback"=>"Phone","Marked on Android"=>"Phone","Earlier record"=>"Noir",_=>source};

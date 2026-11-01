@@ -88,7 +88,7 @@ public sealed partial class PcDownloads
     }
     public async Task<DownloadPlan> PlanSeason(string itemId,DownloadPlanRequest request,IProgress<DownloadSourceStatus>? progress=null,CancellationToken ct=default,bool readyOnly=false)
     {
-        var searchId=Guid.NewGuid().ToString("N");lock(gate)plannerSearches[searchId]=[];
+        using var planning=PlanningRequests.Begin();var searchId=Guid.NewGuid().ToString("N");lock(gate)plannerSearches[searchId]=[];
         try{
         request=Copy(request);
         var item=Item(itemId);var scoped=ScopeEpisodes(item,request);var preference=request.Preferences??SeasonPreferences(itemId);
@@ -116,7 +116,7 @@ public sealed partial class PcDownloads
         if(aio!=null){
             await EpisodeFirst(aio,wanted,progress,searchId,releaseIds,plan,(id,files)=>fileLists[id]=new(Task.FromResult<List<DownloadFileChoice>?>(files)),ct);
             // Media servers, Real-Debrid and the TorBox account library aren't all in AIOStreams' results; ask them per
-            // episode (the TorBox account listing is shared across those requests).
+            // episode; account and media-server listings are shared for this plan.
             if(provider is DownloadProviders){
                 using var slots=new SemaphoreSlim(4);
                 var connected=await Task.WhenAll(wanted.Select(async episode=>{await slots.WaitAsync(ct);try{return await SearchDetailedCore(episode.Id,false,progress,ct,searchId,true);}finally{slots.Release();}}));
@@ -294,7 +294,7 @@ public sealed partial class PcDownloads
     readonly object readyGate=new();
     readonly SemaphoreSlim readyRun=new(1,1);
     int readyPending;
-    NoirReadyState? ready;
+    NoirReadyState? ready;byte[]? lastReadySave;
     ReadyStorage readyStorage=new(0,0,0,0);
     string ReadyPath=>Path.Combine(store.DataDirectory,"noir-ready.json");
     public NoirReadyState ReadyState {get{lock(readyGate)return Copy(ready??new());}}
@@ -306,10 +306,11 @@ public sealed partial class PcDownloads
     {
         lock(readyGate){if(ready!=null)return;
             if(File.Exists(ReadyPath))ready=JsonSerializer.Deserialize<NoirReadyState>(File.ReadAllText(ReadyPath))??throw new IOException("Preparation state could not be read");else ready=new();
+            lastReadySave=JsonSerializer.SerializeToUtf8Bytes(ready,Json);
             if(!ready.Migrated){store.MigrateReadyPreferences();ready.Migrated=true;ready.Log("Migrated keep ready preferences");SaveReady();}
         }
     }
-    void SaveReady()=>Atomic(ReadyPath,JsonSerializer.SerializeToUtf8Bytes(ready,Json));
+    void SaveReady(){var data=JsonSerializer.SerializeToUtf8Bytes(ready,Json);if(lastReadySave!=null&&data.AsSpan().SequenceEqual(lastReadySave))return;Atomic(ReadyPath,data);lastReadySave=data;}
     public Task ChangeReady(Action<NoirReadyState> change)=>Task.Run(()=>{InitializeReady();bool paused;List<string> resume;lock(readyGate){var wasPaused=ready!.Paused;change(ready);ready.BudgetBytes=Math.Max(NoirReadyPolicy.GB,ready.BudgetBytes);ready.KeepFreeBytes=Math.Max(10*NoirReadyPolicy.GB,ready.KeepFreeBytes);paused=ready.Paused;resume=wasPaused&&!paused?ready.PausedJobs.ToList():[];if(!paused)ready.PausedJobs.Clear();SaveReady();}
         var state=ReadyState;var owned=state.ManagedFiles.Select(f=>f.JobId).ToHashSet();foreach(var job in Jobs().Where(j=>owned.Contains(j.Id))){if(paused&&job.Status is "Queued" or "Preparing" or "Downloading"){Control(job.Id,"pause");lock(readyGate){ready!.PausedJobs.Add(job.Id);SaveReady();}}else if(resume.Contains(job.Id)&&job.Status=="Paused")Control(job.Id,"resume");}Changed?.Invoke();});
     public ReadyTitlePlan? PreparedTitle(string group){lock(readyGate)return ready?.Titles.GetValueOrDefault(group) is {} title?Copy(title):null;}
@@ -402,35 +403,59 @@ public sealed partial class PcDownloads
     }
     void ReconcileReadyFiles(DateTimeOffset now)
     {
-        var state=ReadyState;var all=Jobs().ToDictionary(j=>j.Id);var inputs=store.ReadyCleanupInputs(state.ManagedFiles.Select(f=>f.ItemId));
+        var state=ReadyState;var all=Jobs().ToDictionary(j=>j.Id);var inputs=state.CleanupWatched?store.ReadyCleanupInputs(state.ManagedFiles.Select(f=>f.ItemId)):[];var profiles=state.CleanupWatched?ReadReadyProfiles():null;bool changed=false;
         foreach(var file in state.ManagedFiles){
             if(!all.TryGetValue(file.JobId,out var job)||job.Status!="Completed"||!file.Path.Equals(job.Destination,StringComparison.OrdinalIgnoreCase))continue;
             var info=new FileInfo(file.Path);if(!info.Exists)continue;
+            var before=(file.FileBytes,file.LastWriteUtc,file.RemoveAt,file.CleanupCancelled);string log="";
             if(file.LastWriteUtc==null){file.FileBytes=info.Length;file.LastWriteUtc=info.LastWriteTimeUtc;}
-            var watched=inputs.GetValueOrDefault(file.ItemId);var others=ReadyOtherProfiles(job.Target);
+            var watched=inputs.GetValueOrDefault(file.ItemId);var others=profiles?.Watched(job.Target)??[];
             bool eligible=state.CleanupWatched&&watched.Watched&&!file.Pinned&&!file.CleanupCancelled&&watched.At!=null&&others.All(x=>x==true);
-            if(!eligible){file.RemoveAt=null;}
-            else if(file.RemoveAt==null){var due=watched.At!.Value.AddDays(7);file.RemoveAt=due>now?due:now.AddDays(1);lock(readyGate)ready!.Log("Watched file removal scheduled",file.Title);}
+            if(!eligible)file.RemoveAt=null;
+            else if(file.RemoveAt==null){var due=watched.At!.Value.AddDays(7);file.RemoveAt=due>now?due:now.AddDays(1);log="Watched file removal scheduled";}
             else if(file.RemoveAt<=now&&NoirReadyPolicy.CanRemove(state.CleanupWatched,true,watched.Watched,file.Pinned,file.CleanupCancelled,watched.At,others,now)){
-                // Ownership and identity must still match. A changed file belongs to the user.
-                if(info.Length==file.FileBytes&&info.LastWriteTimeUtc==file.LastWriteUtc){var latest=store.ReadyCleanupInputs([file.ItemId]).GetValueOrDefault(file.ItemId);lock(readyGate){var current=ready!.ManagedFiles.FirstOrDefault(f=>f.JobId==file.JobId);if(ready.Paused||!ready.CleanupWatched||current==null||current.Pinned||current.CleanupCancelled||!latest.Watched)continue;DownloadNaming.Validate(job.Root,file.Path);File.Delete(file.Path);file.RemoveAt=null;ready.Log("Removed watched managed file",file.Title);}}
-                else{file.CleanupCancelled=true;file.RemoveAt=null;lock(readyGate)ready!.Log("File changed; removal cancelled",file.Title);}
+                var latest=store.ReadyCleanupInputs([file.ItemId]).GetValueOrDefault(file.ItemId);
+                lock(readyGate){
+                    var current=ready!.ManagedFiles.FirstOrDefault(f=>f.JobId==file.JobId);
+                    if(ready.Paused||!ready.CleanupWatched||current==null||current.Pinned||current.CleanupCancelled||!NoirReadyPolicy.CanRemove(true,true,latest.Watched,false,false,latest.At,others,now)||profiles?.Fresh()!=true)continue;
+                    info.Refresh();if(!info.Exists)continue;
+                    if(info.Length==file.FileBytes&&info.LastWriteTimeUtc==file.LastWriteUtc){DownloadNaming.Validate(job.Root,file.Path);File.Delete(file.Path);file.RemoveAt=null;log="Removed watched managed file";}
+                    else{file.CleanupCancelled=true;file.RemoveAt=null;log="File changed; removal cancelled";}
+                }
             }
-            lock(readyGate){var current=ready!.ManagedFiles.FirstOrDefault(f=>f.JobId==file.JobId);if(current!=null){current.FileBytes=file.FileBytes;current.LastWriteUtc=file.LastWriteUtc;if(!current.Pinned&&!current.CleanupCancelled){current.RemoveAt=file.RemoveAt;current.CleanupCancelled=file.CleanupCancelled;}}SaveReady();}
+            lock(readyGate){var current=ready!.ManagedFiles.FirstOrDefault(f=>f.JobId==file.JobId);if(current==null)continue;
+                if(before!=(file.FileBytes,file.LastWriteUtc,file.RemoveAt,file.CleanupCancelled)){
+                    current.FileBytes=file.FileBytes;current.LastWriteUtc=file.LastWriteUtc;
+                    if(!current.Pinned&&!current.CleanupCancelled){current.RemoveAt=file.RemoveAt;current.CleanupCancelled=file.CleanupCancelled;}changed=true;
+                }
+                if(log.Length>0){ready.Log(log,file.Title);changed=true;}
+            }
         }
+        if(changed)lock(readyGate)SaveReady();
         var root=Config.ShowsRoot;if(root.Length==0)root=store.State.Roots.FirstOrDefault()?.Path??parts;MeasureReadyStorage(root);
     }
-    List<bool?> ReadyOtherProfiles(VideoItem item)
+    sealed class ReadyProfileLibraries
     {
+        public List<Dictionary<string,bool>?> Libraries=[];
+        public Dictionary<string,(long Bytes,DateTime Written)> Files=[];
+        public static (long Bytes,DateTime Written) Stamp(string path){var info=new FileInfo(path);return info.Exists?(info.Length,info.LastWriteTimeUtc):(-1,default);}
+        public bool Fresh(){try{return Files.All(p=>Stamp(p.Key)==p.Value);}catch(Exception e)when(e is IOException or UnauthorizedAccessException){return false;}}
+        public List<bool?> Watched(VideoItem item)=>Libraries.Select(l=>l==null?(bool?)null:l.TryGetValue(item.GroupKey+"|"+item.Season+"|"+item.Episode,out var watched)||item.ImdbId.Length>0&&l.TryGetValue("imdb:"+item.ImdbId+"|"+item.Season+"|"+item.Episode,out watched)?watched:(bool?)null).ToList();
+    }
+    ReadyProfileLibraries ReadReadyProfiles()
+    {
+        var result=new ReadyProfileLibraries();
         try{
-            var directory=Path.GetFullPath(store.DataDirectory);var parent=Directory.GetParent(directory);var root=parent?.Name=="profiles"?parent.Parent!.FullName:directory;
-            var registry=Path.Combine(root,"profiles.json");if(!File.Exists(registry))return [null];
-            var list=JsonSerializer.Deserialize<ProfileList>(File.ReadAllText(registry));if(list==null||list.Profiles.Count==0)return [null];var result=new List<bool?>();
-            foreach(var profile in list.Profiles){if(!Profiles.ValidId(profile.Id)){result.Add(null);continue;}var folder=profile.Id=="default"?root:Path.Combine(root,"profiles",profile.Id);if(Path.GetFullPath(folder).Equals(directory,StringComparison.OrdinalIgnoreCase))continue;
-                var path=Path.Combine(folder,"library.json");if(!File.Exists(path)){result.Add(null);continue;}var other=JsonSerializer.Deserialize<PlayerState>(File.ReadAllText(path));var entry=other?.Catalog.Values.FirstOrDefault(e=>(e.Item.GroupKey==item.GroupKey||item.ImdbId.Length>0&&e.Item.ImdbId==item.ImdbId)&&e.Item.Season==item.Season&&e.Item.Episode==item.Episode);
-                result.Add(entry==null?null:entry.Progress is {Completed:false}?false:entry.Progress?.Completed==true||other!.Viewings.GetValueOrDefault(entry.Item.Id)?.Count>0);
-            }return result;
-        }catch(Exception e)when(e is IOException or JsonException or UnauthorizedAccessException){return [null];}
+            var directory=Path.GetFullPath(store.DataDirectory);var root=MobileProfiles.Root(directory);var registry=Path.Combine(root,"profiles.json");result.Files[registry]=ReadyProfileLibraries.Stamp(registry);
+            var list=JsonSerializer.Deserialize<ProfileList>(File.ReadAllText(registry));if(list==null||list.Profiles.Count==0){result.Libraries.Add(null);return result;}
+            foreach(var profile in list.Profiles){
+                if(!Profiles.ValidId(profile.Id)){result.Libraries.Add(null);continue;}var folder=profile.Id=="default"?root:Path.Combine(root,"profiles",profile.Id);if(Path.GetFullPath(folder).Equals(directory,StringComparison.OrdinalIgnoreCase))continue;
+                var path=Path.Combine(folder,"library.json");var stamp=ReadyProfileLibraries.Stamp(path);var other=JsonSerializer.Deserialize<PlayerState>(File.ReadAllText(path));result.Files[path]=stamp;
+                if(other==null||ReadyProfileLibraries.Stamp(path)!=stamp){result.Libraries.Add(null);continue;}
+                var index=new Dictionary<string,bool>();foreach(var entry in other.Catalog.Values){var item=entry.Item;var watched=entry.Progress is not {Completed:false}&&(entry.Progress?.Completed==true||other.Viewings.GetValueOrDefault(item.Id)?.Count>0);index.TryAdd(item.GroupKey+"|"+item.Season+"|"+item.Episode,watched);if(item.ImdbId.Length>0)index.TryAdd("imdb:"+item.ImdbId+"|"+item.Season+"|"+item.Episode,watched);}result.Libraries.Add(index);
+            }
+        }catch(Exception e)when(e is IOException or JsonException or UnauthorizedAccessException){result.Libraries.Add(null);}
+        return result;
     }
     public Task CheckReadyStorage()=>Task.Run(async()=>{if(!await readyRun.WaitAsync(0))return;try{InitializeReady();var root=Config.ShowsRoot;if(root.Length==0)root=parts;var disk=MeasureReadyStorage(root);var state=ReadyState;var reason=disk.UsedBytes+disk.ReservedBytes>state.BudgetBytes?"Preparation budget reached":disk.FreeBytes-disk.DiskReservedBytes<Math.Max(10*NoirReadyPolicy.GB,state.KeepFreeBytes)?"Keeping free space available":"";if(reason.Length==0)return;var owned=state.ManagedFiles.Select(f=>f.JobId).ToHashSet();foreach(var job in Jobs().Where(j=>owned.Contains(j.Id)&&j.Status is "Queued" or "Preparing" or "Downloading")){Control(job.Id,"pause");lock(readyGate){ready!.Log(reason,job.Name);if(ready.Titles.TryGetValue(job.Target.GroupKey,out var title)){title.State="Blocked";title.Reason=reason;title.RecheckAt=DateTimeOffset.UtcNow.AddMinutes(15);}SaveReady();}}}catch(Exception e)when(e is IOException or UnauthorizedAccessException){store.Log(e);}finally{readyRun.Release();}});
 }

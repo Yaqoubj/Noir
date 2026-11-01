@@ -35,10 +35,16 @@ public sealed class MobileSyncServer : IAsyncDisposable
     WebApplication? app;
     string pairCode="";
     DateTimeOffset pairExpires;
+    bool pairSucceeded;
+    public (DateTimeOffset Expires,bool Active,bool Paired) PairingState {get{lock(gate)return(pairExpires,pairCode.Length>0&&DateTimeOffset.UtcNow<pairExpires,pairSucceeded);}}
+    int activeMediaResponses;
+    public int ActiveMediaResponses=>Volatile.Read(ref activeMediaResponses);
     public MobileHostConfig Config {get;}
     public string Status {get;private set;}="Starting…";
     public bool Running=>app!=null;
     public string Pin=>Convert.ToHexString(SHA256.HashData(certificate.RawData));
+    /// <summary>The short code a TV shows before it sends the pairing code: the first 12 hex digits of the certificate fingerprint, "AB12 CD34 EF56". Mirrors DataStore.checkCode on Android.</summary>
+    public static string CheckCode(string pin){var p=pin.ToUpperInvariant();return $"{p[..4]} {p[4..8]} {p[8..12]}";}
     public MobileSyncServer(LibraryStore store,Func<MobileSnapshot> snapshot,Func<List<MobileOperation>,List<string>> merge,int port=Port,PcDownloads? downloads=null,Func<string,CancellationToken,Task<bool>>? confirmSettingsShare=null,bool ephemeralCertificate=false)
     {
         this.store=store;this.snapshot=snapshot;this.merge=merge;this.port=port;this.downloads=downloads;subtitleTools=new(store);this.confirmSettingsShare=confirmSettingsShare;phoneCloud=downloads==null?null:new(store,downloads);
@@ -96,7 +102,7 @@ public sealed class MobileSyncServer : IAsyncDisposable
     }
     public string BeginPairing(string address)
     {
-        lock(gate) {pairCode=RandomNumberGenerator.GetInt32(10000000,100000000).ToString();pairExpires=DateTimeOffset.UtcNow.AddMinutes(10);attempts.Clear();
+        lock(gate) {pairCode=RandomNumberGenerator.GetInt32(10000000,100000000).ToString();pairExpires=DateTimeOffset.UtcNow.AddMinutes(10);pairSucceeded=false;attempts.Clear();
         return $"noir://pair?address={Uri.EscapeDataString(address+":"+port)}&code={pairCode}&pin={Pin}";}
     }
     public void EndPairing() {lock(gate) pairCode="";}
@@ -109,8 +115,10 @@ public sealed class MobileSyncServer : IAsyncDisposable
         try {File.Move(temp,configPath,true);break;}
         catch(IOException) when(attempt<4) {Thread.Sleep(40*(attempt+1));}
     }
+    public string StartFailure {get;private set;}="";
     public async Task SetEnabled(bool enabled)
     {
+        StartFailure="";
         lock(gate) {Config.Enabled=enabled;SaveConfig();if(!enabled) pairCode="";}
         if(!enabled) {if(app!=null) {var old=app;app=null;await old.StopAsync();await old.DisposeAsync();}Status="Off";return;}
         if(app!=null) return;
@@ -151,7 +159,9 @@ public sealed class MobileSyncServer : IAsyncDisposable
                     {var active=MobileProfiles.Active(store.DataDirectory);ctx.Response.StatusCode=409;await ctx.Response.WriteAsJsonAsync(new{activeProfileId=active.Id,activeProfileName=active.Name,hostId=MobileProfiles.HostId(store.DataDirectory)},Json);return;}
                     if(requested.Length>0&&!ProfileAllowed(ctx,requested)){ctx.Response.StatusCode=403;return;}
                 }
-                await next(ctx);
+                var mediaResponse=ctx.Request.Path.StartsWithSegments("/v1/media")||ctx.Request.Path.StartsWithSegments("/v1/phone-downloads/content");
+                if(mediaResponse)Interlocked.Increment(ref activeMediaResponses);
+                try{await next(ctx);}finally{if(mediaResponse)Interlocked.Decrement(ref activeMediaResponses);}
             });
             host.MapPost("/v1/pair",async(HttpContext ctx)=>
             {
@@ -166,7 +176,7 @@ public sealed class MobileSyncServer : IAsyncDisposable
                     if(input==null||pairCode.Length==0||DateTimeOffset.UtcNow>pairExpires||!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(input.Code),Encoding.UTF8.GetBytes(pairCode))) return Results.Unauthorized();
                     token=Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
                     if(Config.Peers.Count>=16) return Results.BadRequest();
-                    Config.Peers.Add(new(){Name=input.Name[..Math.Min(input.Name.Length,80)],Hash=Hash(token),PairedAt=DateTimeOffset.UtcNow,ProfileAccess=[MobileProfiles.Active(store.DataDirectory).Id]});pairCode="";SaveConfig();
+                    Config.Peers.Add(new(){Name=input.Name[..Math.Min(input.Name.Length,80)],Hash=Hash(token),PairedAt=DateTimeOffset.UtcNow,ProfileAccess=[MobileProfiles.Active(store.DataDirectory).Id]});pairCode="";pairSucceeded=true;SaveConfig();
                 }
                 var identity=snapshot();return Results.Json(new {token,instance=identity.Instance,hostId=identity.HostId,profileId=identity.ProfileId,profileName=identity.ProfileName,profileColor=identity.ProfileColor},Json);
             });
@@ -271,7 +281,7 @@ public sealed class MobileSyncServer : IAsyncDisposable
             });
             await host.StartAsync();app=host;Status=$"Ready · HTTPS port {port}";
         }
-        catch(Exception e) {if(host!=null) await host.DisposeAsync();store.Log(e);Status=$"Couldn't start sync on port {port}. Check that another app isn't using the port, then enable sync again.";}
+        catch(Exception e) {if(host!=null) await host.DisposeAsync();store.Log(e);StartFailure=System.Text.RegularExpressions.Regex.Replace(e.GetBaseException().Message,@"(?i)\b[a-z][a-z0-9+.-]*://\S+","[link]");Status=$"Couldn't start sync on port {port}. · تعذر بدء المزامنة على المنفذ {port}. "+StartFailure;}
     }
     public async Task<(int Status,PhoneDownloadSettingsPayload? Settings)> ShareDownloadSettings(string token,CancellationToken cancellation=default)
     {

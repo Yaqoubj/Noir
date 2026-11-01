@@ -114,6 +114,10 @@ public sealed partial class LibraryStore
     // This is a projection, never the library file: roots, paths, cookies and account data stay on PC.
     public MobileSnapshot MobileSnapshot()
     {
+        LibraryStore projection;lock(gate)projection=new(this,LibrarySnapshot.Copy(State));return projection.BuildMobileSnapshot();
+    }
+    MobileSnapshot BuildMobileSnapshot()
+    {
         lock(gate)
         {
             // One listing per folder answers every "does this file exist" and subtitle lookup below.
@@ -167,22 +171,26 @@ public sealed partial class LibraryStore
         mobileKnownCollections=State.Collections.ToDictionary(p=>p.Key,p=>new HashSet<string>(p.Value));mobileKnownCollectionTimes=State.MobileFieldTimes.Where(p=>p.Key.StartsWith("collection:")).ToDictionary(p=>p.Key,p=>p.Value);
         mobileKnownHistory=MobileHistoryFields();mobileKnownHistoryTimes=mobileKnownHistory.Keys.ToDictionary(k=>k,k=>State.MobileFieldTimes.GetValueOrDefault(k));
     }
+    void RememberMobileViewing(string id,ViewingRecord v)
+    {if(mobileKnownViews!=null)mobileKnownViews[id+":"+v.Id]=(v.WatchedAt.ToUnixTimeMilliseconds(),v.DateUnknown,v.Approximate,State.MobileFieldTimes.GetValueOrDefault("viewingDate:"+id+":"+v.Id));}
     void TrackMobileChanges()
     {
-        if(mobileKnownViews==null){CaptureMobileChanges();return;}var now=DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var current=State.Viewings.SelectMany(p=>p.Value.Select(v=>(Key:p.Key+":"+v.Id,View:v))).GroupBy(p=>p.Key).ToDictionary(g=>g.Key,g=>g.First().View);
-        foreach(var (key,old) in mobileKnownViews)
+        if(mobileKnownViews==null){CaptureMobileChanges();return;}var now=DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();var seen=new HashSet<string>();
+        foreach(var (id,views) in State.Viewings)foreach(var v in views)
         {
-            if(!current.TryGetValue(key,out var v))State.MobileFieldTimes.TryAdd("viewingDeleted:"+key,now);
-            else if((old.Date!=v.WatchedAt.ToUnixTimeMilliseconds()||old.Unknown!=v.DateUnknown||old.Approximate!=v.Approximate)&&State.MobileFieldTimes.GetValueOrDefault("viewingDate:"+key)<=old.Clock)State.MobileFieldTimes["viewingDate:"+key]=now;
+            var key=id+":"+v.Id;if(!seen.Add(key))continue;var field="viewingDate:"+key;
+            if(mobileKnownViews.TryGetValue(key,out var old)&&(old.Date!=v.WatchedAt.ToUnixTimeMilliseconds()||old.Unknown!=v.DateUnknown||old.Approximate!=v.Approximate)&&State.MobileFieldTimes.GetValueOrDefault(field)<=old.Clock)State.MobileFieldTimes[field]=Math.Max(now,old.Clock+1);
+            RememberMobileViewing(id,v);
         }
+        foreach(var key in mobileKnownViews.Keys.Where(k=>!seen.Contains(k)).ToList()){State.MobileFieldTimes.TryAdd("viewingDeleted:"+key,now);mobileKnownViews.Remove(key);}
         foreach(var (name,members) in mobileKnownCollections)
         {
             if(!State.Collections.TryGetValue(name,out var next)){State.MobileFieldTimes.TryAdd("collectionDeleted:"+name,now);continue;}
-            foreach(var group in members.Except(next).Concat(next.Except(members))){var field="collection:"+name+":"+group;if(State.MobileFieldTimes.GetValueOrDefault(field)<=mobileKnownCollectionTimes.GetValueOrDefault(field))State.MobileFieldTimes[field]=now;}
+            foreach(var group in members.Except(next).Concat(next.Except(members))){var field="collection:"+name+":"+group;if(State.MobileFieldTimes.GetValueOrDefault(field)<=mobileKnownCollectionTimes.GetValueOrDefault(field))State.MobileFieldTimes[field]=Math.Max(now,mobileKnownCollectionTimes.GetValueOrDefault(field)+1);}
         }
+        mobileKnownCollections=State.Collections.ToDictionary(p=>p.Key,p=>new HashSet<string>(p.Value));mobileKnownCollectionTimes=State.MobileFieldTimes.Where(p=>p.Key.StartsWith("collection:")).ToDictionary(p=>p.Key,p=>p.Value);
         var history=MobileHistoryFields();foreach(var key in history.Keys.Union(mobileKnownHistory.Keys))if(history.GetValueOrDefault(key)!=mobileKnownHistory.GetValueOrDefault(key)&&State.MobileFieldTimes.GetValueOrDefault(key)<=mobileKnownHistoryTimes.GetValueOrDefault(key))State.MobileFieldTimes[key]=Math.Max(now,mobileKnownHistoryTimes.GetValueOrDefault(key)+1);
-        CaptureMobileChanges();
+        mobileKnownHistory=history;mobileKnownHistoryTimes=history.Keys.ToDictionary(k=>k,k=>State.MobileFieldTimes.GetValueOrDefault(k));
     }
     public void SetFavorites(IEnumerable<string> keys){lock(gate){State.Favorites=keys.Where(HistoryKey).Distinct().Take(4).ToList();TouchMobileField("favorites");Save();}}
     public void SetLike(string key,bool liked){if(!HistoryKey(key))return;lock(gate){if(liked)State.Likes.Add(key);else State.Likes.Remove(key);TouchMobileField("like:"+key);Save();}}

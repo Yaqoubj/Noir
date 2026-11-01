@@ -11,6 +11,11 @@ A rejected run leaves an exact copy of the input at the output path.
 the existing embedded-text-reference preference and otherwise uses ffsubsync's
 audio pipeline. No dependency or network access was added.
 
+`NoirSubtitleSync.exe <video> <subtitle> <output> --audio` always uses the
+soundtrack as the reference (ffsubsync `--reference-stream 0:a:0`). Noir uses it
+to check a subtitle track built into the video, which would otherwise be
+compared with itself.
+
 ## Decision and safeguards
 
 1. Run the existing ffsubsync global offset/frame-rate fit. Retain its success,
@@ -19,6 +24,9 @@ audio pipeline. No dependency or network access was added.
 2. Retain global precision/recall minima: 0.80/0.50 for embedded text,
    0.65/0.35 for audio. A meaningful global change (>1 s or >0.003 scale
    deviation) still needs >=0.05 absolute precision improvement over the input.
+   With `--audio` the minima are 0.55/0.50 and a meaningful change needs >=0.10
+   precision improvement: speech detection on real soundtracks caps precision
+   lower, so the floor drops only with stronger recall and a larger gain.
    Additionally, neither precision nor recall may regress against the input,
    overall or in any eligible local window.
 3. Verify non-overlapping 240 s windows, requiring >=8 fully contained cues,

@@ -1,0 +1,79 @@
+package app.noir.mobile;
+import android.app.*;
+import android.content.*;
+import android.os.SystemClock;
+import android.view.*;
+import android.view.accessibility.AccessibilityNodeInfo;
+import android.widget.*;
+import org.json.*;
+import org.junit.*;
+import java.io.*;
+import java.net.*;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.*;
+import java.util.concurrent.*;
+import static org.junit.Assert.*;
+
+public final class AuditPhoneFlowsTest {
+ AuditPhoneFixture f;Instrumentation.ActivityMonitor player;
+ @Before public void setup()throws Exception{f=new AuditPhoneFixture();player=f.test.addMonitor(PlayerActivity.class.getName(),null,true);}
+ @After public void cleanup()throws Exception{if(player!=null)f.test.removeMonitor(player);if(f!=null)f.close();}
+ JSONObject item(String id,boolean movie)throws Exception{return new JSONObject().put("id",id).put("group",id).put("title","N3 "+id).put("movie",movie).put("imdb","tt987654321").put("season",1).put("episode",1).put("inLibrary",true);}
+ // Inspect the actual dialog window/buttons on API 29+; older phones use normalized accessibility labels.
+ View dialogRoot(String text){for(View root:android.view.inspector.WindowInspector.getGlobalWindowViews())if(root.isShown()&&AuditPhoneFixture.find(root,v->v instanceof TextView&&text.equalsIgnoreCase(((TextView)v).getText().toString()))!=null)return root;return null;}
+ AccessibilityNodeInfo node(AccessibilityNodeInfo root,String text){if(root==null)return null;if(root.getText()!=null&&text.equalsIgnoreCase(root.getText().toString()))return AccessibilityNodeInfo.obtain(root);for(int n=0;n<root.getChildCount();n++){AccessibilityNodeInfo child=root.getChild(n);if(child==null)continue;try{AccessibilityNodeInfo found=node(child,text);if(found!=null)return found;}finally{child.recycle();}}return null;}
+ boolean windowText(String text){if(android.os.Build.VERSION.SDK_INT>=29)return dialogRoot(text)!=null;AccessibilityNodeInfo root=f.test.getUiAutomation().getRootInActiveWindow();if(root==null)return false;try{AccessibilityNodeInfo found=node(root,text);if(found==null)return false;found.recycle();return true;}finally{root.recycle();}}
+ void waitText(String text)throws Exception{long end=SystemClock.elapsedRealtime()+30000;boolean[] found={false};while(SystemClock.elapsedRealtime()<end){f.ui(()->found[0]=windowText(text));if(found[0])return;Thread.sleep(25);}fail("Dialog text not found: "+text);}
+ void clickButton(String marker,int which,String label)throws Exception{waitText(marker);f.ui(()->{if(android.os.Build.VERSION.SDK_INT>=29){View root=dialogRoot(marker);assertNotNull("Dialog: "+marker,root);Button button=root.findViewById(which==AlertDialog.BUTTON_POSITIVE?android.R.id.button1:which==AlertDialog.BUTTON_NEGATIVE?android.R.id.button2:android.R.id.button3);assertNotNull("Dialog button: "+label,button);assertTrue(label.equalsIgnoreCase(button.getText().toString()));assertTrue(button.isShown()&&button.isEnabled());assertTrue(button.performClick());}else{AccessibilityNodeInfo root=f.test.getUiAutomation().getRootInActiveWindow();assertNotNull(root);try{AccessibilityNodeInfo button=node(root,label);assertNotNull("Dialog button: "+label,button);try{assertTrue(button.isEnabled());assertTrue(button.performAction(AccessibilityNodeInfo.ACTION_CLICK));}finally{button.recycle();}}finally{root.recycle();}}});f.idle();}
+ void assertNoLaunch(){f.ui(()->assertFalse("Late completion reopened the stream picker",windowText(Loc.t("Choose a stream"))));assertEquals("Late completion must not launch playback",0,player.getHits());}
+ void streamConfig()throws Exception{PhoneHarbor.phoneCache=new JSONObject().put("manifest","https://noir-n3.invalid/manifest.json");PhoneHarbor.phoneAt=System.currentTimeMillis();PhoneStream.cacheProfile=f.data.profileId;}
+ @Test public void streamCancelAndBackDiscardLateResponses()throws Exception{
+  MainActivity a=f.launch(MainActivity.class);JSONObject item=f.data.rememberPhoneItem(item("late-stream",true));streamConfig();
+  for(boolean choose:new boolean[]{false,true})for(boolean back:new boolean[]{false,true})try(DelayedStreams fixture=new DelayedStreams(true)){
+   PhoneStream.Search[] search={null};f.ui(()->{PhoneStream.start(a,item,choose);search[0]=PhoneStream.searches.get(a);assertNotNull(search[0]);assertTrue(search[0].dialog.isShowing());});assertTrue("Fixture response read started",fixture.reading.await(10,TimeUnit.SECONDS));
+   f.ui(()->{if(back){KeyEvent down=new KeyEvent(KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_BACK),up=new KeyEvent(KeyEvent.ACTION_UP,KeyEvent.KEYCODE_BACK);search[0].dialog.dispatchKeyEvent(down);search[0].dialog.dispatchKeyEvent(up);}else search[0].dialog.getButton(AlertDialog.BUTTON_NEGATIVE).performClick();});f.idle();f.ui(()->{assertFalse(search[0].dialog.isShowing());assertTrue(search[0].cancel.stopped);assertFalse(PhoneStream.searches.containsKey(a));});
+   fixture.release.countDown();assertTrue("Delayed response released after dismissal",fixture.delivered.await(5,TimeUnit.SECONDS));f.until(()->PhoneStream.interactive.getActiveCount()==0);assertNoLaunch();
+  }
+ }
+ @Test public void streamCancelWinsAgainstAnAlreadyQueuedCompletion()throws Exception{
+  MainActivity a=f.launch(MainActivity.class);JSONObject item=f.data.rememberPhoneItem(item("queued-stream",true));streamConfig();for(boolean choose:new boolean[]{false,true})try(DelayedStreams fixture=new DelayedStreams(false)){
+   f.ui(()->{PhoneStream.start(a,item,choose);PhoneStream.Search search=PhoneStream.searches.get(a);assertNotNull(search);try{search.future.get(5,TimeUnit.SECONDS);assertEquals(0,fixture.delivered.getCount());}catch(Exception e){throw new AssertionError("Fixture must finish while its UI callback is queued",e);}
+    // AlertDialog posts button listeners; call the same entry point while completion is still queued.
+    PhoneStream.cancel(a);assertTrue(search.cancel.stopped);assertFalse(search.dialog.isShowing());assertFalse(PhoneStream.searches.containsKey(a));});f.idle();assertNoLaunch();
+  }
+ }
+ @Test public void navigationAndProfileChangeDiscardLateStreamResponses()throws Exception{
+  MainActivity a=f.launch(MainActivity.class);JSONObject item=f.data.rememberPhoneItem(item("leaving-stream",true));streamConfig();
+  try(DelayedStreams fixture=new DelayedStreams(true)){f.ui(()->PhoneStream.start(a,item,true));assertTrue(fixture.reading.await(10,TimeUnit.SECONDS));ProfilesActivity next=f.launch(ProfilesActivity.class);f.ui(()->assertFalse(PhoneStream.searches.containsKey(a)));fixture.release.countDown();assertTrue(fixture.delivered.await(5,TimeUnit.SECONDS));f.until(()->PhoneStream.interactive.getActiveCount()==0);assertNoLaunch();f.ui(next::finish);f.idle();}
+  String id=f.data.profiles.create("N3 switch","#E4C084").optString("id");DownloadStore original=NoirApp.downloads;DataStore switched=null;
+  try(DelayedStreams fixture=new DelayedStreams(true)){streamConfig();f.ui(()->PhoneStream.start(a,item,true));assertTrue(fixture.reading.await(10,TimeUnit.SECONDS));NoirApp.switchProfile(f.context,id,"");switched=NoirApp.data;fixture.release.countDown();assertTrue(fixture.delivered.await(5,TimeUnit.SECONDS));f.until(()->PhoneStream.interactive.getActiveCount()==0);assertNoLaunch();}finally{f.ui(()->PhoneStream.cancel(a));NoirApp.data=f.data;NoirApp.downloads=original;f.data.profiles.select(ProfileStore.DEFAULT,"");if(switched!=null){NoirApp.forgetProfile(id);assertTrue(switched.network.awaitTermination(10,TimeUnit.SECONDS));assertTrue(switched.images.awaitTermination(10,TimeUnit.SECONDS));switched.flush();}}
+ }
+ @Test public void profileDeleteCancelKeepsCopiesAndConfirmedDeleteStopsTransfer()throws Exception{
+  ProfileStore profiles=f.data.profiles;JSONObject profile=profiles.create("N3 downloads","#E4C084");String id=profile.optString("id");Context scoped=ProfileStore.context(f.context,id);File internal=new File(scoped.getFilesDir(),"offline"),external=new File(scoped.getExternalFilesDir(null),"offline");assertTrue(internal.mkdirs());assertTrue(external.mkdirs());File video=new File(external,"fixture.video"),part=new File(internal,"fixture.part"),keep=new File(external,"keep.txt");Files.write(video.toPath(),new byte[4096]);Files.write(part.toPath(),new byte[17]);Files.write(keep.toPath(),new byte[3]);File queue=new File(scoped.getFilesDir(),"downloads.json");Files.write(queue.toPath(),"[{\"id\":\"active\",\"status\":\"downloading\"}]".getBytes(StandardCharsets.UTF_8));DownloadStore store=new DownloadStore(scoped);boolean[] stopped={false};store.activeId="active";store.activeConnection=new HttpURLConnection(new URL("https://noir-n3.invalid/active")){public void disconnect(){stopped[0]=video.isFile()&&part.isFile();store.activeId="";}public void connect(){}public boolean usingProxy(){return false;}};synchronized(NoirApp.class){NoirApp.downloadStores.put(id,new java.lang.ref.WeakReference<>(store));}
+  ProfilesActivity a=f.launch(ProfilesActivity.class);String size=android.text.format.Formatter.formatFileSize(a,4113),message=Loc.f("Downloads on this phone: %s. Deleting the profile also deletes these copies. Cancel to keep them.",size);
+  try{f.ui(()->{a.profiles=profiles;a.render();View row=AuditPhoneFixture.find(a.body,v->"N3 downloads".equals(v.getContentDescription()));assertNotNull(row);AuditPhoneFixture.click(row,"Edit");});clickButton(Loc.t("Edit profile"),AlertDialog.BUTTON_NEUTRAL,Loc.t("Delete"));waitText(message);clickButton(message,AlertDialog.BUTTON_NEGATIVE,Loc.t("Cancel"));assertTrue(video.isFile());assertTrue(part.isFile());assertTrue(queue.isFile());assertNotNull(profiles.get(id));assertFalse(stopped[0]);
+   f.ui(()->ProfilesActivity.confirmDelete(a,profiles,id,a::render));waitText(message);clickButton(message,AlertDialog.BUTTON_POSITIVE,Loc.t("Delete profile and downloads"));f.until(()->DataStore.objects(profiles.list()).stream().noneMatch(p->id.equals(p.optString("id"))));assertTrue("Transfer stopped before managed copies were removed",stopped[0]);assertFalse(video.exists());assertFalse(part.exists());assertFalse(queue.exists());assertTrue("Unmanaged file is retained",keep.isFile());
+  }finally{synchronized(NoirApp.class){NoirApp.downloadStores.remove(id);}}
+ }
+ @Test public void profileCleanupFailureKeepsTheProfile()throws Exception{
+  ProfileStore profiles=f.data.profiles;String id=profiles.create("N3 failed cleanup","#E4C084").optString("id");File directory=new File(ProfileStore.context(f.context,id).getFilesDir(),"offline");assertTrue(directory.mkdirs());File video=new File(directory,"blocked.video");Files.write(video.toPath(),new byte[9]);ProfilesActivity a=f.launch(ProfilesActivity.class);boolean[] done={false};android.system.Os.chmod(directory.getPath(),0500);
+  try{assertFalse("Fixture directory denies deletion",video.delete());f.ui(()->ProfilesActivity.confirmDelete(a,profiles,id,()->done[0]=true));clickButton(Loc.t("Delete this phone profile?"),AlertDialog.BUTTON_POSITIVE,Loc.t("Delete profile and downloads"));waitText(Loc.t("Couldn't delete downloads. Check storage and try again."));assertNotNull(profiles.get(id));assertTrue(video.isFile());assertFalse(done[0]);clickButton(Loc.t("Couldn't delete downloads. Check storage and try again."),AlertDialog.BUTTON_POSITIVE,Loc.t("OK"));}finally{android.system.Os.chmod(directory.getPath(),0700);}
+ }
+ @Test public void libraryRemovalRetainsTheDownloadAndItsDownloadsRow()throws Exception{
+  JSONObject item=f.data.rememberPhoneItem(item("retained-copy",true));DownloadStore store=NoirApp.downloads;store.enqueue(item);File video=store.file(item.optString("id"),false);Files.write(video.toPath(),new byte[4]);f.data.localFile(item.optString("id"),android.net.Uri.fromFile(video).toString());store.update(item.optString("id"),"complete",4,4,"","");MainActivity a=f.launch(MainActivity.class);
+  f.ui(()->{a.page="Library";a.render();a.removeFromLibrary(item,a.group(item.optString("group")));});clickButton("Remove "+item.optString("title")+" from your library?",AlertDialog.BUTTON_POSITIVE,"Remove");f.ui(()->{assertFalse(a.inLibrary(a.group(item.optString("group"))));assertNull(AuditPhoneFixture.find(a.body,v->v.getContentDescription()!=null&&(item.optString("title")+" · "+Loc.t("Details")).contentEquals(v.getContentDescription())));});assertTrue(video.isFile());assertEquals("complete",store.job(item.optString("id")).optString("status"));assertFalse(f.data.localFile(item.optString("id")).isEmpty());DownloadsActivity downloads=f.launch(DownloadsActivity.class);f.ui(()->{assertTrue("Retained copy remains reachable in Downloads",downloads.labels.containsKey(item.optString("id")));assertNotNull(AuditPhoneFixture.find(downloads.body,v->v instanceof TextView&&((TextView)v).getText().toString().contains(item.optString("title"))));});
+ }
+ @Test public void trackerLongShowBuildsOnlyThePickedSeason()throws Exception{
+  List<JSONObject> episodes=new ArrayList<>();for(int s=1;s<=40;s++)for(int e=1;e<=10;e++)episodes.add(new JSONObject().put("id","long-"+s+"-"+e).put("group","long-show").put("title","N3 Long show").put("season",s).put("episode",e).put("airsAt","2020-01-01T00:00:00Z"));f.data.rememberPhoneItems(episodes);f.data.phoneSetting("historyOnly",true);MainActivity a=f.launch(MainActivity.class);f.ui(()->{a.open(episodes.get(0));assertEquals(10,episodeRows(a).size());Spinner picker=(Spinner)AuditPhoneFixture.find(a.body,v->v instanceof Spinner);assertNotNull(picker);picker.setSelection(39);});f.until(()->a.detailSeason==40);f.ui(()->{assertEquals(10,episodeRows(a).size());for(View row:episodeRows(a))assertTrue(((TextView)row).getText().toString().startsWith("S40 E"));});MainActivity b=f.recreate(a);f.ui(()->{assertEquals(40,b.detailSeason);assertEquals(10,episodeRows(b).size());for(View row:episodeRows(b))assertTrue(((TextView)row).getText().toString().startsWith("S40 E"));});
+ }
+ List<View> episodeRows(MainActivity a){return AuditPhoneFixture.all(a.body,v->v instanceof TextView&&((TextView)v).getText().toString().matches("S[0-9]{2} E[0-9]{2}.*"));}
+
+ // Intentionally return late bytes even after interruption, so the real cancellation guards are exercised.
+ final class DelayedStreams implements PhoneStream.StreamFetch,AutoCloseable {
+  final PhoneStream.StreamFetch previous=PhoneStream.fetchOverride;final CountDownLatch reading=new CountDownLatch(1),release=new CountDownLatch(1),delivered=new CountDownLatch(1);final byte[] bytes="{\"streams\":[{\"name\":\"cached 1080p\",\"url\":\"https://noir-n3.invalid/video\"}]}".getBytes(StandardCharsets.UTF_8);
+  DelayedStreams(boolean delay)throws Exception{List<JSONObject> options=PhoneStream.rank(PhoneDownloadProvider.parse(new JSONObject(new String(bytes,StandardCharsets.UTF_8)),item("fixture",true),new JSONObject()),"1080p",true);assertEquals(1,options.size());assertTrue("Fixture must exercise cached autoplay",options.get(0).optBoolean("cached"));if(!delay)release.countDown();PhoneStream.fetchOverride=this;}
+  @Override public byte[] fetch(String url,int max)throws Exception{assertEquals("https://noir-n3.invalid/stream/movie/tt987654321.json",url);assertEquals(8*1024*1024,max);reading.countDown();long end=SystemClock.elapsedRealtime()+30000;boolean interrupted=false;try{while(release.getCount()>0&&SystemClock.elapsedRealtime()<end)try{release.await(25,TimeUnit.MILLISECONDS);}catch(InterruptedException ignored){interrupted=true;}if(release.getCount()>0)throw new IOException("Fixture release timed out");delivered.countDown();return bytes;}finally{if(interrupted)Thread.currentThread().interrupt();}}
+  @Override public void close()throws Exception{try{f.ui(()->{for(Activity a:f.activities)PhoneStream.cancel(a);});release.countDown();f.until(()->PhoneStream.interactive.getActiveCount()==0&&PhoneStream.interactive.getQueue().isEmpty());}finally{release.countDown();PhoneStream.fetchOverride=previous;}}
+ }
+}

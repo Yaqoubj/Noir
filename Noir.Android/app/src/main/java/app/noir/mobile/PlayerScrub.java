@@ -25,6 +25,8 @@ final class PlayerScrub {
   if(!frames)return;int slot=(int)(Math.max(0,seconds)/10)*10;if(slot==wanted)return;wanted=slot;Bitmap hit=cache.get(slot);image.setImageBitmap(hit);if(hit!=null)return;
   worker.execute(()->{if(wanted!=slot)return;Bitmap b=frame(slot);if(b!=null)cache.put(slot,b);a.handler.post(()->{if(wanted==slot&&b!=null&&!a.destroyed)image.setImageBitmap(b);});});}
  void hide(){wanted=-1;box.setVisibility(View.GONE);}
+ // Remote seeks never fetch or decode: reuse a thumbnail only when it is already in memory.
+ void showCached(double seconds,String chapter,int bottomOffset){int slot=(int)(Math.max(0,seconds)/10)*10;Bitmap hit=cache.get(slot);if(hit==null){hide();return;}wanted=slot;image.setVisibility(View.VISIBLE);image.setImageBitmap(hit);label.setText(DataStore.time(seconds)+(chapter.isEmpty()?"":" · "+chapter));FrameLayout.LayoutParams p=(FrameLayout.LayoutParams)box.getLayoutParams();p.gravity=Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL;p.leftMargin=0;p.bottomMargin=bottomOffset;box.setLayoutParams(p);box.setVisibility(View.VISIBLE);}
  Bitmap frame(int slot){String id=a.item.optString("id"),local=a.data.localFile(id);
   try{if(!local.isEmpty()){if(retriever==null){retriever=new MediaMetadataRetriever();if(local.startsWith("file:"))retriever.setDataSource(Uri.parse(local).getPath());else retriever.setDataSource(a,Uri.parse(local));}
     Bitmap raw=retriever.getFrameAtTime(slot*1000000L,MediaMetadataRetriever.OPTION_CLOSEST_SYNC);if(raw==null)return null;Bitmap small=Bitmap.createScaledBitmap(raw,320,Math.max(1,320*raw.getHeight()/Math.max(1,raw.getWidth())),true);if(small!=raw)raw.recycle();return small;}

@@ -184,7 +184,9 @@ public sealed class MediaServers(HttpClient? client=null)
     }
     static string FileName(string path)=>path.Replace('\\','/').Split('/').LastOrDefault()??"";
     static string Authorization(MediaServerAccount s)=>"MediaBrowser Client=\"Noir\", Device=\"Windows PC\", DeviceId=\""+s.DeviceId+"\", Version=\"1.0\""+(s.Token.Length>0?", Token=\""+s.Token+"\"":"");
-    async Task<JsonElement> Send(MediaServerAccount server,string path,HttpContent? content,CancellationToken ct)
+    Task<JsonElement> Send(MediaServerAccount server,string path,HttpContent? content,CancellationToken ct)
+        =>content==null?PlanningRequests.Read(this,JsonSerializer.Serialize(server)+"|"+path,()=>SendCore(server,path,null,ct)):SendCore(server,path,content,ct);
+    async Task<JsonElement> SendCore(MediaServerAccount server,string path,HttpContent? content,CancellationToken ct)
     {
         var url=BaseUrl(server.BaseUrl)+path;if(!DownloadSecurity.ValidUrl(url,server.BaseUrl))throw new IOException("The media server address is invalid.");
         using var request=new HttpRequestMessage(content==null?HttpMethod.Get:HttpMethod.Post,url){Content=content};request.Headers.TryAddWithoutValidation("Accept","application/json");
@@ -205,4 +207,16 @@ public sealed class MediaServers(HttpClient? client=null)
     static string Scalar(JsonElement e,string key)=>e.TryGetProperty(key,out var v)?v.ToString():"";
     static long Number(JsonElement e,string key)=>e.ValueKind==JsonValueKind.Object&&e.TryGetProperty(key,out var v)&&v.ValueKind==JsonValueKind.Number&&v.TryGetInt64(out var n)?n:0;
     static bool Flag(JsonElement e,string key)=>e.TryGetProperty(key,out var v)&&(v.ValueKind==JsonValueKind.True||v.ValueKind==JsonValueKind.Number&&v.GetInt32()==1);
+}
+
+internal static class PlanningRequests
+{
+    static readonly AsyncLocal<Scope?> current=new();
+    sealed class Scope(Scope? previous):IDisposable
+    {
+        public readonly System.Collections.Concurrent.ConcurrentDictionary<(object Owner,string Key,Type Type),object> Requests=new();
+        public void Dispose()=>current.Value=previous;
+    }
+    public static IDisposable Begin(){var scope=new Scope(current.Value);current.Value=scope;return scope;}
+    public static Task<T> Read<T>(object owner,string key,Func<Task<T>> fetch)=>current.Value is {} scope?((Lazy<Task<T>>)scope.Requests.GetOrAdd((owner,key,typeof(T)),_=>new Lazy<Task<T>>(fetch))).Value:fetch();
 }

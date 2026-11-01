@@ -12,6 +12,7 @@ public sealed class RealDebridProvider(Func<DownloadCredentials> config,HttpClie
     readonly HttpClient http=client??DownloadSecurity.Client(TimeSpan.FromSeconds(45));
     readonly SemaphoreSlim metadata=new(1);
     readonly Dictionary<string,string> ids=new(StringComparer.OrdinalIgnoreCase);
+    readonly object accountGate=new();
     readonly System.Collections.Concurrent.ConcurrentDictionary<long,string> handles=new();
     readonly System.Collections.Concurrent.ConcurrentDictionary<string,bool> downloaded=new(StringComparer.OrdinalIgnoreCase);
     string accountKey="";
@@ -51,6 +52,16 @@ public sealed class RealDebridProvider(Func<DownloadCredentials> config,HttpClie
         }
         return new(){Releases=merged,Sources=result.SelectMany(r=>r.Sources).ToList()};
     }
+    string Account()
+    {
+        var key=config().Key;lock(accountGate){if(accountKey!=key){ids.Clear();handles.Clear();downloaded.Clear();accountKey=key;}return key;}
+    }
+    Task<List<JsonElement>> Listing(CancellationToken ct)
+    {
+        var key=Account();return PlanningRequests.Read(this,"torrents|"+key,async()=>{
+            var all=await Torrents(ct);lock(accountGate){if(Account()==key){ids.Clear();downloaded.Clear();foreach(var t in all){var hash=Text(t,"hash");var id=Text(t,"id");if(hash.Length>0&&id.Length>0)ids.TryAdd(hash,id);if(Text(t,"status")=="downloaded")downloaded[hash]=true;}}}return all;
+        });
+    }
     async Task<List<JsonElement>> Torrents(CancellationToken ct)
     {
         var result=new List<JsonElement>();
@@ -59,10 +70,10 @@ public sealed class RealDebridProvider(Func<DownloadCredentials> config,HttpClie
     }
     async Task<List<IndexedRelease>> Library(VideoItem item,bool season,CancellationToken ct)
     {
-        downloaded.Clear();var all=await Torrents(ct);foreach(var t in all.Where(t=>Text(t,"status")=="downloaded"))downloaded[Text(t,"hash")]=true;using var slots=new SemaphoreSlim(3);
+        var all=await Listing(ct);using var slots=new SemaphoreSlim(3);
         var tasks=all.Where(t=>Regex.IsMatch(Text(t,"hash"),@"\A[a-fA-F0-9]{40}\z")&&Candidate(item,Text(t,"filename"))).Select(async t=>{
             await slots.WaitAsync(ct);try{
-                var id=Text(t,"id");var info=await Api("torrents/info/"+Uri.EscapeDataString(id),null,ct);var files=ReadFiles(info);
+                var id=Text(t,"id");var info=await PlanningRequests.Read(this,"info|"+Account()+"|"+id,()=>Api("torrents/info/"+Uri.EscapeDataString(id),null,ct));var files=ReadFiles(info);
                 using var normalized=JsonDocument.Parse(JsonSerializer.Serialize(new{name=Text(t,"filename"),files=files.Select(f=>new{id=f.Id,name=f.Name,size=f.Size})}));if(!TorboxProvider.AccountMatch(item,normalized.RootElement,season))return null;
                 var hash=Text(t,"hash").ToLowerInvariant();
                 var ready=Text(info,"status")=="downloaded";var name=DownloadSecurity.SafeText(Text(t,"filename"),config());return new IndexedRelease(new(){Id=Guid.NewGuid().ToString("N"),Name=name,Size=files.Where(f=>DownloadNaming.Video(f.Name)).Sum(f=>f.Size),SizeKind="Pack",Cached=ready,CacheStatus=ready?"Ready":"Unknown",Sources=["Real-Debrid library"],Resolution=TorboxProvider.Resolution(name),ReferenceSeason=item.Season,ReferenceEpisode=item.Episode},hash);
@@ -78,13 +89,13 @@ public sealed class RealDebridProvider(Func<DownloadCredentials> config,HttpClie
     {
         if(!Regex.IsMatch(hash,@"\A[a-fA-F0-9]{40}\z"))throw new IOException("This release has no valid torrent identity.");
         await metadata.WaitAsync(ct);try{
-            if(accountKey!=config().Key){ids.Clear();handles.Clear();accountKey=config().Key;}
-            if(!ids.TryGetValue(hash,out var id)){
-                var existing=(await Torrents(ct)).FirstOrDefault(t=>Text(t,"hash").Equals(hash,StringComparison.OrdinalIgnoreCase));id=Text(existing,"id");
+            var key=Account();string? id;lock(accountGate)ids.TryGetValue(hash,out id);
+            if(id==null){
+                var existing=(await Listing(ct)).FirstOrDefault(t=>Text(t,"hash").Equals(hash,StringComparison.OrdinalIgnoreCase));id=Text(existing,"id");
                 if(id.Length==0){var added=await Api("torrents/addMagnet",new FormUrlEncodedContent(new Dictionary<string,string>{{"magnet","magnet:?xt=urn:btih:"+hash}}),ct);id=Text(added,"id");}
-                if(id.Length==0)throw new IOException("Real-Debrid didn't return a torrent ID. Check your account limits.");ids[hash]=id;
+                if(id.Length==0)throw new IOException("Real-Debrid didn't return a torrent ID. Check your account limits.");lock(accountGate)if(Account()==key)ids[hash]=id;
             }
-            var info=await Api("torrents/info/"+Uri.EscapeDataString(id),null,ct);if(!Text(info,"hash").Equals(hash,StringComparison.OrdinalIgnoreCase))throw new IOException("Real-Debrid returned a different release.");return(id,info);
+            var info=await PlanningRequests.Read(this,"info|"+key+"|"+id,()=>Api("torrents/info/"+Uri.EscapeDataString(id),null,ct));if(!Text(info,"hash").Equals(hash,StringComparison.OrdinalIgnoreCase))throw new IOException("Real-Debrid returned a different release.");return(id,info);
         }finally{metadata.Release();}
     }
     public async Task<List<TorboxFile>> Files(string hash,CancellationToken ct)
@@ -103,7 +114,7 @@ public sealed class RealDebridProvider(Func<DownloadCredentials> config,HttpClie
     }
     public async Task<string> Link(long torrentId,long fileId,CancellationToken ct)
     {
-        if(!handles.TryGetValue(torrentId,out var id))throw new IOException("Refresh this Real-Debrid release before retrying.");
+        Account();if(!handles.TryGetValue(torrentId,out var id))throw new IOException("Refresh this Real-Debrid release before retrying.");
         var info=await Api("torrents/info/"+Uri.EscapeDataString(id),null,ct);if(Text(info,"status")!="downloaded")throw new IOException("Real-Debrid is still fetching this release. Resume shortly.");
         var selected=info.GetProperty("files").EnumerateArray().Where(Selected).ToList();var index=selected.FindIndex(f=>Number(f,"id")==fileId);
         if(index<0||!info.TryGetProperty("links",out var links)||index>=links.GetArrayLength())throw new IOException("Real-Debrid's selected files changed. Search again.");
@@ -119,8 +130,8 @@ public sealed class RealDebridProvider(Func<DownloadCredentials> config,HttpClie
     async Task<JsonElement> Api(string path,HttpContent? content,CancellationToken ct)
     {
         try{
-            if(config().Key.Length==0)throw new IOException("Add your Real-Debrid token in PC Settings first.");
-            using var request=new HttpRequestMessage(content==null?HttpMethod.Get:HttpMethod.Post,"https://api.real-debrid.com/rest/1.0/"+path){Content=content};request.Headers.Authorization=new AuthenticationHeaderValue("Bearer",config().Key);
+            var key=Account();if(key.Length==0)throw new IOException("Add your Real-Debrid token in PC Settings first.");
+            using var request=new HttpRequestMessage(content==null?HttpMethod.Get:HttpMethod.Post,"https://api.real-debrid.com/rest/1.0/"+path){Content=content};request.Headers.Authorization=new AuthenticationHeaderValue("Bearer",key);
             using var response=await http.SendAsync(request,ct);
             if(!response.IsSuccessStatusCode)throw new IOException(response.StatusCode switch{HttpStatusCode.Unauthorized=>"Real-Debrid rejected this token. Update it in PC Settings.",HttpStatusCode.Forbidden=>"Real-Debrid requires permission and an active premium account for this request.",HttpStatusCode.TooManyRequests=>"Real-Debrid is busy. Wait a minute before retrying.",HttpStatusCode.ServiceUnavailable=>"Real-Debrid is temporarily unavailable. Retry shortly.",_=>$"Real-Debrid couldn't complete this request ({(int)response.StatusCode}). Check your account limits."});
             if(response.StatusCode==HttpStatusCode.NoContent)return default;

@@ -62,8 +62,11 @@ public partial class MainWindow
     void WarmSmartCredits(List<List<VideoItem>> groups)
     {
         var directory=store.DataDirectory;var folder=Path.Combine(directory,"credits");var stamp=Directory.Exists(folder)?Directory.GetLastWriteTimeUtc(folder):DateTime.MinValue;if(smartCreditsLoading||smartCreditsDirectory==directory&&smartCreditsStamp==stamp)return;smartCreditsLoading=true;var items=store.Archive.DistinctBy(i=>i.GroupKey).ToList();
-        _=Task.Run(()=>{var cache=new Dictionary<string,TitleCredits>();foreach(var item in items){var credits=SmartLists.CachedCredits(directory,item);if(credits.Cast.Count+credits.Directors.Count>0)cache[item.GroupKey]=credits;}return cache;}).ContinueWith(task=>Dispatcher.InvokeAsync(()=>{smartCreditsLoading=false;if(closing||store.DataDirectory!=directory||!task.IsCompletedSuccessfully)return;smartCredits=task.Result;smartCreditsDirectory=directory;smartCreditsStamp=stamp;Render();}));
+        _=Task.Run(()=>{var cache=new Dictionary<string,TitleCredits>();foreach(var item in items){var credits=SmartLists.CachedCredits(directory,item);if(credits.Cast.Count+credits.Directors.Count>0)cache[item.GroupKey]=credits;}return cache;}).ContinueWith(task=>Dispatcher.InvokeAsync(()=>{if(closing||store.DataDirectory!=directory||!task.IsCompletedSuccessfully){smartCreditsLoading=false;return;}
+            // Redraw only when the credits change a smart row; an unconditional Render rebuilt Home a second time on every startup.
+            var before=SmartRowsSignature(BuildSmartRows(groups));smartCredits=task.Result;smartCreditsDirectory=directory;smartCreditsStamp=stamp;var after=SmartRowsSignature(BuildSmartRows(groups));smartCreditsLoading=false;if(before!=after)Render();}));
     }
+    static string SmartRowsSignature(Dictionary<string,List<SmartPick>> rows)=>string.Join(";",rows.OrderBy(r=>r.Key).Select(r=>r.Key+":"+string.Join(",",r.Value.Select(p=>p.Key+"/"+p.Reason+"/"+p.EpisodeId))));
     Dictionary<string,List<SmartPick>> BuildSmartRows(List<List<VideoItem>> groups)
     {
         WarmSmartCredits(groups);var now=DateTimeOffset.UtcNow;var stream=CanStream;return SmartLists.Build(groups.Where(g=>g.Count>0).Select(g=>SmartLists.Read(store,g,smartCredits.GetValueOrDefault(g[0].GroupKey)?.Directors.Select(p=>p.Name).ToList(),i=>stream&&SmartLists.StreamReady(store.DataDirectory,i.Id,now)&&store.Aired(i,now)||CanPlay(i))),now,Loc.Arabic);

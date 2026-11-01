@@ -79,10 +79,10 @@ public partial class MainWindow
     void RenderDetail(List<VideoItem> group)
     {
         var choice=ChoiceFor(group);PageTitle.Text=choice.Title;
-        var backPage=page is "History" or "My List"?page:choice.IsMovie?"Movies":"Shows";
+        var backPage=detailOrigin?.Page??(page is "History" or "My List"?page:choice.IsMovie?"Movies":"Shows");
         ContentPanel.Children.Add(Hero(choice,group,store.ContinueFor(group)!=null));
         if(CatchUpCard(group) is {} recap)ContentPanel.Children.Add(recap);
-        var back=ActionButton("←  Back to "+backPage,()=>Navigate(backPage));back.Background=Brush("Transparent");back.Foreground=Brush("#AAA6A0");back.Padding=new(0,4,0,4);back.HorizontalAlignment=HorizontalAlignment.Left;
+        var back=ActionButton(T("←  Back to {0}","←  العودة إلى {0}",T(backPage)),()=>BackFromDetails(backPage));back.Background=Brush("Transparent");back.Foreground=Brush("#AAA6A0");back.Padding=new(0,4,0,4);back.HorizontalAlignment=HorizontalAlignment.Left;
         ContentPanel.Children.Add(DetailActions(choice,group,back));
         if(ReadyTitleInfo(choice.GroupKey) is {} readyInfo)ContentPanel.Children.Add(Body(readyInfo,12));
         if(downloads!=null&&!TrackerOnly&&store.State.Watchlist.Contains(choice.GroupKey))ContentPanel.Children.Add(AlsoDownloadToggle(choice));
@@ -158,7 +158,7 @@ public partial class MainWindow
         var play=ActionButton(stream?"▶ Stream":!available?"↓ Download":bookmark is {Completed:false,Position:>0}?"▶ Resume":"▶ Play",()=>{if(available)_=PlayVideo(item);else if(stream)StreamItem(item);else FindDownloads(item);},true);play.MinWidth=100;actions.Children.Add(play);
         if(stream){var get=ActionButton("↓",()=>FindDownloads(item));get.ToolTip=T("Download to this PC");get.Margin=new(8,0,0,0);actions.Children.Add(get);}
         var reviews=ActionButton("Reviews",()=>OpenReviews(item));reviews.Margin=new(8,0,0,0);actions.Children.Add(reviews);
-        var seen=store.EverWatched(item);var mark=CheckCircle(seen,seen?"Mark unwatched":"Mark watched",()=>{if(seen)SmartWatchedClick(item);else SmartCheckOff(item,item.Label+" watched");},36);mark.Margin=new(12,0,0,0);actions.Children.Add(mark);
+        var seen=store.EverWatched(item);var mark=CheckCircle(seen,seen?"Mark unwatched":"Mark watched",()=>{if(seen)SmartWatchedClick(item);else SmartCheckOff(item,item.Label+" watched");},36);mark.Margin=new(12,0,0,0);actions.Children.Add(mark);actions.Children.Add(MoreButton(item));
         Grid.SetColumn(actions,2);g.Children.Add(actions);
         g.RowDefinitions.Add(new(){Height=GridLength.Auto});g.RowDefinitions.Add(new(){Height=GridLength.Auto});
         g.SizeChanged+=(_,_)=>{var small=g.ActualWidth<760;g.ColumnDefinitions[0].Width=new GridLength(small?120:160);still.Width=small?104:144;still.Height=still.Width*9/16;Grid.SetRow(actions,small?1:0);Grid.SetColumn(actions,small?1:2);Grid.SetColumnSpan(actions,small?2:1);actions.Margin=new Thickness(0,small?10:0,0,0);};
@@ -269,7 +269,9 @@ public partial class MainWindow
     {
         RenderBackgroundSettings();
         ContentPanel.Children.Add(Heading("Keyboard shortcuts"));
-        ContentPanel.Children.Add(Body("Space · Play / pause\n← / → · Seek 10 seconds\n↑ / ↓ · Change volume\nF · Fullscreen\nEscape · Leave fullscreen or return to library\nM · Mute\nI · Skip a known intro",14));
+        ContentPanel.Children.Add(Body(T("Press ? anywhere in Noir to see these. In the library:","اضغط ? في أي مكان في Noir لعرضها. في المكتبة:"),12));ContentPanel.Children.Add(ShortcutRows(LibraryShortcuts,false));
+        ContentPanel.Children.Add(Body(T("In the player:","في المشغّل:"),12));ContentPanel.Children.Add(ShortcutRows(PlayerShortcuts,false));
+        var sheet=ActionButton(T("Shortcuts & tips","الاختصارات والنصائح"),()=>ToggleShortcutSheet(false));sheet.Margin=new(0,6,0,0);ContentPanel.Children.Add(sheet);
         var appVersion=typeof(App).Assembly.GetName().Version?.ToString(3)??"";
         ContentPanel.Children.Add(Heading("Noir "+appVersion,"Built for your local library. Playback powered by VLC."));
         ContentPanel.Children.Add(Body("TV information: TVmaze (CC BY-SA). Movie information: Wikipedia (CC BY-SA). Source links are saved with each title. Artwork belongs to its respective owners.",12));

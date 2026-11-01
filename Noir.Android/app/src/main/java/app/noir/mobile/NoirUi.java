@@ -15,7 +15,7 @@ import java.util.*;
 // landscape "continue" cards that know the next step, poster cards and the Stats view.
 final class NoirUi {
  final MainActivity a;
- NoirUi(MainActivity activity){a=activity;}
+ NoirUi(MainActivity activity){a=activity;PhoneTips.init();}
  static final String RESUME="resume",READY="ready",MISSING="missing",UPCOMING="upcoming";
  static final class Next{JSONObject item;String kind;long activity;long airsAt;Next(JSONObject i,String k,long at,long airs){item=i;kind=k;activity=at;airsAt=airs;}}
 
@@ -73,7 +73,7 @@ final class NoirUi {
   if(cards.isEmpty())return;
   LinearLayout header=new LinearLayout(a);header.setGravity(Gravity.BOTTOM);header.setPadding(0,a.dp(26),0,a.dp(12));
   LinearLayout titles=a.column();TextView t=a.text(title,20,MainActivity.WHITE);t.setTypeface(null,Typeface.BOLD);titles.addView(t);if(!subtitle.isEmpty())titles.addView(a.text(subtitle,12,MainActivity.MUTED));header.addView(titles,new LinearLayout.LayoutParams(0,-2,1));
-  if(seeAll!=null){TextView all=a.text("See all ›",13,MainActivity.GOLD);all.setPadding(a.dp(10),a.dp(6),0,a.dp(6));all.setOnClickListener(v->seeAll.run());header.addView(all);}
+  if(seeAll!=null){TextView all=a.text("See all ›",13,MainActivity.GOLD);all.setMinWidth(a.dp(48));all.setMinHeight(a.dp(48));all.setGravity(Gravity.CENTER);all.setPadding(a.dp(10),a.dp(6),0,a.dp(6));all.setOnClickListener(v->seeAll.run());header.addView(all);}
   host.addView(header);LinearLayout strip=new LinearLayout(a);for(View c:cards)strip.addView(c);host.addView(row(strip));
  }
  FrameLayout art(JSONObject i,boolean portrait,int w,int h){FrameLayout f=new FrameLayout(a);f.setClipToOutline(true);f.setBackground(MainActivity.bg(MainActivity.PANEL,a.dp(14)));f.addView(a.poster(i,portrait),new FrameLayout.LayoutParams(-1,-1));f.setLayoutParams(new LinearLayout.LayoutParams(w,h));return f;}
@@ -89,7 +89,9 @@ final class NoirUi {
   if(n.kind.equals(RESUME)&&d>0&&d-MainActivity.position(i)>=60){TextView left=pill(Loc.minutesLeft((int)((d-MainActivity.position(i))/60)),MainActivity.WHITE,Color.argb(200,12,12,14));FrameLayout.LayoutParams lp=new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.END);lp.setMargins(0,a.dp(10),a.dp(10),0);art.addView(left,lp);}
   if(n.kind.equals(RESUME)&&d>0){ProgressBar bar=new ProgressBar(a,null,android.R.attr.progressBarStyleHorizontal);bar.setMax(1000);bar.setProgress((int)(1000*MainActivity.position(i)/d));bar.setProgressTintList(android.content.res.ColorStateList.valueOf(MainActivity.GOLD));art.addView(bar,new FrameLayout.LayoutParams(-1,a.dp(6),Gravity.BOTTOM));}
   art.setContentDescription(action(n)+" · "+i.optString("title")+" "+MainActivity.episode(i));art.setOnClickListener(v->act(n));card.addView(art);
-  TextView title=a.text(i.optString("title"),15,MainActivity.WHITE);title.setTypeface(null,Typeface.BOLD);title.setSingleLine();title.setEllipsize(TextUtils.TruncateAt.END);title.setPadding(0,a.dp(9),0,a.dp(2));title.setOnClickListener(v->a.open(i));card.addView(title);
+  TextView title=a.text(i.optString("title"),15,MainActivity.WHITE);title.setTypeface(null,Typeface.BOLD);title.setSingleLine();title.setEllipsize(TextUtils.TruncateAt.END);title.setPadding(0,a.dp(9),0,a.dp(2));title.setOnClickListener(v->a.open(i));
+  // Long-press still works; the ⋯ makes the same actions visible.
+  if(i.optBoolean("placeholder"))card.addView(title);else{LinearLayout line=new LinearLayout(a);line.setGravity(Gravity.CENTER_VERTICAL);line.addView(title,new LinearLayout.LayoutParams(0,-2,1));line.addView(more(i.optString("title")+" "+MainActivity.episode(i),()->a.options(i)));card.addView(line);}
   TextView sub=a.text(MainActivity.episode(i)+" · "+action(n),12,n.kind.equals(MISSING)?MainActivity.GOLD:MainActivity.MUTED);sub.setSingleLine();sub.setEllipsize(TextUtils.TruncateAt.END);card.addView(sub);
   View recap=PhoneCatchUp.card(a,a.group(i.optString("group")),true);if(recap!=null)card.addView(recap);
   card.setOnLongClickListener(v->{if(!i.optBoolean("placeholder"))a.options(i);return true;});return card;
@@ -164,7 +166,9 @@ final class NoirUi {
   card.addView(actions);return card;
  }
  static String compact(JSONObject i){return String.format(Locale.ROOT,"S%02dE%02d",i.optInt("season"),i.optInt("episode"));}
- TextView small(String s,Runnable action,boolean primary){TextView t=a.text(s,12,primary?MainActivity.BLACK:MainActivity.WHITE);t.setTypeface(null,primary?Typeface.BOLD:Typeface.NORMAL);t.setSingleLine();t.setPadding(a.dp(12),a.dp(7),a.dp(12),a.dp(7));t.setBackground(MainActivity.bg(primary?MainActivity.GOLD:MainActivity.PANEL,a.dp(16)));t.setOnClickListener(v->action.run());Motion.card(t);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-2,-2);p.setMargins(0,0,a.dp(6),0);t.setLayoutParams(p);return t;}
+ // A quiet ⋯ with a full touch target that opens the episode action sheet.
+ TextView more(String what,Runnable action){TextView t=a.text("⋯",20,MainActivity.MUTED);t.setGravity(Gravity.CENTER);t.setMinWidth(a.dp(44));t.setMinHeight(a.dp(44));t.setContentDescription(Loc.f("More options for %s",what));t.setTooltipText(Loc.t("More options"));t.setOnClickListener(v->{Motion.haptic(t);action.run();});return t;}
+ TextView small(String s,Runnable action,boolean primary){TextView t=a.text(s,12,primary?MainActivity.BLACK:MainActivity.WHITE);t.setMinWidth(a.dp(48));t.setMinHeight(a.dp(48));t.setGravity(Gravity.CENTER);t.setTypeface(null,primary?Typeface.BOLD:Typeface.NORMAL);t.setSingleLine();t.setPadding(a.dp(12),a.dp(7),a.dp(12),a.dp(7));t.setBackground(MainActivity.bg(primary?MainActivity.GOLD:MainActivity.PANEL,a.dp(16)));t.setOnClickListener(v->action.run());Motion.card(t);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-2,-2);p.setMargins(0,0,a.dp(6),0);t.setLayoutParams(p);return t;}
 
  double runtime(JSONObject i){JSONObject p=i.optJSONObject("progress");double d=p==null?0:p.optDouble("duration",0);if(d<60)d=i.optDouble("duration",0);return d>=60?d:i.optBoolean("movie")?6600:2580;}
  static String span(double seconds){long m=(long)(seconds/60),d=m/1440,h=(m%1440)/60,min=m%60;StringBuilder b=new StringBuilder();if(d>0)b.append(d).append(d==1?" day ":" days ");if(h>0)b.append(h).append(h==1?" hour ":" hours ");if(d==0&&min>0)b.append(min).append(" min");String r=b.toString().trim();return r.isEmpty()?"0 min":r;}

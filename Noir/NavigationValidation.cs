@@ -11,6 +11,38 @@ using System.Windows.Interop;
 namespace Noir;
 public partial class MainWindow
 {
+    async Task ValidateStartupAudit()
+    {
+        var checks=new List<string>();void Check(bool ok,string label){if(!ok)throw new Exception(label);checks.Add(label);}
+        try
+        {
+            Width=940;Height=650;AddSyntheticLibrary(20,65);var group=store.EpisodesFor("show:PERF SHOW 0:2000");
+            foreach(var origin in new[]{"Home","Shows","My List","History"})
+            {
+                foreach(var item in store.Archive)store.State.Watchlist.Add(item.GroupKey);
+                trackerTab="Shows";Navigate(origin);libraryFilter="All";genreFilter="All genres";librarySort="Recently added";listType="All";collectionFilter="My List";SearchBox.Text="Perf";searchDebounce?.Stop();Render();UpdateLayout();ContentScroll.ScrollToVerticalOffset(280);UpdateLayout();var offset=ContentScroll.VerticalOffset;
+                OpenDetails(group);Check(detailOrigin?.Page==origin,"Details captures "+origin);libraryFilter="Finished";librarySort="A–Z";BackFromDetails("Shows");UpdateLayout();
+                Check(page==origin&&detailKey==null&&SearchBox.Text=="Perf"&&libraryFilter=="All"&&librarySort=="Recently added"&&trackerTab=="Shows","Back restores page, query and filters from "+origin);
+                Check(Math.Abs(ContentScroll.VerticalOffset-offset)<2,"Back restores scroll from "+origin);
+            }
+            Navigate("Shows");detailKey=group[0].GroupKey;detailOrigin=null;BackFromDetails("Movies");Check(page=="Movies","Direct detail entry retains Back fallback");
+            var file=Path.Combine(store.DataDirectory,"audit-art.png");var bitmap=System.Windows.Media.Imaging.BitmapSource.Create(8,8,96,96,System.Windows.Media.PixelFormats.Bgra32,null,new byte[8*8*4],8*4);var encoder=new System.Windows.Media.Imaging.PngBitmapEncoder();encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));using(var output=File.Create(file))encoder.Save(output);
+            for(var i=0;i<4;i++)await imageDecodeSlots.WaitAsync();
+            Task<System.Windows.Media.Imaging.BitmapImage?> first,second;
+            try{first=DecodeShared(file,320);second=DecodeShared(file,320);Check(ReferenceEquals(first,second),"Artwork shares one pending task per path and width");}finally{imageDecodeSlots.Release(4);}
+            var source=await first;Check(source is {IsFrozen:true},"Worker decoded artwork is frozen");
+            var loads=await Task.WhenAll(Enumerable.Range(0,20).Select(_=>LoadImage(file,321)));Check(loads.All(i=>i!=null&&i.IsFrozen&&ReferenceEquals(i,loads[0])),"Concurrent artwork requests share one decoded bitmap");
+            for(var i=0;i<4;i++)await imageDecodeSlots.WaitAsync();var image=new Image();Task assigned;
+            try{assigned=SetArtwork(image,file,322);image.Tag=new object();}finally{imageDecodeSlots.Release(4);}
+            await assigned;Check(image.Source==null,"Artwork completion skips a reused control");
+            Navigate("Shows");Activate();await Task.Delay(100);UpdateLayout();var invoker=Descendants(ContentPanel).OfType<Button>().First(b=>b.IsEnabled&&b.Focusable);Check(invoker.Focus()&&invoker.IsKeyboardFocused,"Popup invoker receives keyboard focus");var body=OpenSmartPopup(true);SmartButton(body,"First",()=>CloseSmart());SmartButton(body,"Second",()=>CloseSmart());var popup=smartPopup!;
+            for(var attempt=0;attempt<40&&Keyboard.FocusedElement!=body.Children[0];attempt++)await Task.Delay(50);Check(popup.PlacementTarget==invoker&&popup.Placement==PlacementMode.Bottom,"History popup anchors to invoking control");Check(Keyboard.FocusedElement is Button choice&&choice.Content as string=="First","History popup focuses its first choice");
+            Check(KeyboardNavigation.GetTabNavigation(body)==KeyboardNavigationMode.Cycle,"History popup cycles Tab");body.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice,PresentationSource.FromVisual(body)!,Environment.TickCount,Key.Escape){RoutedEvent=Keyboard.PreviewKeyDownEvent});for(var attempt=0;attempt<40&&(popup.IsOpen||smartPopup!=null);attempt++)await Task.Delay(50);
+            Check(!popup.IsOpen&&smartPopup==null,"Escape closes History popup");for(var attempt=0;attempt<40&&(Keyboard.FocusedElement is not FrameworkElement returned||!returned.IsLoaded||body.IsKeyboardFocusWithin);attempt++)await Task.Delay(50);Check(Keyboard.FocusedElement is FrameworkElement focus&&focus.IsLoaded&&!body.IsKeyboardFocusWithin,"History popup returns focus to the page");
+            File.WriteAllText(Path.Combine(store.DataDirectory,"startup-audit-checks.json"),JsonSerializer.Serialize(checks,new JsonSerializerOptions{WriteIndented=true}));
+        }
+        catch(Exception error){File.WriteAllText(Path.Combine(store.DataDirectory,"startup-audit-failure.txt"),error.ToString());}
+    }
     async Task ValidateNavigationDiscover()
     {
         var checks=new List<string>();void Check(bool ok,string label){if(!ok)throw new Exception(label);checks.Add(label);}

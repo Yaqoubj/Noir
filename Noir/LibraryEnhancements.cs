@@ -53,11 +53,14 @@ public partial class MainWindow
         var panel=new StackPanel{Margin=new(28)};panel.Children.Add(Text("Your viewing diary",24,weight:FontWeights.SemiBold));panel.Children.Add(Body(item.Label));
         var personal=store.State.PersonalReviews.GetValueOrDefault(item.Id)??new();
         panel.Children.Add(Heading("My rating & note","Private, saved on this PC."));
-        var rating=personal.Rating;var stars=new WrapPanel();
-        void DrawStars(){stars.Children.Clear();for(int i=1;i<=5;i++){var value=i;var button=ActionButton(i<=rating?"★":"☆",()=>{rating=value;DrawStars();});button.FontSize=24;button.Foreground=Brush("#E4C084");button.Padding=new(9,3,9,3);button.Margin=new(0,0,6,0);button.ToolTip=value+" out of 5";stars.Children.Add(button);}stars.Children.Add(ActionButton("Clear",()=>{rating=0;DrawStars();}));}
-        DrawStars();panel.Children.Add(stars);
+        var rating=personal.Rating10;var stars=new WrapPanel();var picker=new Button{Background=Brush("Transparent"),Padding=new(3,0,3,0),ToolTip=T("Rate with half stars · optional","قيّم بنصف نجمة · اختياري")};
+        System.Windows.Automation.AutomationProperties.SetName(picker,T("Your rating · optional","تقييمك · اختياري"));
+        void DrawStars()=>picker.Content=HalfRating(rating,24);
+        picker.PreviewMouseLeftButtonUp+=(_,e)=>{var score=Math.Clamp((int)Math.Ceiling((e.GetPosition(picker).X-3)/26*2),1,10);rating=rating==score?0:score;DrawStars();e.Handled=true;};
+        picker.Click+=(_,_)=>{var menu=new ContextMenu();for(int n=0;n<=10;n++){var score=n;var choice=new MenuItem{Header=n==0?T("Clear rating","مسح التقييم"):T("{0:0.#} stars","{0:0.#} نجمة",n/2.0),IsCheckable=true,IsChecked=rating==n};choice.Click+=(_,_)=>{rating=score;DrawStars();};menu.Items.Add(choice);}menu.PlacementTarget=picker;menu.IsOpen=true;};
+        DrawStars();stars.Children.Add(picker);stars.Children.Add(ActionButton(T("Clear rating","مسح التقييم"),()=>{rating=0;DrawStars();}));panel.Children.Add(stars);
         var note=new TextBox{Text=personal.Note,AcceptsReturn=true,TextWrapping=TextWrapping.Wrap,MinHeight=84,MaxHeight=160,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,Margin=new(0,14,0,12),MaxLength=4000};System.Windows.Automation.AutomationProperties.SetName(note,"My private note");panel.Children.Add(note);
-        var saved=Body("",12);panel.Children.Add(ActionButton("Save rating & note",()=>{store.State.PersonalReviews[item.Id]=new(){Rating=rating,Note=note.Text};store.TouchMobileField("review:"+item.Id);store.Save();saved.Text="Saved on this PC.";},true));panel.Children.Add(saved);
+        var saved=Body("",12);panel.Children.Add(ActionButton("Save rating & note",()=>{store.State.PersonalReviews[item.Id]=new(){Rating10=rating,Note=note.Text};store.TouchMobileField("review:"+item.Id);store.Save();saved.Text="Saved on this PC.";},true));panel.Children.Add(saved);
         panel.Children.Add(Heading("Viewing dates","Earlier dates stay here when you replay or remove the file."));
         var records=store.Archive.Where(x=>x.GroupKey==item.GroupKey).SelectMany(x=>store.ViewingHistory(x).Select(v=>(Item:x,View:v))).OrderByDescending(x=>x.View.WatchedAt).ToList();
         if(records.Count==0) panel.Children.Add(Body("No completed viewings yet. Your saved position is kept separately."));

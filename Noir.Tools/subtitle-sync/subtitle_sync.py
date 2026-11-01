@@ -25,20 +25,20 @@ class ScoreCapture(logging.Handler):
             self.score = float(match.group(1))
 
 
-def synchronize(video, subtitle, output):
+def synchronize(video, subtitle, output, audio_only=False):
     capture = ScoreCapture()
     logger = logging.getLogger("ffsubsync.ffsubsync")
     old_level = logger.level
     logger.setLevel(logging.INFO)
     logger.addHandler(capture)
     try:
-        return _synchronize(video, subtitle, output, capture)
+        return _synchronize(video, subtitle, output, capture, audio_only)
     finally:
         logger.removeHandler(capture)
         logger.setLevel(old_level)
 
 
-def _synchronize(video, subtitle, output, capture):
+def _synchronize(video, subtitle, output, capture, audio_only=False):
     shutil.copyfile(subtitle, output)
     tools = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
     ffmpeg = tools / "ffmpeg"
@@ -48,10 +48,16 @@ def _synchronize(video, subtitle, output, capture):
             "--skip-sync-on-low-quality", "--min-score", "100",
             "--quality-max-offset-seconds", "30", "--max-framerate-deviation", "0.05",
             "--output-encoding", "utf-8"]
+    if audio_only:
+        # ffsubsync would otherwise pick up the built-in subtitle stream on its own.
+        args += ["--reference-stream", "0:a:0"]
     with tempfile.TemporaryDirectory(prefix="noir-subtitles-") as scratch:
         reference_file = video
         embedded = False
         try:
+            # Checking a built-in track against itself proves nothing, so --audio listens to the soundtrack instead.
+            if audio_only:
+                raise ValueError("audio reference requested")
             probe = subprocess.run([str(ffmpeg / "ffprobe.exe"), "-v", "error", "-show_streams", "-of", "json", video],
                                    capture_output=True, timeout=30, creationflags=0x08000000)
             streams = json.loads(probe.stdout).get("streams", [])
@@ -84,7 +90,7 @@ def _synchronize(video, subtitle, output, capture):
         decision, aligned = decide_alignment(
             speech, [(c.start, c.end) for c in original], offset, scale,
             capture.score, bool(result.get("sync_was_successful")), embedded,
-            [(c.start, c.end) for c in global_subs])
+            [(c.start, c.end) for c in global_subs], audio_only)
         if decision["method"] == "piecewise":
             for cue, (start, end) in zip(original, aligned):
                 cue.start, cue.end = int(start), int(end)
@@ -98,7 +104,7 @@ if __name__ == "__main__":
     try:
         # Third-party progress/logging must never contaminate the JSON protocol.
         with contextlib.redirect_stdout(sys.stderr):
-            decision = synchronize(*sys.argv[1:4])
+            decision = synchronize(*sys.argv[1:4], audio_only="--audio" in sys.argv[4:])
         print(json.dumps(decision, allow_nan=False))
     except Exception:
         print(json.dumps({"accepted": False, "offset": 0, "scale": 1, "method": "none", "segments": []}))

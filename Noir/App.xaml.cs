@@ -63,13 +63,16 @@ public partial class App : Application
             dataDirectory=Profiles.Folder(current);
             if(dataDirectory!=null)Directory.CreateDirectory(dataDirectory);
         }
+        StartupTrace.Mark("App preparation ended");
         var window = new MainWindow(dataDirectory,playPath,validate,initialPage);
+        StartupTrace.Mark("MainWindow constructor ended");
         if(validate) { window.ShowActivated=false;window.Title="Noir validation"; }
         MainWindow = window;
         if(e.Args.Contains("--minimized")) { window.ShowActivated=false;window.WindowState=WindowState.Minimized;window.StartHidden=true; }
         new Thread(()=>{while(showSignal.WaitOne()){string? link=null;try{if(File.Exists(tasteHandoff)){link=File.ReadAllText(tasteHandoff).Trim();File.Delete(tasteHandoff);}}catch(IOException){}Dispatcher.BeginInvoke(()=>{window.ShowFromTray();if(link?.StartsWith(TasteCode.Prefix,StringComparison.OrdinalIgnoreCase)==true)window.OpenTaste(link);});}}){IsBackground=true,Name="Noir activation"}.Start();
         if(tasteLink!=null)window.Loaded+=(_,_)=>window.OpenTaste(tasteLink);
-        window.Show();
+        StartupTrace.Mark("Window Show started");StartupTrace.FirstRendering(window,"First rendering after Show");
+        window.Show();StartupTrace.Mark("Window Show returned");
     }
     // noir:// links open this copy of Noir (per user, no admin). Kept current when Noir moves.
     static void RegisterTasteLinks()
@@ -85,5 +88,5 @@ public partial class App : Application
         }
         catch(Exception){/* Links just won't open Noir. */}
     }
-    protected override void OnExit(ExitEventArgs e) { single?.Dispose(); base.OnExit(e); }
+    protected override void OnExit(ExitEventArgs e) { single?.Dispose(); base.OnExit(e);StartupTrace.Mark("App exit");StartupTrace.Flush(); }
 }

@@ -9,7 +9,7 @@
     <!-- Only for the notification-area icon; WinForms names stay out of the global usings. -->
     <UseWindowsForms>true</UseWindowsForms>
     <PlatformTarget>x64</PlatformTarget>
-    <Version>0.15.1</Version>
+    <Version>0.16.0</Version>
     <ApplicationIcon>Assets\noir.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>

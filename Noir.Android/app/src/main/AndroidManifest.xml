@@ -6,7 +6,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    <application android:name=".NoirApp" android:label="Noir" android:supportsRtl="true" android:icon="@drawable/noir_icon" android:theme="@style/NoirTheme" android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:networkSecurityConfig="@xml/network_security">
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
+    <uses-feature android:name="android.software.leanback" android:required="false"/>
+    <application android:name=".NoirApp" android:label="Noir" android:supportsRtl="true" android:icon="@drawable/noir_icon" android:banner="@drawable/tv_banner" android:theme="@style/NoirTheme" android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:networkSecurityConfig="@xml/network_security">
         <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
             <intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="noir" android:host="pair"/></intent-filter>
@@ -43,5 +45,14 @@
                 <data android:scheme="noir" android:host="taste" android:pathPrefix="/" />
             </intent-filter>
         </activity>
+        <activity android:name=".TvActivity" android:exported="true" android:launchMode="singleTask" android:screenOrientation="landscape" android:configChanges="keyboard|keyboardHidden|navigation">
+            <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LEANBACK_LAUNCHER"/></intent-filter>
+            <intent-filter><action android:name="android.intent.action.SEARCH"/><category android:name="android.intent.category.DEFAULT"/></intent-filter>
+        </activity>
+        <activity android:name=".TvDetailActivity" android:exported="false" android:screenOrientation="landscape"/>
+        <activity android:name=".TvSetupActivity" android:exported="false" android:screenOrientation="landscape"/>
+        <activity android:name=".TvProfilesActivity" android:exported="false" android:screenOrientation="landscape"/>
+        <activity android:name=".TvSettingsActivity" android:exported="false" android:screenOrientation="landscape"/>
+        <activity android:name=".TvCheckActivity" android:exported="false" android:screenOrientation="landscape"/>
     </application>
 </manifest>

@@ -45,3 +45,8 @@ internal static class PlayerWarmup
         return new LibVLC(HasPluginCache?options:[..options,"--reset-plugins-cache"]);
     }
 }
+
+public partial class MainWindow
+{
+    public bool ShouldWarmPlayer()=>!closing&&!validationMode&&store.State.AppMode!="Tracker"&&!StartHidden&&!hiddenInTray&&IsVisible&&WindowState!=System.Windows.WindowState.Minimized;
+}

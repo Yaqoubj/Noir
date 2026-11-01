@@ -1,4 +1,4 @@
-using Noir;
+﻿using Noir;
 using LibVLCSharp.Shared;
 using System.Text.Json;
 
@@ -12,13 +12,16 @@ var special=new VideoItem { Path="special.mkv",Title="Test",Season=0,Episode=1,D
 var all=episodes.Append(special).ToList();
 var results=new List<string>();
 void Check(bool condition,string label) { if(!condition) throw new Exception("FAIL: "+label);results.Add("PASS: "+label);Console.WriteLine(results[^1]); }
+await BackendAuditChecks.Run(root,Check);
 TasteCodeChecks.Run(Check);
+Check(MobileSyncServer.CheckCode("ab12cd34ef567890"+new string('0',48))=="AB12 CD34 EF56","TV pairing check code is the first 12 fingerprint digits in groups of four");
 SmartListChecks.Run(root,Check);
 MobileChecks.Run(root,Check);
 BrowsingChecks.Run(root,Check);
 LetterboxdChecks.Run(root,Check);
 await PhoneProfileChecks.Run(root,Check);
 EmbeddedSubtitleChecks.Run(Check);
+if(Environment.GetEnvironmentVariable("NOIR_EMBEDDED_SYNC_CLIPS") is {Length:>0} clips)await EmbeddedSubtitleChecks.RunMedia(Check,clips,Environment.GetEnvironmentVariable("NOIR_SUBTITLE_TOOLS")??"");
 StreamChecks.Run(Check);
 await StreamingSubtitleChecks.Run(root,Check);
 await SubtitleAddonChecks.Run(root,Check);

@@ -130,7 +130,7 @@ public partial class MainWindow
                 {
                     var chip=new Button{Padding=new(6,5,12,5),Margin=new(0,0,8,8),Background=Brush("#1C1C1F"),ToolTip=p.Kind+" on "+p.Name+" · opens JustWatch's page for this title"};
                     var content=new StackPanel{Orientation=Orientation.Horizontal};chip.Content=content;
-                    var logo=p.Logo.Length>0?await Logo(art,p.Logo):"";if(ImageSource(logo,64) is {} source)content.Children.Add(new Border{Width=26,Height=26,CornerRadius=new(6),ClipToBounds=true,Margin=new(0,0,8,0),Child=new Image{Source=source,Stretch=Stretch.UniformToFill}});
+                    var logo=p.Logo.Length>0?await Logo(art,p.Logo):"";if(await LoadImage(logo,64) is {} source)content.Children.Add(new Border{Width=26,Height=26,CornerRadius=new(6),ClipToBounds=true,Margin=new(0,0,8,0),Child=new Image{Source=source,Stretch=Stretch.UniformToFill}});
                     var label=new StackPanel{VerticalAlignment=VerticalAlignment.Center};label.Children.Add(Text(p.Name,12.5,weight:FontWeights.SemiBold));label.Children.Add(Text(p.Kind,10,"#AAA6A0"));content.Children.Add(label);
                     var link=providers.Link;chip.Click+=(_,_)=>{if(Uri.TryCreate(link,UriKind.Absolute,out var u)&&u.Scheme=="https")System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(u.AbsoluteUri){UseShellExecute=true});};
                     row.Children.Add(chip);

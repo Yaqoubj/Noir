@@ -123,7 +123,7 @@ public partial class MainWindow
         LibraryRoot.Language=System.Windows.Markup.XmlLanguage.GetLanguage(Loc.Arabic?"ar":"en-GB");
         // Western digits everywhere, matching the numbers that come from titles and services.
         System.Windows.Media.NumberSubstitution.SetSubstitution(LibraryRoot,System.Windows.Media.NumberSubstitutionMethod.European);
-        ScanNav.ToolTip=T("Scan library for new files");RailToggle.ToolTip=T("Show or hide labels");RailLogo.ToolTip=T("Home");
+        ScanNav.ToolTip=T("Scan library for new files");RailToggle.ToolTip=T("Show or hide labels");RailLogo.ToolTip=T("Home");HelpNav.ToolTip=T("Shortcuts & tips (?)","الاختصارات والنصائح (?)");
         BuildSideRail();
     }
     void SetLanguage(string language)

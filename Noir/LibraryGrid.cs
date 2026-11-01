@@ -20,7 +20,7 @@ public partial class MainWindow
     FrameworkElement LibraryListRow(List<VideoItem> group)
     {
         var item=group[0];var (watched,total)=Progress(group);var height=LibrarySize=="S"?72:LibrarySize=="L"?120:94;var line=new DockPanel{Margin=new(12)};var picture=new Grid{Width=height*1.5,Height=height,ClipToBounds=true};picture.Children.Add(Art(System.IO.File.Exists(item.Backdrop)?item.Backdrop:item.Poster,item.Title,height));AddStatusPill(picture,item);DockPanel.SetDock(picture,Dock.Left);line.Children.Add(picture);
-        var buttons=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center,Margin=new(12,0,0,0)};DockPanel.SetDock(buttons,Dock.Right);line.Children.Add(buttons);var open=ActionButton(T("Details"),()=>OpenDetails(group));open.Padding=new(12,8,12,8);System.Windows.Automation.AutomationProperties.SetName(open,item.Title+" details");buttons.Children.Add(open);var listed=store.State.Watchlist.Contains(item.GroupKey);var list=ActionButton(listed?"✓":"＋",()=>ToggleWatchlist(item));list.ToolTip=T("My List");list.Margin=new(6,0,0,0);buttons.Children.Add(list);
+        var buttons=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center,Margin=new(12,0,0,0)};DockPanel.SetDock(buttons,Dock.Right);line.Children.Add(buttons);var open=ActionButton(T("Details"),()=>OpenDetails(group));open.Padding=new(12,8,12,8);System.Windows.Automation.AutomationProperties.SetName(open,item.Title+" details");buttons.Children.Add(open);var listed=store.State.Watchlist.Contains(item.GroupKey);var list=ActionButton(listed?"✓":"＋",()=>ToggleWatchlist(item));list.ToolTip=T("My List");list.Margin=new(6,0,0,0);buttons.Children.Add(list);var more=MoreButton(item);more.Margin=new(6,0,0,0);buttons.Children.Add(more);
         var info=new StackPanel{Margin=new(16,0,8,0),VerticalAlignment=VerticalAlignment.Center};line.Children.Add(info);var title=Text(item.Title,16,weight:FontWeights.SemiBold);title.TextWrapping=TextWrapping.NoWrap;title.TextTrimming=TextTrimming.CharacterEllipsis;info.Children.Add(title);info.Children.Add(Text(string.Join(" · ",new[]{item.Year>0?item.Year.ToString():"",item.Duration>0?Loc.Runtime(item.Duration):"",item.Genres}.Where(x=>x.Length>0)),12,"#AAA6A0"));info.Children.Add(Text(item.IsMovie?T(watched>0?"Watched":"Not started"):$"{watched} / {total} {T("watched")}",11,"#E4C084"));info.Children.Add(new ProgressBar{Height=3,Value=watched,Maximum=Math.Max(1,total),Margin=new(0,8,0,0),Background=Brush("#2A2A30"),Foreground=Brush("#E4C084"),BorderThickness=new(0)});
         var border=new Border{Width=Math.Max(440,ContentScroll.ViewportWidth-sidePad*2-10),CornerRadius=new(12),Margin=new(0,0,0,10),Background=Brush("#141416"),Child=line,BorderBrush=Brush("#1AFFFFFF"),BorderThickness=new(1)};LazyMenu(border,item);return HoverCard(border,group);
     }
@@ -89,8 +89,8 @@ public partial class MainWindow
         var bar=new Border{Background=Brush("#111113"),BorderBrush=Brush("#1AFFFFFF"),BorderThickness=new(1),CornerRadius=new(14),Padding=new(14,10,14,10),Margin=new(0,10,0,10)};
         var dock=new StackPanel();bar.Child=dock;
         var right=new WrapPanel{VerticalAlignment=VerticalAlignment.Center,Margin=new(0,8,0,0)};DockPanel.SetDock(right,Dock.Right);dock.Children.Add(right);
-        right.Children.Add(Select(["Poster","Landscape","List"],LibraryView,v=>{SaveLibraryView(v,LibrarySize);Render();},T("View","?????")));
-        right.Children.Add(Select(["S","M","L"],LibrarySize,v=>{SaveLibraryView(LibraryView,v);Render();},T("Card size","??? ???????")));
+        right.Children.Add(Select(["Poster","Landscape","List"],LibraryView,v=>{SaveLibraryView(v,LibrarySize);Render();},T("View","طريقة العرض")));
+        right.Children.Add(Select(["S","M","L"],LibrarySize,v=>{SaveLibraryView(LibraryView,v);Render();},T("Card size","حجم البطاقة")));
         right.Children.Add(new TextBlock{Text=T("Sort"),Foreground=Brush("#8F8A83"),FontSize=12,VerticalAlignment=VerticalAlignment.Center,Margin=new(12,0,8,0)});
         right.Children.Add(Select(LibrarySorts,librarySort,v=>{librarySort=v;Render();},"Sort"));
         if(genres.Count>1)
@@ -113,7 +113,7 @@ public partial class MainWindow
     ComboBox Select(string[] options,string selected,Action<string> pick,string name)
     {
         var box=new ComboBox{MinWidth=options[0]=="S"?64:options[0]=="Poster"?120:150,FontSize=12.5,Padding=new(10,5,10,5)};
-        foreach(var o in options)box.Items.Add(new ComboBoxItem{Content=o switch{"Poster"=>T("Poster","??????"),"Landscape"=>T("Landscape","????"),"List"=>T("List","?????"),"S"=>T("S","?"),"M"=>T("M","?"),"L"=>T("L","?"),_=>T(o)},Tag=o});
+        foreach(var o in options)box.Items.Add(new ComboBoxItem{Content=o switch{"Poster"=>T("Poster","ملصق"),"Landscape"=>T("Landscape","أفقي"),"List"=>T("List","قائمة"),"S"=>T("S","صغير"),"M"=>T("M","متوسط"),"L"=>T("L","كبير"),_=>T(o)},Tag=o});
         box.SelectedIndex=Math.Max(0,Array.IndexOf(options,selected));
         System.Windows.Automation.AutomationProperties.SetName(box,T(name));
         box.SelectionChanged+=(_,_)=>{if(box.SelectedItem is ComboBoxItem {Tag:string v}&&v!=selected)pick(v);};

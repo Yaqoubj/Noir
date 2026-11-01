@@ -76,7 +76,7 @@ public partial class MainWindow
         }
         // Advances every 9 seconds while Discover's browse view is showing and the pointer isn't on it.
         spotTimer?.Stop();spotTimer=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromSeconds(9)};
-        spotTimer.Tick+=(_,_)=>{if(page!="Discover"||discoverTitle!=null||revision!=discoverRevision||!host.IsLoaded){spotTimer?.Stop();return;}if(!host.IsMouseOver&&!validationMode)Show((discoverSpot+1)%spotlights.Count);};
+        spotTimer.Tick+=(_,_)=>{if(page!="Discover"||discoverTitle!=null||revision!=discoverRevision||!host.IsLoaded){spotTimer?.Stop();return;}if(!host.IsMouseOver&&!host.IsKeyboardFocusWithin&&IsActive&&current==null&&CarouselVisible(host)&&!validationMode)Show((discoverSpot+1)%spotlights.Count);};
         if(Motion.Enabled&&!validationMode)spotTimer.Start();host.Unloaded+=(_,_)=>spotTimer?.Stop();
         return host;
     }
@@ -121,7 +121,7 @@ public partial class MainWindow
         var name=Text(title.Name,14,weight:FontWeights.SemiBold);name.Margin=new(0,9,0,2);name.TextTrimming=TextTrimming.CharacterEllipsis;name.TextWrapping=TextWrapping.NoWrap;body.Children.Add(name);
         body.Children.Add(Text((title.IsMovie?"Movie":"Series")+(title.Years.Length>0?" · "+title.Years:""),11,"#9F9A93"));
         if(!File.Exists(title.Poster))_=Load();
-        async Task Load(){try{using var client=DiscoverClient();await client.Artwork(title,token);if(token.IsCancellationRequested||!anywhere&&(revision!=discoverRevision||page!="Discover")||closing)return;var source=ImageSource(title.Poster,384);if(source!=null){picture.Children.RemoveAt(0);var image=new Image{Source=source,Stretch=Stretch.UniformToFill};picture.Children.Insert(0,image);if(image.IsLoaded)Motion.FadeIn(image);}}catch(OperationCanceledException)when(token.IsCancellationRequested){}catch(Exception e){store.Log(e);}}
+        async Task Load(){try{using var client=DiscoverClient();await client.Artwork(title,token);if(token.IsCancellationRequested||!anywhere&&(revision!=discoverRevision||page!="Discover")||closing)return;var source=await LoadImage(title.Poster,384);if(token.IsCancellationRequested||!anywhere&&(revision!=discoverRevision||page!="Discover")||closing)return;if(source!=null){picture.Children.RemoveAt(0);var image=new Image{Source=source,Stretch=Stretch.UniformToFill};picture.Children.Insert(0,image);if(image.IsLoaded)Motion.FadeIn(image);}}catch(OperationCanceledException)when(token.IsCancellationRequested){}catch(Exception e){store.Log(e);}}
         return Lift(body,edge);
     }
     // Full-bleed artwork for a Discover title; the background is fetched if it isn't cached yet.
@@ -148,13 +148,17 @@ public partial class MainWindow
             actions.Children.Add(BigButton($"▶   {T("Stream")} S{next.Season} E{next.Episode}",()=>DiscoverStream(title,next.Season,next.Episode),true));
         if(detail&&existing!=null)actions.Children.Add(BigButton("Open in library",()=>{var group=store.EpisodesFor(existing.GroupKey);Navigate(existing.IsMovie?"Movies":"Shows");OpenDetails(group);},false));
         var listed=existing!=null&&store.State.Watchlist.Contains(existing.GroupKey);
-        actions.Children.Add(RoundAction(listed?"✓":"＋",listed?"In My List":"Add to My List",()=>{store.AddDiscovered(title,true);Render();Status.Text="Saved to My List. Watching history stays unchanged.";},listed));
+        actions.Children.Add(RoundAction(listed?"✓":"＋",listed?"In My List":"Add to My List",()=>ToggleDiscoveredWatchlist(title),listed));
         var inLibrary=existing!=null&&store.InLibrary(existing.GroupKey);
         actions.Children.Add(RoundAction(inLibrary?"▦":"＋",inLibrary?"In your library · click to remove":"Add to library",()=>{var key=existing?.GroupKey??store.AddDiscovered(title,false)[0].GroupKey;store.SetInLibrary(key,!inLibrary);Render();Status.Text=inLibrary?"Removed from your library. History stays.":"Added to your library.";},inLibrary));
         if(detail&&title.IsMovie){var seen=existing!=null&&store.EverWatched(existing);actions.Children.Add(RoundAction(seen?"👁":"👁",seen?"Watched · open in History":"I've seen it · log it in History",()=>{if(seen)OpenLog(title);else LogTitleItems(title,[(0,0)],title.Name+" logged as watched");},seen));}
         if(detail&&!title.IsMovie)actions.Children.Add(RoundAction("✓","Track episodes you've seen",()=>OpenLog(title)));
         panel.Children.Add(actions);grid.Children.Add(panel);FitHero(grid,panel,detail);
         return Bleed(grid,detail?6:0);
+    }
+    void ToggleDiscoveredWatchlist(DiscoverTitle title)
+    {
+        var group=TrackedGroup(title);if(group is {Count:>0})ToggleWatchlist(group[0]);else{store.AddDiscovered(title,true);Render();}
     }
     // The show's next aired episode you haven't watched (the first one again when you've seen them all).
     KnownEpisode? NextToStream(DiscoverTitle title,VideoItem? existing)

@@ -16,26 +16,33 @@ public sealed class PreviewFrames : IAsyncDisposable
     readonly SemaphoreSlim gate=new(1,1);
     LibVLC? previewEngine;
     bool disposed;
-    public PreviewFrames(string dataDirectory) {directory=Path.Combine(dataDirectory,"previews");Directory.CreateDirectory(directory);}
+    DateTime lastCleanup=DateTime.MinValue;
+    public PreviewFrames(string dataDirectory) {directory=Path.Combine(dataDirectory,"previews");}
     public static double Slot(double seconds) => Math.Max(0,Math.Floor(seconds/10)*10);
     string CachePath(VideoItem item,string fingerprint,double seconds)=>Path.Combine(directory,Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(item.Id+":"+fingerprint+":"+Slot(seconds))))+".png");
-    public BitmapSource? Cached(VideoItem item,string fingerprint,double seconds)
+    public Task<BitmapSource?> CachedAsync(VideoItem item,string fingerprint,double seconds,CancellationToken token)=>Task.Run(async()=>
     {
-        var path=CachePath(item,fingerprint,seconds);if(!File.Exists(path))return null;
+        await gate.WaitAsync(token);
+        try{return disposed?null:Read(CachePath(item,fingerprint,seconds));}
+        finally{gate.Release();}
+    },token);
+    static BitmapSource? Read(string path)
+    {
+        if(!File.Exists(path))return null;
         var image=new BitmapImage();image.BeginInit();image.CacheOption=BitmapCacheOption.OnLoad;image.UriSource=new Uri(path);image.EndInit();image.Freeze();return image;
     }
-    public async Task<BitmapSource?> Get(VideoItem item,string fingerprint,double seconds,CancellationToken token)
+    public Task<BitmapSource?> Get(VideoItem item,string fingerprint,double seconds,CancellationToken token)=>Task.Run(()=>GetCore(item,fingerprint,seconds,token),token);
+    async Task<BitmapSource?> GetCore(VideoItem item,string fingerprint,double seconds,CancellationToken token)
     {
         if(disposed)return null;
         var slot=Slot(seconds);var key=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(item.Id+":"+fingerprint+":"+slot)));
         var path=Path.Combine(directory,key+".png");
-        BitmapSource Read(){var image=new BitmapImage();image.BeginInit();image.CacheOption=BitmapCacheOption.OnLoad;image.UriSource=new Uri(path);image.EndInit();image.Freeze();return image;}
-        if(File.Exists(path)) return Read();
         await gate.WaitAsync(token);
         try
         {
             if(disposed)return null;token.ThrowIfCancellationRequested();
-            if(File.Exists(path)) return Read();
+            if(Read(path) is {} cached)return cached;
+            Directory.CreateDirectory(directory);
             var pixels=await Task.Run(async()=>
             {
                 var vlc=previewEngine??=new LibVLC("--quiet","--no-audio","--no-spu","--avcodec-hw=none","--avcodec-threads=1","--no-video-title-show");
@@ -62,23 +69,29 @@ public sealed class PreviewFrames : IAsyncDisposable
             if(pixels==null) return null;token.ThrowIfCancellationRequested();
             var bitmap=BitmapSource.Create(256,144,96,96,PixelFormats.Bgr32,null,pixels,1024);bitmap.Freeze();
             var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));using(var file=File.Create(path+".tmp")) encoder.Save(file);File.Move(path+".tmp",path,true);
-            // Generated previews are disposable and bounded; library history and artwork are separate.
-            var files=new DirectoryInfo(directory).EnumerateFiles("*.png").OrderBy(f=>f.LastWriteTimeUtc).ToList();long size=files.Sum(f=>f.Length);
-            foreach(var file in files) {if(size<=128*1024*1024) break;size-=file.Length;try{file.Delete();}catch(IOException){}}
+            // Generated previews are disposable; avoid enumerating the cache on every frame.
+            if((DateTime.UtcNow-lastCleanup).TotalMinutes>=1)
+            {
+                lastCleanup=DateTime.UtcNow;
+                var files=new DirectoryInfo(directory).EnumerateFiles("*.png").OrderBy(f=>f.LastWriteTimeUtc).ToList();long size=files.Sum(f=>f.Length);
+                foreach(var file in files) {if(size<=128*1024*1024) break;size-=file.Length;try{file.Delete();}catch(IOException){}}
+            }
             return bitmap;
         }
         finally {gate.Release();}
     }
-    public async Task<string?> GetPath(VideoItem item,string fingerprint,double seconds,CancellationToken token)
+    public Task<string?> GetPath(VideoItem item,string fingerprint,double seconds,CancellationToken token)=>Task.Run(async()=>
     {
-        if(await Get(item,fingerprint,seconds,token)==null) return null;
+        if(await GetCore(item,fingerprint,seconds,token)==null) return null;
         var path=CachePath(item,fingerprint,seconds);return File.Exists(path)?path:null;
-    }
+    },token);
     public async ValueTask DisposeAsync(){disposed=true;await gate.WaitAsync();try{if(previewEngine is {} engine)await Task.Run(engine.Dispose);previewEngine=null;}finally{gate.Release();}}
 }
 public partial class MainWindow
 {
     PreviewFrames? previews;
+    readonly object previewGate=new();
+    PreviewFrames PreviewCache(){lock(previewGate)return previews??=new PreviewFrames(store.DataDirectory);}
     CancellationTokenSource? previewCancellation;
     Border? previewPanel;
     Image? previewImage;
@@ -99,11 +112,12 @@ public partial class MainWindow
         previewCancellation?.Cancel();var request=previewCancellation=new CancellationTokenSource();var item=current;var thisSerial=serial;
         try
         {
-            previews??=new PreviewFrames(store.DataDirectory);
-            var cached=previews.Cached(item,store.State.Catalog[item.Id].Fingerprint,seconds);
+            var frames=PreviewCache();var fingerprint=store.State.Catalog[item.Id].Fingerprint;
+            var cached=await frames.CachedAsync(item,fingerprint,seconds,request.Token);
+            if(request.IsCancellationRequested||serial!=thisSerial||current!=item||!SeekBar.IsMouseOver) return;
             if(cached!=null){previewImage.Source=cached;previewImage.Visibility=Visibility.Visible;return;}
             await Task.Delay(550,request.Token);
-            var image=await previews.Get(item,store.State.Catalog[item.Id].Fingerprint,seconds,request.Token);
+            var image=await frames.Get(item,fingerprint,seconds,request.Token);
             if(request.IsCancellationRequested||serial!=thisSerial||current!=item||!SeekBar.IsMouseOver) return;
             if(image!=null) {previewImage.Source=image;previewImage.Visibility=Visibility.Visible;}
         }
@@ -115,7 +129,7 @@ public partial class MainWindow
     async Task<string?> PhonePreviewFrame(VideoItem item,double seconds,CancellationToken token)
     {
         var fingerprint=store.State.Catalog.GetValueOrDefault(item.Id)?.Fingerprint;if(fingerprint==null) return null;
-        var frames=previews??=new PreviewFrames(store.DataDirectory);return await frames.GetPath(item,fingerprint,seconds,token);
+        return await PreviewCache().GetPath(item,fingerprint,seconds,token);
     }
     void HidePreview() {previewCancellation?.Cancel();previewSlot=-1;if(previewPanel!=null) previewPanel.Visibility=Visibility.Collapsed;}
     void Seek_Leave(object sender,MouseEventArgs e)=>HidePreview();

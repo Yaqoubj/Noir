@@ -36,14 +36,26 @@ public partial class MainWindow
         }
         Select(player.AudioTrackDescription,preference.AudioTrack,id=>player.SetAudioTrack(id));
         if(preference.SubtitleTrack=="Off" || preference.SubtitleTrack.Length==0&&store.State.Subtitles=="Off") player.SetSpu(-1);
-        else if(!Select(player.SpuDescription,preference.SubtitleTrack,id=>player.SetSpu(id))&&store.State.Subtitles is "English" or "Arabic")
+        else if(!Select(player.SpuDescription,preference.SubtitleTrack,id=>player.SetSpu(SyncedTrack(id)))&&store.State.Subtitles is "English" or "Arabic")
         {
             var rememberedLanguage=SubtitleDownloads.Language(preference.SubtitleTrack);
             var arabic=rememberedLanguage.Length>0?rememberedLanguage=="ar":store.State.Subtitles=="Arabic";
             var english=player.SpuDescription.FirstOrDefault(x=>x.Id>=0&&(x.Name.Contains(arabic?"Arabic":"English",StringComparison.OrdinalIgnoreCase)||x.Name.Contains(arabic?"[ara]":"[eng]",StringComparison.OrdinalIgnoreCase)||System.Text.RegularExpressions.Regex.IsMatch(x.Name,arabic?@"(?i)\.ar[.\]]":@"(?i)\.en[.\]]")));
-            if(!string.IsNullOrEmpty(english.Name)) player.SetSpu(english.Id);
+            if(!string.IsNullOrEmpty(english.Name)) player.SetSpu(SyncedTrack(english.Id));
         }
         player.SetSpuDelay((long)(preference.SubtitleDelay*1000000));
+    }
+    // A timing-corrected copy of a built-in track (name.synced.en.srt) replaces that language's track when it is picked.
+    // VLC labels it like the built-in one, but adds subtitle files after the built-in tracks, so the copy is the last of its language.
+    int SyncedTrack(int id)
+    {
+        if(player==null||current==null)return id;var tracks=player.SpuDescription;var chosen=tracks.FirstOrDefault(t=>t.Id==id);if(string.IsNullOrEmpty(chosen.Name))return id;
+        static string Lang(string name)=>System.Text.RegularExpressions.Regex.IsMatch(name,@"(?i)arabic|\[ara\]|\.ar[.\]]")?"ar":System.Text.RegularExpressions.Regex.IsMatch(name,@"(?i)english|\[eng\]|\.en[.\]]")?"en":"";
+        var language=Lang(chosen.Name);if(language.Length==0)return id;
+        var owner=currentStream==null?current:SubtitleDownloads.StreamTarget(store.DataDirectory,current,currentStream.Name);
+        if(!MobileSubtitles.Find(owner,requireVideo:currentStream==null).Any(s=>SubtitleDownloads.IsSyncedCopy(System.IO.Path.GetFileNameWithoutExtension(s.Path))&&SubtitleDownloads.SidecarLanguage(s.Path)==language))return id;
+        var copy=tracks.LastOrDefault(t=>t.Id>=0&&Lang(t.Name)==language);
+        return string.IsNullOrEmpty(copy.Name)?id:copy.Id;
     }
     void AdjustSubtitleDelay(double change,bool reset=false)
     {

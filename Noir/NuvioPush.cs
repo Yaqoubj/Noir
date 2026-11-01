@@ -32,6 +32,7 @@ public sealed class NuvioSync:IDisposable
                 jobs=store.State.WatchSync.Values.Where(j=>j.Provider=="Nuvio"&&j.SyncedAt==null&&j.RetryAt<=DateTimeOffset.UtcNow).ToList();
                 deletes=store.State.NuvioDeletes.ToList();
             }
+            if(jobs.Count==0&&deletes.Count==0)return;
             var items=new List<(WatchSyncJob Job,NuvioWatched Item)>();
             foreach(var job in jobs)
             {

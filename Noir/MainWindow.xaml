@@ -53,7 +53,7 @@
        <Path x:Name="SearchGlyph" Data="M10,1 A9,9 0 1 1 9.99,1 M16.5,16.5 L23,23" Stroke="#B8B2AA" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Width="16" Height="16" Stretch="Uniform" HorizontalAlignment="Left" Margin="16,0,0,0" IsHitTestVisible="False"/>
        <TextBlock x:Name="SearchPlaceholder" Text="Search movies &amp; shows" Foreground="#8F8A83" FontSize="13.5" Margin="44,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Text,ElementName=SearchBox}" Value=""><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
       </Grid>
-      <Button x:Name="ScanNav" Grid.Column="2" Style="{StaticResource TopIcon}" Click="Scan_Click" ToolTip="Scan library for new files" AutomationProperties.Name="Scan library"/>
+      <StackPanel Grid.Column="2" Orientation="Horizontal"><Button x:Name="HelpNav" Style="{StaticResource TopIcon}" Click="Help_Click" ToolTip="Shortcuts &amp; tips (?)" AutomationProperties.Name="Shortcuts and tips"><TextBlock Text="?" FontSize="17" FontWeight="SemiBold" Foreground="#D9D4CC"/></Button><Button x:Name="ScanNav" Style="{StaticResource TopIcon}" Click="Scan_Click" ToolTip="Scan library for new files" AutomationProperties.Name="Scan library"/></StackPanel>
      </Grid>
     </Grid>
     <!-- Status messages float briefly at the bottom instead of occupying a line. -->
@@ -64,18 +64,20 @@
    </Grid>
   </Grid>
   <Grid x:Name="PlayerRoot" Background="Black" Visibility="Collapsed">
+   <!-- Built on first use (PlayerSurface.cs) so startup skips the hidden player. -->
+   <Grid.Resources><ControlTemplate x:Key="PlayerSurface" TargetType="ContentControl">
    <vlc:VideoView x:Name="Video" Background="Black" SizeChanged="Video_SizeChanged">
     <Grid x:Name="PlayerOverlay" Background="Transparent" MouseLeftButtonDown="Video_Click" MouseMove="Player_MouseMove">
    <Grid x:Name="PlayerHeader" VerticalAlignment="Top" Panel.ZIndex="10">
     <Grid.Background><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#F0101012" Offset="0"/><GradientStop Color="#A0101012" Offset="0.65"/><GradientStop Color="#00101012" Offset="1"/></LinearGradientBrush></Grid.Background>
     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-    <Button Content="←  Library" Click="Back_Click" Margin="18,14" Background="Transparent"/>
+    <Button Content="←  Library" Click="Back_Click" Margin="18,14" Background="Transparent" ToolTip="Back to the library (Esc)"/>
     <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,12,0"><TextBlock x:Name="NowTitle" Foreground="{StaticResource Text}" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="NowEpisode" Foreground="{StaticResource Muted}" FontSize="12" TextTrimming="CharacterEllipsis"/></StackPanel>
-    <StackPanel Grid.Column="2" Orientation="Horizontal"><Button x:Name="SleepButton" Visibility="Collapsed" Content="Sleep timer" Click="Sleep_Click"/><Button Content="Episodes" Click="PlayerEpisodes_Click" Margin="8,14,18,22" Background="Transparent"/></StackPanel>
+    <StackPanel Grid.Column="2" Orientation="Horizontal"><Button x:Name="SleepButton" Visibility="Collapsed" Content="Sleep timer" Click="Sleep_Click"/><Button Content="Episodes" Click="PlayerEpisodes_Click" Margin="8,14,18,22" Background="Transparent" ToolTip="Every episode of this show"/></StackPanel>
    </Grid>
      <TextBlock x:Name="PlayerMessage" Foreground="{StaticResource Text}" Text="Opening video…" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="20" Background="#AA000000" Padding="20,10"/>
      <TextBlock x:Name="PlayerHint" Visibility="Collapsed" IsHitTestVisible="False" Foreground="{StaticResource Text}" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,130" FontSize="15" Background="#BB101012" Padding="16,8"/>
-     <Button x:Name="SkipIntro" Content="Skip intro  →" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,32,140" Visibility="Collapsed" Click="SkipIntro_Click" Style="{StaticResource Primary}"/>
+     <Button x:Name="SkipIntro" Content="Skip intro  →" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,32,140" Visibility="Collapsed" Click="SkipIntro_Click" Style="{StaticResource Primary}" ToolTip="Press I to skip a known intro"/>
      <Button x:Name="CreditsChip" Visibility="Collapsed" Content="Next episode ›" Click="CreditsChip_Click" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="24,24,24,122" Background="#EE222224"/>
      <!-- Up Next card: episode still in a reserved 16:9 box, ring countdown around the play button. -->
      <Border x:Name="NextPanel" Visibility="Collapsed" Background="#F2161618" BorderBrush="#4D453B" BorderThickness="1" CornerRadius="12" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="24,24,28,122" Width="352" Panel.ZIndex="12">
@@ -111,15 +113,16 @@
      <Button Grid.Column="2" Click="Forward_Click" Style="{StaticResource PlayerIcon}" Margin="2,0,0,0" ToolTip="Forward 10 seconds (→)" AutomationProperties.Name="Forward 10 seconds"><Grid Width="30" Height="30"><Path Data="M15,4 A11,11 0 1 1 4,15 M15,4 L10,0.5 M15,4 L10,7.5" Stroke="#F4F1EB" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/><TextBlock Text="10" FontSize="10" FontWeight="SemiBold" Foreground="#F4F1EB" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,2,0,0"/></Grid></Button>
      <StackPanel x:Name="PlayerVolume" Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0" ToolTip="Volume (↑ ↓ · M to mute)"><Path Data="M1,8 L6,8 L12,3 L12,21 L6,16 L1,16 Z M16,8.5 A5,5 0 0 1 16,15.5 M19,5 A10,10 0 0 1 19,19" Stroke="#F4F1EB" StrokeThickness="1.6" StrokeLineJoin="Round" Width="22" Height="22" Stretch="Uniform" VerticalAlignment="Center"/><Slider x:Name="VolumeBar" Minimum="0" Maximum="100" Width="84" Value="75" ValueChanged="Volume_Changed" Margin="10,0,0,0" VerticalAlignment="Center" AutomationProperties.Name="Volume"/></StackPanel>
      <TextBlock x:Name="SavedLabel" Visibility="Collapsed" Grid.Column="4" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#C7C2BC" FontSize="11" TextTrimming="CharacterEllipsis"/>
-     <Button Grid.Column="5" Click="Languages_Click" Style="{StaticResource PlayerIcon}" ToolTip="Audio &amp; subtitles" AutomationProperties.Name="Audio and subtitles"><Grid Width="30" Height="22"><Border BorderBrush="#F4F1EB" BorderThickness="1.6" CornerRadius="4"/><TextBlock Text="CC" FontSize="10.5" FontWeight="Bold" Foreground="#F4F1EB" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid></Button>
-     <Button Grid.Column="6" Click="PlayerMore_Click" Style="{StaticResource PlayerIcon}" Margin="4,0,0,0" ToolTip="More: picture, sleep timer, intro times" AutomationProperties.Name="More"><Path Data="M1,5 L23,5 M1,12 L23,12 M1,19 L23,19 M7,2 L7,8 M17,9 L17,15 M10,16 L10,22" Stroke="#F4F1EB" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Width="22" Height="22" Stretch="Uniform"/></Button>
+     <Button Grid.Column="5" Click="Languages_Click" Style="{StaticResource PlayerIcon}" ToolTip="Audio, subtitles &amp; timing ([ ] shifts subtitles)" AutomationProperties.Name="Audio and subtitles"><Grid Width="30" Height="22"><Border BorderBrush="#F4F1EB" BorderThickness="1.6" CornerRadius="4"/><TextBlock Text="CC" FontSize="10.5" FontWeight="Bold" Foreground="#F4F1EB" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid></Button>
+     <Button Grid.Column="6" Click="PlayerMore_Click" Style="{StaticResource PlayerIcon}" Margin="4,0,0,0" ToolTip="More: picture, sleep timer, intro times, shortcuts (?)" AutomationProperties.Name="More"><Path Data="M1,5 L23,5 M1,12 L23,12 M1,19 L23,19 M7,2 L7,8 M17,9 L17,15 M10,16 L10,22" Stroke="#F4F1EB" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Width="22" Height="22" Stretch="Uniform"/></Button>
      <Button x:Name="PictureModeButton" Visibility="Collapsed" Grid.Column="7" Content="Fill" Click="PictureMode_Click"/>
-     <StackPanel Grid.Column="7" Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="BoostButton" Content="Boost" Click="Boost_Click" Background="Transparent" Padding="10,6" Margin="4,0,0,0" FontSize="12" ToolTip="Volume boost: up to 200% for quiet videos" AutomationProperties.Name="Volume boost"/><Button x:Name="SpeedButton" Content="1×" Click="Speed_Click" Background="Transparent" Padding="10,6" Margin="2,0,0,0" FontSize="13" FontWeight="SemiBold" ToolTip="Playback speed" AutomationProperties.Name="Playback speed"/></StackPanel>
-     <Button Grid.Column="8" AutomationProperties.Name="Fullscreen" Click="Fullscreen_Click" ToolTip="Fullscreen (F)" Margin="4,0,0,0" Style="{StaticResource PlayerIcon}"><Viewbox Width="22" Height="22"><Path Stroke="#F4F1EB" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M1,8 L1,1 L8,1 M16,1 L23,1 L23,8 M23,16 L23,23 L16,23 M8,23 L1,23 L1,16"/></Viewbox></Button>
+     <StackPanel Grid.Column="7" Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="BoostButton" Content="Boost" Click="Boost_Click" Background="Transparent" Padding="10,6" Margin="4,0,0,0" FontSize="12" ToolTip="Volume boost: up to 200% for quiet videos" AutomationProperties.Name="Volume boost"/><Button x:Name="SpeedButton" Content="1×" Click="Speed_Click" Background="Transparent" Padding="10,6" Margin="2,0,0,0" FontSize="13" FontWeight="SemiBold" ToolTip="Playback speed (Shift+&lt; slower · Shift+&gt; faster)" AutomationProperties.Name="Playback speed"/></StackPanel>
+     <Button Grid.Column="8" AutomationProperties.Name="Fullscreen" Click="Fullscreen_Click" ToolTip="Fullscreen (F or double-click the video)" Margin="4,0,0,0" Style="{StaticResource PlayerIcon}"><Viewbox Width="22" Height="22"><Path Stroke="#F4F1EB" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M1,8 L1,1 L8,1 M16,1 L23,1 L23,8 M23,16 L23,23 L16,23 M8,23 L1,23 L1,16"/></Viewbox></Button>
     </Grid>
    </StackPanel>
     </Grid>
    </vlc:VideoView>
+   </ControlTemplate></Grid.Resources>
   </Grid>
  </Grid>
 </Window>

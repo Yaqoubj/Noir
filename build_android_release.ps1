@@ -12,6 +12,7 @@ $releaseVersion=[regex]::Match([IO.File]::ReadAllText((Join-Path $PSScriptRoot '
 if(!$releaseVersion){throw 'Could not read Android version'}
 $phonePackage="Noir-Android-$releaseVersion-Standalone.apk"
 $universalPackage="Noir-Android-$releaseVersion-Standalone-All.apk"
+$tvPackage="Noir-Android-$releaseVersion-TV.apk"
 & "$PSScriptRoot/scripts/sign-android.ps1"
 Push-Location (Join-Path $PSScriptRoot 'Noir.Android')
 try {
@@ -22,4 +23,8 @@ try {
     & $gradleExecutable --no-daemon --no-watch-fs '-PnoirAbi=arm64-v8a' assembleRelease
     if($LASTEXITCODE -ne 0) {throw 'Android phone build failed'}
     Copy-Item app/build/outputs/apk/release/app-release.apk "$PSScriptRoot/outputs/Android/$phonePackage" -Force
+    # Chromecast with Google TV runs 32-bit apps; newer Google TV boxes are 64-bit.
+    & $gradleExecutable --no-daemon --no-watch-fs '-PnoirAbi=armeabi-v7a,arm64-v8a' assembleRelease
+    if($LASTEXITCODE -ne 0) {throw 'Android TV build failed'}
+    Copy-Item app/build/outputs/apk/release/app-release.apk "$PSScriptRoot/outputs/Android/$tvPackage" -Force
 } finally {Pop-Location}

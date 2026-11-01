@@ -39,7 +39,7 @@ public partial class MainWindow
             await PlayStream(item,option);await Wait(()=>player?.IsPlaying==true&&player.Time>500,"HTTP stream plays without a local video");
             await Wait(()=>attachedStreamSubtitles.Count==2&&player!.Spu>=0,"Cached streaming subtitles attach and select a track");
             var menu=BuildSubtitleMenu();Check(menu.Items.OfType<MenuItem>().Any(m=>m.Header?.ToString()=="Use saved Arabic subtitles"),"Saved language choices appear in the streaming subtitle menu");
-            Check(!menu.Items.OfType<MenuItem>().Any(m=>m.Header?.ToString()=="Auto-sync saved subtitles…"),"Streaming menu excludes unavailable local timing analysis");
+            Check(!menu.Items.OfType<MenuItem>().Any(m=>m.Header?.ToString()=="Auto-sync subtitle timing…"),"Streaming menu excludes unavailable local timing analysis");
             var arabic=menu.Items.OfType<MenuItem>().Single(m=>m.Header?.ToString()=="Use saved Arabic subtitles");arabic.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));await Task.Delay(500);
             Check(Preference(item).SubtitleTrack=="Arabic"&&player!.Spu>=0,"Selecting saved Arabic updates playback and preference");
             AdjustSubtitleDelay(.5);Check(player!.SpuDelay==500000,"Timing adjustment applies during HTTP streaming");
@@ -50,6 +50,11 @@ public partial class MainWindow
             var dialog=OwnedWindows.OfType<Window>().Single(w=>w.Title=="Subtitles");
             Check(ViewElements(dialog).OfType<TextBlock>().Any(t=>t.Text.Contains("while you stream")),"Subtitle download dialog explains streaming support");dialog.Close();
             Check(!File.Exists(item.Path)&&!File.Exists(target.Path),"Playback never downloads a video to the subtitle cache");
+            // A timing-corrected copy of a built-in track wins over the plain track of its language.
+            await File.WriteAllTextAsync(SubtitleDownloads.SyncedCopy(target.Path,"en",".srt"),"1\n00:00:00,000 --> 00:01:50,000\nSYNCED ENGLISH\n");
+            Preference(item).SubtitleTrack="English";await PlayStream(item,option);await Wait(()=>player?.IsPlaying==true&&player.SpuDescription.Count(t=>t.Id>=0)>=3,"Corrected subtitle copy attaches next to the others");
+            ApplyPreferredTracks();var english=player!.SpuDescription.Where(t=>t.Id>=0&&t.Name.Contains("English")).ToList();
+            Check(english.Count>=2&&player.Spu==english[^1].Id,"English picks the corrected copy, added after the others · "+string.Join(" | ",player.SpuDescription.Select(t=>t.Id+"="+t.Name))+" · selected "+player.Spu);
             ReturnToLibrary();
         }
         catch(Exception e){results.Add(e.Message.StartsWith("FAIL:")?e.Message:"FAIL: "+e);}

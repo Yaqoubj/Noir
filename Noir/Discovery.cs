@@ -111,3 +111,16 @@ public sealed partial class LibraryStore
         }
     }
 }
+
+internal static class DiskCacheMaintenance
+{
+    public static void Trim(string directory,DateTimeOffset now,TimeSpan age,long budget,Func<string,bool>? protect=null,object? gate=null)
+    {
+        if(!Directory.Exists(directory)||(File.GetAttributes(directory)&FileAttributes.ReparsePoint)!=0)return;
+        var files=Directory.EnumerateFiles(directory).Select(p=>new FileInfo(p)).Where(f=>(f.Attributes&FileAttributes.ReparsePoint)==0&&Regex.IsMatch(f.Name,@"\A[0-9A-Fa-f]{64}\.[a-zA-Z0-9]+\z")).OrderBy(f=>f.LastWriteTimeUtc).ToList();long bytes=files.Sum(f=>f.Length);
+        foreach(var file in files){if(file.LastWriteTimeUtc>now.UtcDateTime-age&&bytes<=budget)continue;var stamp=(file.Length,file.LastWriteTimeUtc);
+            void Remove(){try{file.Refresh();if(!file.Exists||(file.Length,file.LastWriteTimeUtc)!=stamp||protect?.Invoke(file.FullName)==true)return;file.Delete();bytes-=stamp.Length;}catch(Exception e)when(e is IOException or UnauthorizedAccessException){}}
+            if(gate==null)Remove();else lock(gate)Remove();
+        }
+    }
+}

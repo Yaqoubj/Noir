@@ -77,7 +77,7 @@ public partial class MainWindow
         var body=new StackPanel{Width=150,Margin=new(0,0,14,18)};var picture=new Grid{Height=225,ClipToBounds=true};
         picture.Children.Add(Art(t.Poster,t.Name,225,true));
         if(!File.Exists(t.Poster)&&t.PosterUrl.Length>0)_=Poster();
-        async Task Poster(){try{using var client=DiscoverClient();await client.Artwork(t,CancellationToken.None);var source=ImageSource(t.Poster,384);if(source!=null){picture.Children.RemoveAt(0);picture.Children.Insert(0,new Image{Source=source,Stretch=Stretch.UniformToFill});}}catch(Exception e){store.Log(e);}}
+        async Task Poster(){try{using var client=DiscoverClient();await client.Artwork(t,CancellationToken.None);var source=await LoadImage(t.Poster,384);if(source!=null){picture.Children.RemoveAt(0);picture.Children.Insert(0,new Image{Source=source,Stretch=Stretch.UniformToFill});}}catch(Exception e){store.Log(e);}}
         var picked=picks.GetValueOrDefault(t.Id);var group=TrackedGroup(t);
         var seen=group==null?0:t.IsMovie?(store.EverWatched(group[0])?1:0):group.Count(i=>i.Season>0&&store.EverWatched(i));
         string label=picked!=null?(t.IsMovie||picked.Season==0?"✓ PICKED":$"✓ UP TO S{picked.Season:00}E{picked.Episode:00}"):seen>0?(t.IsMovie?"IN YOUR HISTORY":$"{seen} EPISODES LOGGED"):"";

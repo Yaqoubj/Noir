@@ -12,6 +12,7 @@ public partial class MainWindow
     bool quitting,hiddenInTray,renderWhenShown;
     DispatcherTimer? awakeTimer;
     readonly HashSet<string> announcedDownloads=[];
+    DateTime nextStorageCheck;
     [DllImport("kernel32.dll")] static extern uint SetThreadExecutionState(uint flags);
     const uint EsContinuous=0x80000000,EsSystemRequired=0x00000001;
     const string RunKey=@"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -89,13 +90,13 @@ public partial class MainWindow
     {
         if(tray==null||closing) return;
         var jobs=downloads?.Jobs()??[];
-        if(downloads!=null)_=downloads.CheckReadyStorage();
+        if(downloads!=null&&DateTime.UtcNow>=nextStorageCheck){nextStorageCheck=DateTime.UtcNow.AddSeconds(30);_=downloads.CheckReadyStorage();}
         var active=jobs.Where(j=>j.Status is "Queued" or "Preparing" or "Downloading" or "Subtitles").ToList();
         var text=active.Count==0?"Noir":active.Count==1&&active[0].Size>0?$"Noir · Downloading {Math.Clamp(active[0].Bytes*100/active[0].Size,0,100)}%":$"Noir · {active.Count} downloads in progress";
         tray.Text=text.Length>63?text[..63]:text;
         foreach(var done in jobs.Where(j=>j.Status=="Completed"&&announcedDownloads.Add(j.Id)))
             if(hiddenInTray||!IsActive) Notify("Ready to watch",done.Target.Label,"Home");
-        var streaming=mobileSync!=null&&(DateTime.UtcNow-mobileSync.LastMediaRequest).TotalMinutes<3;
+        var streaming=mobileSync?.ActiveMediaResponses>0;
         // Keep the PC from sleeping only while it is doing work for you. The display may still turn off.
         var busy=store.State.KeepAwakeWhileBusy&&(active.Count>0||streaming);
         SetThreadExecutionState(busy?EsContinuous|EsSystemRequired:EsContinuous);

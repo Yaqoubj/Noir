@@ -18,6 +18,7 @@ public sealed class TitleExtra
     public string Runtime {get;set;}="";
     public string Logo {get;set;}="";
     public DateTimeOffset CheckedAt {get;set;}
+    public DateTimeOffset RetryAfter {get;set;}
 }
 // Home in the style of the big streaming hubs: title-logo heroes with the IMDb score, services you
 // have connected, and this week's Top 10 with large outlined numbers.
@@ -34,7 +35,7 @@ public partial class MainWindow
         var id=item.ImdbId;if(!Regex.IsMatch(id,@"^tt\d+$"))return null;
         if(titleExtras==null){try{titleExtras=File.Exists(ExtrasPath)?JsonSerializer.Deserialize<Dictionary<string,TitleExtra>>(File.ReadAllText(ExtrasPath))??new():new();}catch{titleExtras=new();}}
         var known=titleExtras.GetValueOrDefault(id);
-        if((known==null||known.CheckedAt<DateTimeOffset.UtcNow.AddDays(-14))&&store.State.OnlineMetadata&&!closing&&extrasPending.Add(id))_=FetchExtra(id,item.IsMovie?"movie":"series");
+        if((known==null||known.CheckedAt<DateTimeOffset.UtcNow.AddDays(-14)||known.Rating.Length==0&&known.Runtime.Length==0&&known.Logo.Length==0)&&(known==null||known.RetryAfter<=DateTimeOffset.UtcNow)&&store.State.OnlineMetadata&&!closing&&extrasPending.Add(id))_=FetchExtra(id,item.IsMovie?"movie":"series");
         return known;
     }
     async Task FetchExtra(string id,string type)
@@ -51,17 +52,20 @@ public partial class MainWindow
                 {
                     var bytes=await extrasHttp.GetByteArrayAsync(url);var target=System.IO.Path.Combine(store.DataDirectory,"art","logo-"+id+".png");
                     // Only keep files that decode as images; a missing logo falls back to the title text.
-                    using(var probe=new MemoryStream(bytes)){var frame=BitmapDecoder.Create(probe,BitmapCreateOptions.None,BitmapCacheOption.OnLoad).Frames[0];if(frame.PixelWidth<20)throw new IOException("Logo too small");}
-                    Directory.CreateDirectory(System.IO.Path.GetDirectoryName(target)!);await File.WriteAllBytesAsync(target,bytes);extra.Logo=target;
+                    await Task.Run(async()=>{await imageDecodeSlots.WaitAsync().ConfigureAwait(false);try{using var probe=new MemoryStream(bytes);var frame=BitmapDecoder.Create(probe,BitmapCreateOptions.None,BitmapCacheOption.OnLoad).Frames[0];frame.Freeze();if(frame.PixelWidth<20)throw new IOException("Logo too small");}finally{imageDecodeSlots.Release();}});
+                    Directory.CreateDirectory(System.IO.Path.GetDirectoryName(target)!);var temp=target+"."+Guid.NewGuid().ToString("N")+".tmp";try{await File.WriteAllBytesAsync(temp,bytes);File.Move(temp,target,true);}finally{if(File.Exists(temp))File.Delete(temp);}extra.Logo=target;
                 }
             }
+            else throw new JsonException("Missing title metadata");
+            if(extra.Rating.Length==0&&extra.Runtime.Length==0&&extra.Logo.Length==0)throw new JsonException("Empty title metadata");
         }
-        catch(Exception e)when(e is HttpRequestException or TaskCanceledException or JsonException or IOException or NotSupportedException or FileFormatException){}
-        if(closing)return;
+        catch(Exception e)when(e is HttpRequestException or TaskCanceledException or JsonException or IOException or NotSupportedException or FileFormatException)
+        {extra=titleExtras!.GetValueOrDefault(id)??new();extra.RetryAfter=DateTimeOffset.UtcNow.AddHours(1);}
+        extrasPending.Remove(id);if(closing)return;
         titleExtras![id]=extra;
         // Several titles finish together; save and redraw Home once they settle, keeping the scroll position.
-        if(extrasRender==null){extrasRender=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(700)};extrasRender.Tick+=(_,_)=>{extrasRender.Stop();SaveExtras();if(!closing&&current==null&&page=="Home"&&detailKey==null&&!IsKeyboardFocusWithinSearch)RenderQuiet();};}
-        extrasRender.Stop();extrasRender.Start();
+        if(extrasRender==null){extrasRender=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(700)};extrasRender.Tick+=(_,_)=>{extrasRender.Stop();SaveExtras();};}
+        extrasRender.Stop();extrasRender.Start();if(page=="Home"&&detailKey==null)QueueMetadataRender();
     }
     void SaveExtras()
     {
@@ -70,8 +74,10 @@ public partial class MainWindow
     bool IsKeyboardFocusWithinSearch=>SearchBox.IsKeyboardFocusWithin;
     FrameworkElement? TitleLogo(VideoItem item,double maxHeight,double maxWidth)
     {
-        if(ExtraFor(item) is not {Logo.Length:>0} extra||ImageSource(extra.Logo,900) is not {} source)return null;
-        return new Image{Source=source,Stretch=Stretch.Uniform,MaxHeight=maxHeight,MaxWidth=maxWidth,HorizontalAlignment=HorizontalAlignment.Left,ToolTip=item.Title};
+        if(ExtraFor(item) is not {Logo.Length:>0} extra)return null;
+        var host=new Grid{MaxHeight=maxHeight,MaxWidth=maxWidth,HorizontalAlignment=HorizontalAlignment.Left};var fallback=Text(item.Title,item.Title.Length>24?50:66,weight:FontWeights.Bold);fallback.FontFamily=new FontFamily("Segoe UI Variable Display, Segoe UI");host.Children.Add(fallback);
+        var image=new Image{Stretch=Stretch.Uniform,MaxHeight=maxHeight,MaxWidth=maxWidth,HorizontalAlignment=HorizontalAlignment.Left,ToolTip=item.Title};host.Children.Add(image);_=Load();return host;
+        async Task Load(){await SetArtwork(image,extra.Logo,900);if(image.Source!=null)fallback.Visibility=Visibility.Collapsed;}
     }
     // "Year 2015 · [IMDb] 8.5 · Runtime 25 min · Drama": labels muted, values bright, as one wrapping line.
     TextBlock HeroFacts(VideoItem item,List<VideoItem> group,int rating)
@@ -129,7 +135,7 @@ public partial class MainWindow
             var mixed=new List<DiscoverTitle>();for(int i=0;i<10&&mixed.Count<10;i++)foreach(var list in lists)if(i<list.Count&&mixed.Count<10)mixed.Add(list[i]);
             await Task.WhenAll(mixed.Select(t=>client.Artwork(t,default)));
             topTen=mixed;topTenAt=DateTimeOffset.UtcNow;
-            if(!closing&&current==null&&(page=="Home"&&detailKey==null||page=="Discover"&&discoverTitle==null)&&SearchBox.Text.Length==0)RenderQuiet();
+            if(!closing&&current==null&&(page=="Home"&&detailKey==null||page=="Discover"&&discoverTitle==null)&&SearchBox.Text.Length==0)QueueMetadataRender();
         }
         catch(Exception e)when(e is HttpRequestException or TaskCanceledException or JsonException or IOException){}
         finally{topTenLoading=false;}
@@ -139,8 +145,7 @@ public partial class MainWindow
         var card=new Grid{Width=rank==10?262:212,Height=250,Margin=new(0,0,10,0),Background=Brush("Transparent")};
         card.Children.Add(Numeral(rank));
         var column=new StackPanel{Width=130,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Top};
-        var source=File.Exists(title.Poster)?ImageSource(title.Poster,260):title.PosterUrl.StartsWith("https://",StringComparison.OrdinalIgnoreCase)?new BitmapImage(new Uri(title.PosterUrl)){DecodePixelWidth=260}:null;
-        FrameworkElement picture=source!=null?new Image{Source=source,Stretch=Stretch.UniformToFill,Height=195}:Art("",title.Name,195,true);
+        FrameworkElement picture=Art(title.Poster,title.Name,195,true);
         var framed=new Grid{Height=195};framed.Children.Add(picture);framed.Children.Add(new Border{Background=Brush("#E4C084"),CornerRadius=new(5),Padding=new(5,3,5,3),Margin=new(5),HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Top,Child=Text(StatusText("#"+rank+" this week"),9,"#16120C",FontWeights.SemiBold)});
         var open=new Button{Content=framed,Padding=new(0),Background=Brush("#151517"),HorizontalContentAlignment=HorizontalAlignment.Stretch,ToolTip=title.Name+(title.Rating.Length>0?" · IMDb "+title.Rating:"")};
         System.Windows.Automation.AutomationProperties.SetName(open,$"Top 10 number {rank}: {title.Name}");

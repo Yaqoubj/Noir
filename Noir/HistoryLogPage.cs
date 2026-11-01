@@ -19,6 +19,10 @@ public partial class MainWindow
     List<DiscoverTitle>? logResults;
     CancellationTokenSource? logCancel;
     DispatcherTimer? logDebounce;
+    CancellationTokenSource? logSearchCancel;
+    StackPanel? logSearchHost;
+    int logSearchGeneration;
+    void CancelLogSearch(){logSearchGeneration++;logDebounce?.Stop();logDebounce=null;logSearchCancel?.Cancel();logSearchCancel?.Dispose();logSearchCancel=null;logSearchHost=null;}
     void OpenLog(DiscoverTitle? title)
     {
         if(page!="History"){CancelDiscover();page="History";detailKey=null;SearchBox.Text="";}
@@ -46,28 +50,30 @@ public partial class MainWindow
         box.TextChanged+=(_,_)=>
         {
             hint.Visibility=box.Text.Length>0?Visibility.Collapsed:Visibility.Visible;logQuery=box.Text;
-            logDebounce??=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(320)};logDebounce.Stop();
-            logDebounce.Tick-=LogSearchTick;logDebounce.Tick+=LogSearchTick;logDebounce.Start();
-            void LogSearchTick(object? s,EventArgs e){logDebounce!.Stop();logDebounce.Tick-=LogSearchTick;_=LogSearch(results);}
+            logResults=null;CancelLogSearch();logSearchHost=results;var generation=logSearchGeneration;
+            var debounce=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(320)};logDebounce=debounce;
+            debounce.Tick+=(_,_)=>{debounce.Stop();if(generation==logSearchGeneration)_=LogSearch(results,generation);};debounce.Start();
         };
-        if(logResults!=null)FillLogResults(results);else _=LogSearch(results);
+        logSearchHost=results;if(logResults!=null)FillLogResults(results);else _=LogSearch(results,logSearchGeneration);
     }
-    async Task LogSearch(StackPanel host)
+    async Task LogSearch(StackPanel host,int generation)
     {
-        logCancel?.Cancel();logCancel=new();var token=logCancel.Token;var query=logQuery.Trim();
+        bool Current()=>generation==logSearchGeneration&&ReferenceEquals(host,logSearchHost)&&logging&&page=="History"&&logTitle==null&&!closing;
+        if(!Current())return;
+        logSearchCancel?.Cancel();logSearchCancel?.Dispose();logSearchCancel=new();var token=logSearchCancel.Token;var query=logQuery.Trim();
         host.Children.Clear();host.Children.Add(Body(query.Length>0?$"Searching for “{query}”…":"Loading popular titles…",13));
         try
         {
             using var client=DiscoverClient();var found=await client.Search(query,logFilter,token);
-            if(token.IsCancellationRequested||!logging||closing)return;
+            if(token.IsCancellationRequested||!Current())return;
             logResults=found.Titles;FillLogResults(host);
         }
         catch(OperationCanceledException)when(token.IsCancellationRequested){}
-        catch(Exception e){store.Log(e);host.Children.Clear();host.Children.Add(Heading("Search is unavailable","Check your connection and try again."));}
+        catch(Exception e){if(token.IsCancellationRequested||!Current())return;store.Log(e);host.Children.Clear();host.Children.Add(Heading("Search is unavailable","Check your connection and try again."));}
     }
     void FillLogResults(StackPanel host)
     {
-        host.Children.Clear();var titles=logResults??[];var token=logCancel?.Token??CancellationToken.None;
+        host.Children.Clear();var titles=logResults??[];logSearchCancel??=new();var token=logSearchCancel.Token;
         if(titles.Count==0){host.Children.Add(Heading("Nothing found","Try the original title, or fewer words."));return;}
         host.Children.Add(Heading(logQuery.Trim().Length>0?$"Results for “{logQuery.Trim()}”":"Popular right now","Choose a title to log it."));
         var wrap=new WrapPanel();host.Children.Add(wrap);
@@ -86,7 +92,7 @@ public partial class MainWindow
             var name=Text(title.Name,14,weight:FontWeights.SemiBold);name.Margin=new(0,9,0,2);name.TextTrimming=TextTrimming.CharacterEllipsis;name.TextWrapping=TextWrapping.NoWrap;body.Children.Add(name);
             body.Children.Add(Text((title.IsMovie?"Movie":"Series")+(title.Years.Length>0?" · "+title.Years:""),11,"#9F9A93"));
             if(!File.Exists(title.Poster))_=LoadPoster();
-            async Task LoadPoster(){try{using var client=DiscoverClient();await client.Artwork(title,token);if(token.IsCancellationRequested||!logging)return;var source=ImageSource(title.Poster,384);if(source!=null){picture.Children.RemoveAt(0);var image=new Image{Source=source,Stretch=Stretch.UniformToFill};picture.Children.Insert(0,image);image.BeginAnimation(OpacityProperty,new DoubleAnimation(0,1,TimeSpan.FromMilliseconds(300)));}}catch(OperationCanceledException)when(token.IsCancellationRequested){}catch(Exception e){store.Log(e);}}
+            async Task LoadPoster(){try{using var client=DiscoverClient();await client.Artwork(title,token);if(token.IsCancellationRequested||!logging)return;var source=await LoadImage(title.Poster,384);if(token.IsCancellationRequested||!logging||closing)return;if(source!=null){picture.Children.RemoveAt(0);var image=new Image{Source=source,Stretch=Stretch.UniformToFill};picture.Children.Insert(0,image);image.BeginAnimation(OpacityProperty,new DoubleAnimation(0,1,TimeSpan.FromMilliseconds(300)));}}catch(OperationCanceledException)when(token.IsCancellationRequested){}catch(Exception e){store.Log(e);}}
             wrap.Children.Add(Lift(body,edge));
         }
     }

@@ -110,7 +110,7 @@ public partial class MainWindow
         var tools=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(tools,3);g.Children.Add(tools);
         if(a.Episode.AirsAt>DateTimeOffset.UtcNow)tools.Children.Add(new Border{Background=Brush("#E4C084"),CornerRadius=new(6),Padding=new(9,3,9,3),Child=Text(When(a.Episode.AirsAt!.Value),11,"#16120C",FontWeights.Bold)});
         else if(a.Item!=null)tools.Children.Add(CheckCircle(store.EverWatched(a.Item),store.EverWatched(a.Item)?"Watched":"Mark watched",()=>{if(store.EverWatched(a.Item))SmartWatchedClick(a.Item);else SmartCheckOff(a.Item,$"{show.Title} S{a.Episode.Season:00}E{a.Episode.Episode:00} watched");},38));
-        card.MouseEnter+=(_,_)=>card.BorderBrush=Brush("#2EFFFFFF");card.MouseLeave+=(_,_)=>card.BorderBrush=Brush("#00000000");if(!TrackerOnly&&a.Item!=null)LazyMenu(card,a.Item);
+        card.MouseEnter+=(_,_)=>card.BorderBrush=Brush("#2EFFFFFF");card.MouseLeave+=(_,_)=>card.BorderBrush=Brush("#00000000");if(!TrackerOnly&&a.Item!=null){LazyMenu(card,a.Item);tools.Children.Add(MoreButton(a.Item));}
         return card;
     }
     FrameworkElement OutNowRow(Airing a,List<Airing> all)
@@ -139,7 +139,7 @@ public partial class MainWindow
         {
             var tools=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(tools,2);g.Children.Add(tools);
             tools.Children.Add(CheckCircle(false,"Mark watched",()=>SmartCheckOff(item,$"{show.Title} S{a.Episode.Season:00}E{a.Episode.Episode:00} watched"),54));
-            if(!TrackerOnly)LazyMenu(card,item);
+            if(!TrackerOnly){LazyMenu(card,item);tools.Children.Add(MoreButton(item));}
         }
         card.MouseEnter+=(_,_)=>card.BorderBrush=Brush("#40E4C084");card.MouseLeave+=(_,_)=>card.BorderBrush=Brush("#00000000");
         return card;

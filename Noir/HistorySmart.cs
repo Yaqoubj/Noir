@@ -11,15 +11,24 @@ public partial class MainWindow
 {
     static readonly string[] WhenChoices=["Just now","When they aired","Pick a date","Around a year","Over a period","Don't remember"];
     Popup? smartPopup;
-    // A small dark card at the pointer; closing it without a choice puts the page back as it was.
-    StackPanel SmartPopup(Action? dismissed=null)
+    FrameworkElement? smartInvoker;
+    StackPanel SmartPopup(Action? dismissed=null)=>OpenSmartPopup(InputManager.Current.MostRecentInputDevice is KeyboardDevice,dismissed);
+    StackPanel OpenSmartPopup(bool keyboard,Action? dismissed=null)
     {
-        if(smartPopup!=null)smartPopup.IsOpen=false;
+        var invoker=smartInvoker??Keyboard.FocusedElement as FrameworkElement;if(smartPopup!=null)smartPopup.IsOpen=false;smartInvoker=invoker;
+        var focusIndex=invoker==null?-1:ViewElements(ContentPanel).Where(e=>e.Focusable&&e.IsEnabled).ToList().IndexOf(invoker);
         var body=new StackPanel{Margin=new(18,16,18,16),MaxWidth=420};var chosen=false;
-        var popup=new Popup{Placement=PlacementMode.MousePoint,StaysOpen=false,AllowsTransparency=true,PopupAnimation=PopupAnimation.Fade,
+        KeyboardNavigation.SetTabNavigation(body,KeyboardNavigationMode.Cycle);KeyboardNavigation.SetControlTabNavigation(body,KeyboardNavigationMode.Cycle);
+        var popup=new Popup{Placement=keyboard&&invoker!=null?PlacementMode.Bottom:PlacementMode.MousePoint,PlacementTarget=keyboard?invoker:null,StaysOpen=false,AllowsTransparency=true,PopupAnimation=PopupAnimation.Fade,
             Child=new Border{Background=Brush("#F51A1A1D"),BorderBrush=Brush("#55E4C084"),BorderThickness=new(1),CornerRadius=new(14),Child=body}};
         popup.Tag=(Action)(()=>chosen=true);
-        popup.Closed+=(_,_)=>{if(smartPopup==popup)smartPopup=null;if(!chosen){dismissed?.Invoke();RenderQuiet();}};
+        body.PreviewKeyDown+=(_,e)=>{if(e.Key==Key.Escape){e.Handled=true;popup.IsOpen=false;}};
+        popup.Closed+=(_,_)=>
+        {
+            var latest=smartPopup==popup;if(latest){smartPopup=null;smartInvoker=null;}if(!chosen){dismissed?.Invoke();RenderQuiet();}
+            if(!chosen&&latest&&invoker!=null)Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input,()=>{if(closing||smartPopup!=null)return;ContentPanel.UpdateLayout();var target=invoker.IsLoaded?invoker:focusIndex>=0?ViewElements(ContentPanel).Where(e=>e.Focusable&&e.IsEnabled).ElementAtOrDefault(focusIndex):null;if(target?.Focus()!=true)ContentScroll.Focus();});
+        };
+        body.Loaded+=(_,_)=>Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input,()=>{if(popup.IsOpen){body.UpdateLayout();if(ViewElements(body).OfType<ButtonBase>().FirstOrDefault(b=>b.Focusable&&b.IsEnabled&&b.IsVisible) is {} first)Keyboard.Focus(first);}});
         smartPopup=popup;popup.IsOpen=true;return body;
     }
     void CloseSmart(){if(smartPopup is {} p){((Action)p.Tag)();p.IsOpen=false;}}

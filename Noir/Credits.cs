@@ -19,7 +19,7 @@ public sealed class CreditTitle
 }
 internal sealed class DetailHttp : IDisposable
 {
-    readonly HttpClient http;readonly string cache,key;const int MaxBytes=2_000_000;static readonly SemaphoreSlim gate=new(4);
+    readonly HttpClient http;readonly string cache,key;const int MaxBytes=2_000_000;static readonly SemaphoreSlim gate=new(4);static readonly SemaphoreSlim[] fetches=Enumerable.Range(0,64).Select(_=>new SemaphoreSlim(1,1)).ToArray();
     public DetailHttp(string directory,string key,HttpMessageHandler? handler){cache=Path.Combine(directory,"credits");Directory.CreateDirectory(cache);this.key=key.Trim();http=handler==null?new(new HttpClientHandler{AllowAutoRedirect=false}):new(handler,false);http.Timeout=TimeSpan.FromSeconds(12);http.DefaultRequestHeaders.UserAgent.ParseAdd("Noir/0.14");}
     public async Task<JsonElement> Get(string url,CancellationToken ct)
     {
@@ -27,12 +27,16 @@ internal sealed class DetailHttp : IDisposable
         var file=Path.Combine(cache,Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url)))+".json");
         async Task<JsonElement> Read(){if(new FileInfo(file).Length>MaxBytes)throw new IOException("Credit cache is too large.");using var d=JsonDocument.Parse(await File.ReadAllTextAsync(file,ct).ConfigureAwait(false));return d.RootElement.Clone();}
         if(File.Exists(file)&&File.GetLastWriteTimeUtc(file)>DateTime.UtcNow.AddDays(-7))try{return await Read().ConfigureAwait(false);}catch(Exception e)when(e is JsonException or IOException){}
+        var keyed=fetches[(int)((uint)StringComparer.Ordinal.GetHashCode(file)%fetches.Length)];await keyed.WaitAsync(ct).ConfigureAwait(false);try{
+        if(File.Exists(file)&&File.GetLastWriteTimeUtc(file)>DateTime.UtcNow.AddDays(-7))try{return await Read().ConfigureAwait(false);}catch(Exception e)when(e is JsonException or IOException){}
         await gate.WaitAsync(ct).ConfigureAwait(false);try{
+            using var timeout=CancellationTokenSource.CreateLinkedTokenSource(ct);timeout.CancelAfter(TimeSpan.FromSeconds(12));var bodyToken=timeout.Token;
             var request=url;if(uri.Host=="api.themoviedb.org"&&key.Length<=40)request+=(url.Contains('?')?"&":"?")+"api_key="+Uri.EscapeDataString(key);
-            using var message=new HttpRequestMessage(HttpMethod.Get,request);if(uri.Host=="api.themoviedb.org"&&key.Length>40)message.Headers.Authorization=new("Bearer",key);using var response=await http.SendAsync(message,HttpCompletionOption.ResponseHeadersRead,ct).ConfigureAwait(false);response.EnsureSuccessStatusCode();if(response.Content.Headers.ContentLength>MaxBytes)throw new IOException("Credit response is too large.");
-            using var stream=await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);using var bytes=new MemoryStream();var buffer=new byte[16_384];int count;while((count=await stream.ReadAsync(buffer,ct).ConfigureAwait(false))>0){if(bytes.Length+count>MaxBytes)throw new IOException("Credit response is too large.");bytes.Write(buffer,0,count);}
+            using var message=new HttpRequestMessage(HttpMethod.Get,request);if(uri.Host=="api.themoviedb.org"&&key.Length>40)message.Headers.Authorization=new("Bearer",key);using var response=await http.SendAsync(message,HttpCompletionOption.ResponseHeadersRead,bodyToken).ConfigureAwait(false);response.EnsureSuccessStatusCode();if(response.Content.Headers.ContentLength>MaxBytes)throw new IOException("Credit response is too large.");
+            using var stream=await response.Content.ReadAsStreamAsync(bodyToken).ConfigureAwait(false);using var bytes=new MemoryStream();var buffer=new byte[16_384];int count;while((count=await stream.ReadAsync(buffer,bodyToken).ConfigureAwait(false))>0){if(bytes.Length+count>MaxBytes)throw new IOException("Credit response is too large.");bytes.Write(buffer,0,count);}
             using var doc=JsonDocument.Parse(bytes.ToArray());var temp=file+"."+Guid.NewGuid().ToString("N")+".tmp";try{await File.WriteAllBytesAsync(temp,bytes.ToArray(),ct).ConfigureAwait(false);File.Move(temp,file,true);}finally{if(File.Exists(temp))File.Delete(temp);}Trim();return doc.RootElement.Clone();
         }catch(Exception e)when(!ct.IsCancellationRequested&&File.Exists(file)&&File.GetLastWriteTimeUtc(file)>DateTime.UtcNow.AddDays(-30)&&e is HttpRequestException or IOException or TaskCanceledException){return await Read().ConfigureAwait(false);}finally{gate.Release();}
+        }finally{keyed.Release();}
     }
     void Trim(){try{long total=0;int count=0;foreach(var f in new DirectoryInfo(cache).EnumerateFiles("*.json").OrderByDescending(f=>f.LastWriteTimeUtc)){total+=f.Length;if(++count>256||total>24_000_000)try{f.Delete();}catch(IOException){}}}catch(IOException){}}
     public void Dispose()=>http.Dispose();

@@ -9,7 +9,7 @@ public partial class MainWindow
     Action? downloadPageUpdate;
     int lastDownloadCount=-1;
     void DownloadChanged(){void Update(){if(closing)return;UpdateDownloadBadge();UpdateBackgroundState();if(!hiddenInTray){downloadPageUpdate?.Invoke();if(page=="Downloads")readyCentreUpdate?.Invoke();}}if(Dispatcher.CheckAccess())Update();else Dispatcher.BeginInvoke(Update,DispatcherPriority.DataBind);}
-    void UpdateDownloadBadge(){var count=downloads?.Jobs().Count(j=>j.Status is "Queued" or "Preparing" or "Downloading" or "Subtitles")??0;if(count==lastDownloadCount)return;lastDownloadCount=count;SetNavIcon(DownloadsNav,DownloadIcon(count));UpdateNavSelection();if(!railCompact)DownloadsNav.ToolTip=count>0?$"{T("Downloads")} · {count}":null;}
+    void UpdateDownloadBadge(){var count=downloads?.ActiveCount??0;if(count==lastDownloadCount)return;lastDownloadCount=count;SetNavIcon(DownloadsNav,DownloadIcon(count));UpdateNavSelection();if(!railCompact)DownloadsNav.ToolTip=count>0?$"{T("Downloads")} · {count}":null;}
     void StartDownloads()
     {
         try
@@ -59,7 +59,7 @@ public partial class MainWindow
         }
         ContentPanel.Children.Add(ActionButton(T("Check link"),async()=>{await CheckSubtitleLink();}));
         ContentPanel.Children.Add(ActionButton(T("Save subtitle source"),async()=>{if(await CheckSubtitleLink())try{downloads.ConfigureSubtitleSource(subtitleLink.Password,subtitleOnly.IsChecked==true);Status.Text=T("Subtitle source saved securely.");}catch(Exception){subtitleStatus.Text=T("Couldn't save subtitle source.");}}));
-        ContentPanel.Children.Add(ActionButton("Save download settings",async()=>{if(!await CheckSubtitleLink())return;try{long limit=0;if(size.Text.Trim().Length>0){if(!double.TryParse(size.Text,System.Globalization.NumberStyles.Float,System.Globalization.CultureInfo.InvariantCulture,out var gb)||!double.IsFinite(gb)||gb<=0||gb>1000)throw new System.IO.IOException("Enter an episode size between 0 and 1000 GB, or leave it empty.");limit=(long)(gb*1073741824);}downloads.Configure(manifest.Password,key.Password,shows.SelectedItem as string??"",movies.SelectedItem as string??"",quality.SelectedItem as string??"1080p",limit,new[]{english.IsChecked==true?"en":"",arabic.IsChecked==true?"ar":""}.Where(l=>l.Length>0).ToList(),timing.IsChecked==true,selectedService);downloads.ConfigureSubtitleSource(subtitleLink.Password,subtitleOnly.IsChecked==true);Status.Text="Saved securely on this PC. Paired phones use these download preferences.";}catch(Exception e){Status.Text=e is System.IO.IOException?e.Message:"Couldn't save settings.";}},true));
+        ContentPanel.Children.Add(ActionButton("Save download settings",async()=>{try{if(SubtitleAddon.Normalize(subtitleLink.Password)!=downloads.Config.SubtitleAddonUrl&&!await CheckSubtitleLink())return;long limit=0;if(size.Text.Trim().Length>0){if(!double.TryParse(size.Text,System.Globalization.NumberStyles.Float,System.Globalization.CultureInfo.InvariantCulture,out var gb)||!double.IsFinite(gb)||gb<=0||gb>1000)throw new System.IO.IOException("Enter an episode size between 0 and 1000 GB, or leave it empty.");limit=(long)(gb*1073741824);}downloads.Configure(manifest.Password,key.Password,shows.SelectedItem as string??"",movies.SelectedItem as string??"",quality.SelectedItem as string??"1080p",limit,new[]{english.IsChecked==true?"en":"",arabic.IsChecked==true?"ar":""}.Where(l=>l.Length>0).ToList(),timing.IsChecked==true,selectedService);downloads.ConfigureSubtitleSource(subtitleLink.Password,subtitleOnly.IsChecked==true);Status.Text="Saved securely on this PC. Paired phones use these download preferences.";}catch(Exception e){Status.Text=e is System.IO.IOException?e.Message:"Couldn't save settings.";}},true));
         var servers=ActionButton("Media servers (Plex, Jellyfin, Emby) are in Connections →",()=>{settingsSection="Connections";Render();ContentScroll.ScrollToTop();});servers.Margin=new(0,14,0,10);ContentPanel.Children.Add(servers);
         ContentPanel.Children.Add(Body("All connected sources are checked for releases and existing files. Plan missing episodes checks released episodes, season coverage and local files. Subtitles come from the release or OpenSubtitles, when available, and stay beside the video for offline use. Automatic timing runs locally and keeps an original backup. Files are organized as Show (Year) / Season 01 / Show (Year) S01E01.mkv.",12));
         ContentPanel.Children.Add(ActionButton("Manage PC downloads",ShowDownloads));
@@ -155,7 +155,7 @@ public partial class MainWindow
     Action BuildDownloadQueue(StackPanel body)
     {
         if(downloads==null)return ()=>{};
-        var empty=Body("No downloads queued yet.",13);body.Children.Add(empty);
+        var empty=Body(T("No downloads queued yet. Open a movie or episode and choose ↓ Download, or use ⟳ Keep ready on a season so the next episodes are always waiting.","لا توجد تنزيلات بعد. افتح فيلمًا أو حلقة واختر ↓ تنزيل، أو استخدم ⟳ إبقاء الحلقات جاهزة في موسم لتبقى الحلقات التالية بانتظارك."),13);body.Children.Add(empty);
         var rows=new Dictionary<string,(Border Container,TextBlock Label,ProgressBar Progress,WrapPanel Actions,string State)>();
         void RenderJobs()
         {

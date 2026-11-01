@@ -2,7 +2,7 @@
 
 **A personal cinema and watch tracker for Windows and Android.** Play your own files or streams, and keep your whole viewing history in one place.
 
-[**Download Noir**](https://github.com/Yaqoubj/Noir/releases/latest) · Windows 0.15.1 · Android 0.7.1
+[**Download Noir**](https://github.com/Yaqoubj/Noir/releases/latest) · Windows 0.16.0 · Android 0.8.0
 
 ![Home](docs/screenshots/home.jpg)
 

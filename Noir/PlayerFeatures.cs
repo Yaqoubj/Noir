@@ -18,7 +18,8 @@ public partial class MainWindow
     SegmentKind activeSegment,noticeKind;
     double noticeTarget;
     DispatcherTimer? noticeTimer;
-    DateTime countdownEnds;
+    DateTime countdownEnds,noticeEnds;
+    TimeSpan? pausedCountdown,pausedNotice;
     const double CountdownSeconds=8;
     int stillRequest;
     double sessionSpeed=1;
@@ -83,7 +84,8 @@ public partial class MainWindow
         {
             handledSegments.Add(kind);noticeKind=kind;noticeTarget=end;
             SkipIntro.Content=SkipNoticeText(kind)+"   "+PL("Undo","تراجع");SkipIntro.Visibility=Visibility.Visible;
-            noticeTimer??=new DispatcherTimer{Interval=TimeSpan.FromSeconds(2)};noticeTimer.Tick-=NoticeElapsed;noticeTimer.Tick+=NoticeElapsed;noticeTimer.Stop();noticeTimer.Start();
+            pausedNotice=null;noticeEnds=DateTime.UtcNow.AddSeconds(2);
+            noticeTimer??=new DispatcherTimer();noticeTimer.Interval=TimeSpan.FromSeconds(2);noticeTimer.Tick-=NoticeElapsed;noticeTimer.Tick+=NoticeElapsed;noticeTimer.Stop();noticeTimer.Start();
             return;
         }
         if(noticeKind!=SegmentKind.None) return;
@@ -93,13 +95,26 @@ public partial class MainWindow
     static string SkipNoticeText(SegmentKind kind)=>kind switch{SegmentKind.Recap=>PL("Skipping recap…","جارٍ تخطي الملخص…"),SegmentKind.Credits=>PL("Skipping credits…","جارٍ تخطي الشارة…"),_=>PL("Skipping intro…","جارٍ تخطي المقدمة…")};
     void NoticeElapsed(object? sender,EventArgs e)
     {
+        if(player?.IsPlaying!=true){SetAutomationPaused(true);return;}
         noticeTimer?.Stop();var target=noticeTarget;var kind=noticeKind;noticeKind=SegmentKind.None;SkipIntro.Visibility=Visibility.Collapsed;
         if(current==null||kind==SegmentKind.None) return;
         if(kind==SegmentKind.Intro) introHandled=true;
         SkipTo(kind,target);
     }
     void SkipTo(SegmentKind kind,double target){if(kind==SegmentKind.Credits)SeekAbsolute(Math.Max(0,currentDuration-.3),false,false);else SeekAbsolute(target,false,false);}
-    void CancelSkipNotice(){noticeTimer?.Stop();noticeKind=SegmentKind.None;}
+    void CancelSkipNotice(){noticeTimer?.Stop();pausedNotice=null;noticeKind=SegmentKind.None;}
+    void SetAutomationPaused(bool paused)
+    {
+        var now=DateTime.UtcNow;
+        if(paused)
+        {
+            if(noticeTimer?.IsEnabled==true){pausedNotice=noticeEnds>now?noticeEnds-now:TimeSpan.Zero;noticeTimer.Stop();}
+            if(nextTimer?.IsEnabled==true){pausedCountdown=countdownEnds>now?countdownEnds-now:TimeSpan.Zero;nextTimer.Stop();}
+            return;
+        }
+        if(pausedNotice is {} notice){pausedNotice=null;noticeEnds=now+notice;if(noticeKind!=SegmentKind.None&&noticeTimer!=null){noticeTimer.Interval=notice>TimeSpan.Zero?notice:TimeSpan.FromMilliseconds(1);noticeTimer.Start();}}
+        if(pausedCountdown is {} countdown){pausedCountdown=null;countdownEnds=now+countdown;nextTimer?.Start();}
+    }
     void SkipPillClicked()
     {
         if(noticeKind!=SegmentKind.None){CancelSkipNotice();ShowPlayerHint(PL("Skip cancelled","أُلغي التخطي"));return;}
@@ -129,12 +144,13 @@ public partial class MainWindow
     }
     void StartCountdown()
     {
-        countdownEnds=DateTime.UtcNow.AddSeconds(CountdownSeconds);
+        pausedCountdown=null;countdownEnds=DateTime.UtcNow.AddSeconds(CountdownSeconds);
         nextTimer??=new DispatcherTimer();nextTimer.Interval=TimeSpan.FromMilliseconds(100);
         nextTimer.Tick-=CountdownTick;nextTimer.Tick+=CountdownTick;nextTimer.Start();CountdownTick(null,EventArgs.Empty);
     }
     void CountdownTick(object? sender,EventArgs e)
     {
+        if(!ended&&player?.IsPlaying!=true){SetAutomationPaused(true);return;}
         var left=Math.Max(0,(countdownEnds-DateTime.UtcNow).TotalSeconds);SetRing(1-left/CountdownSeconds);
         var seconds=(int)Math.Ceiling(left);
         NextCountdown.Text=streamNext!=null?PL($"Streaming in {seconds} seconds",$"يبدأ البث خلال {seconds} ث"):PL($"Playing in {seconds} seconds",$"تبدأ خلال {seconds} ث");

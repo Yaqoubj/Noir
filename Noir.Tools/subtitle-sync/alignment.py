@@ -195,7 +195,7 @@ def plausible_candidate(speech, original, global_cues, candidate, cuts, embedded
 
 
 def decide_alignment(speech, cues, offset=0., scale=1., score=0., global_success=False,
-                     embedded=False, global_cues=None):
+                     embedded=False, global_cues=None, audio_check=False):
     """Return (JSON-safe decision, chosen cues), without mutating inputs.
 
     Piecewise can rescue poor global overlap, but not a failed ffsubsync quality
@@ -213,8 +213,11 @@ def decide_alignment(speech, cues, offset=0., scale=1., score=0., global_success
         return none, cues.copy()
     before, baseline = overlap(speech, cues), overlap(speech, fitted)
     meaningful = abs(offset) > 1 or abs(scale - 1) > .003
-    accepted = (np.all(baseline >= _thresholds(embedded)) and np.all(baseline + 1e-9 >= before)
-                and (not meaningful or baseline[0] - before[0] >= .05)
+    # A built-in track checked against the soundtrack: speech detection caps precision lower,
+    # so accept a lower floor only with stronger coverage and a clearly larger gain.
+    floor, gain = (np.array([.55, .5]), .10) if audio_check and not embedded else (_thresholds(embedded), .05)
+    accepted = (np.all(baseline >= floor) and np.all(baseline + 1e-9 >= before)
+                and (not meaningful or baseline[0] - before[0] >= gain)
                 and _no_local_regression(speech, cues, fitted))
     decision = {"accepted": bool(accepted), "offset": float(offset), "scale": float(scale),
                 "method": "global" if accepted else "none",

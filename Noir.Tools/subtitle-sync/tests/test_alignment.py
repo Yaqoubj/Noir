@@ -44,6 +44,23 @@ class AlignmentTests(unittest.TestCase):
         np.testing.assert_array_equal(result, original)
         np.testing.assert_array_equal(original, self.reference)
 
+    def test_audio_check_accepts_a_clear_shift_with_weak_speech_detection(self):
+        # Speech detection finds only ~60% of dialogue, as on real soundtracks.
+        speech = self.speech & (np.random.default_rng(7).random(len(self.speech)) < .6)
+        source = self.reference - 3000
+        strict, _ = decide(speech, source, offset=3.)
+        self.assertFalse(strict["accepted"], strict)
+        decision, result = decide(speech, source, offset=3., audio_check=True)
+        self.assertTrue(decision["accepted"], decision)
+        np.testing.assert_array_equal(result, self.reference)
+
+    def test_audio_check_never_moves_a_matching_track(self):
+        speech = self.speech & (np.random.default_rng(7).random(len(self.speech)) < .6)
+        # A spurious 2 s proposal for an already aligned track must leave it untouched.
+        decision, result = decide(speech, self.reference, offset=2., audio_check=True)
+        self.assertFalse(decision["accepted"], decision)
+        np.testing.assert_array_equal(result, self.reference)
+
     def test_constant_offset(self):
         for offset in (2.75, -3.2):
             with self.subTest(offset=offset):

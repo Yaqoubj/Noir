@@ -140,6 +140,11 @@ public partial class MainWindow
         hero.Loaded+=(_,_)=>{if(painted)Motion.FadeIn(image);Paint();if(heroTints.TryGetValue(tintKey,out var tint)&&tint.IsCompletedSuccessfully)Tint(tint.Result);};
         Paint();
     }
+    bool CarouselVisible(FrameworkElement host)
+    {
+        if(!host.IsLoaded||!host.IsVisible)return false;
+        try{var bounds=host.TransformToAncestor(ContentScroll).TransformBounds(new Rect(host.RenderSize));return bounds.Bottom>0&&bounds.Top<ContentScroll.ViewportHeight;}catch(InvalidOperationException){return false;}
+    }
     // Home: up to five titles that matter right now, rotating every nine seconds with a cross-fade.
     FrameworkElement HeroCarousel(List<(VideoItem Item,List<VideoItem> Group,bool Continuing,bool Finished)> slides)
     {
@@ -157,7 +162,7 @@ public partial class MainWindow
         }
         for(int i=0;i<slides.Count;i++){var target=i;var dot=new Border{Height=4,Width=16,CornerRadius=new(2),Margin=new(3,0,3,0),Cursor=Cursors.Hand,ToolTip=slides[i].Item.Title,Background=Brush("#4DFFFFFF")};dot.MouseLeftButtonDown+=(_,e)=>{Show(target,true);e.Handled=true;};dots.Children.Add(dot);}
         Panel.SetZIndex(dots,5);host.Children.Add(dots);Show(0,false);
-        var timer=new DispatcherTimer{Interval=TimeSpan.FromSeconds(9)};timer.Tick+=(_,_)=>{if(!host.IsMouseOver&&IsActive&&current==null)Show(index+1,true);};
+        var timer=new DispatcherTimer{Interval=TimeSpan.FromSeconds(9)};timer.Tick+=(_,_)=>{if(!host.IsMouseOver&&!host.IsKeyboardFocusWithin&&IsActive&&current==null&&CarouselVisible(host))Show(index+1,true);};
         host.Loaded+=(_,_)=>{if(Motion.Enabled&&!validationMode)timer.Start();};host.Unloaded+=(_,_)=>timer.Stop();
         return Bleed(host);
     }
