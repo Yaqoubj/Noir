@@ -1,104 +1,138 @@
 # Noir
 
-**Your own little cinema, and a diary of everything you've ever watched.**
+**A place for everything you watch.**
 
-Noir plays your files and streams on Windows, Android phones and Google TV, and quietly remembers every episode and movie along the way, even after the files are long gone.
+Settle into a film, pick up a series, or remember something you watched somewhere else.
+Noir brings your player, movie and TV library, and watch diary together on Windows
+and Android phones, with a Google TV / Android TV app for the sofa.
 
 [**Download Noir**](https://github.com/Yaqoubj/Noir/releases/latest) · Windows 0.17.0 · Android 0.9.0 · free and open source
 
-![Noir's Home screen](docs/screenshots/home.jpg)
+![Noir Home, with cinematic artwork and Continue Watching](docs/screenshots/home.jpg)
 
-## Why Noir?
+## Make yourself comfortable
 
-Most players forget you the moment you close them. Most trackers make you do all the typing. Noir does both jobs in one place:
+Point Noir at your movie and show folders on Windows, or stream through your own
+AIOStreams connection. VLC powers playback on PC, phone and TV, with saved resume
+points that let you leave an episode halfway through and come back to it.
 
-- **It plays.** Local files, or streams through AIOStreams with TorBox or Real-Debrid, in a fast VLC-based player with English and Arabic subtitles.
-- **It remembers.** Every check-off, rating, rewatch and note lands in your history automatically, and you can bring in years of history from Netflix, Trakt, TV Time, Letterboxd, IMDb, Plex, Jellyfin, Kodi and more.
-- **It follows you.** Your PC, phone and TV share profiles, history and resume points over home Wi‑Fi. No account, no cloud, and the phone works fine on its own.
+![Noir's player with the next episode waiting](docs/screenshots/player.jpg)
 
-## A Home that knows what you're in the mood for
+- Choose audio tracks and subtitles, including English and Arabic subtitle downloads
+  when available.
+- Skip known intros, recaps and credits; let Up Next take you into the following
+  episode, or cancel it.
+- Save movies and episodes for offline viewing on PC and phone, with downloads
+  managed inside Noir.
 
-Open Noir and the next thing to watch is right there. Below it, rows that actually fill up with things worth your time:
+Streaming and downloads use your configured sources, including AIOStreams, TorBox
+and Real-Debrid, with each service's own connection and account requirements.
 
-- **Continue watching** on wide cards that show the episode and how many minutes are left.
-- **Top 10 this week**, straight from Cinemeta.
-- **Because you watched…**, two rows of picks from your own library first, then fresh titles you haven't seen.
-- **Picked for you** and **More like your favourites**, each card telling you *why* it's there.
-- **Popular** and **Top rated** in the genre you watch most.
+## A library worth browsing
 
-Hover over any card and the big hero at the top changes to that title, so you can browse without clicking into every page. Rows end with a **See all** tile, and **Edit Home** lets you reorder, hide or restyle any of them.
+Browse your folders as a library of posters, artwork, seasons and episode pages,
+with title synopses and cast, **My List** for things you want to watch,
+and collections you put together yourself.
 
-<img src="docs/screenshots/hover.jpg" width="230" align="right" alt="Hover card with preview">
+![A show in Noir, with seasons and episode details](docs/screenshots/show.jpg)
 
-- Hover cards that grow into a muted trailer or clip (you can turn previews off).
-- Labels like "New season" and "Finale" so nothing slips by.
-- A quick Discover side panel (a bottom sheet on the phone).
-- Poster, landscape or list views for your library.
-- Cast and crew with person pages, plus trailers and extras.
+Home mixes **Continue Watching** with recommendations drawn from what you watch,
+rate and favourite. Discover lets you search movies and shows beyond your library;
+you can save a title without downloading it or marking it watched.
 
-<br clear="right">
+![Posters and recommendations on Home](docs/screenshots/home-rows.jpg)
 
-![A show page](docs/screenshots/show.jpg)
+- Find something through popular picks, genres, or suggestions based on your favourites.
+- Let smart lists surface unfinished shows, comfort rewatches and shorter choices
+  for tonight.
+- Arrange Home's rows around the way you browse.
 
-## History, the way you'd actually use it
+## Your whole viewing life
 
-![History: Up next first](docs/screenshots/history.jpg)
+From a film at the cinema to a series on another service, Noir can be your watch
+tracker without a media folder: search a title, choose when you watched it,
+and log a movie, an episode or a season.
 
-History opens on what matters: **Up next**, every show you're in the middle of, with a big check circle for the episode you just finished.
+![History, with shows in progress and the next episode to watch](docs/screenshots/history.jpg)
 
-Right below it is **Recently watched**, so last night's episode is never more than a scroll away.
+**Up next** keeps your place across the shows you follow, with a quick check-off
+for each episode, while your diary keeps viewing dates and rewatches.
+History, ratings, favourites and private notes stay with you even when the video
+files are gone.
 
-![Recently watched](docs/screenshots/recently-watched.jpg)
+- See what's coming in the episode calendar, with air dates when available and
+  optional alerts.
+- Look back through watch-time stats, streaks and a year in review you can save
+  as story images.
+- Rate or leave a note from Recently watched, whenever you feel like it.
 
-- **Favourites** without limits: tap ♡ on any card or title page, and pick your **Top four** for your profile.
-- **Stop showing** a show you've dropped, straight from its ⋯ menu. It leaves Up next, and **Bring back** is one click away if you change your mind. Everything has Undo.
-- Streaks, a weekly goal and your yearly pace live in a slim strip at the bottom: there when you want them, never in your face.
-- A **diary** with hearts and half stars, season ratings with a mood map, and an **Upcoming** calendar with alerts and `.ics` export.
+![Recently watched titles in Noir](docs/screenshots/recently-watched.jpg)
 
-<img src="docs/screenshots/story.jpg" width="260" align="right" alt="Year in review story">
+## Bring your history with you
 
-- **Year in review:** shareable story slides, each saved as a PNG.
-- **On your phone's home screen:** a widget for the next episode, with a ✓ to check it off.
+Bring your records into Noir and keep them alongside what you watch here,
+without having to remember every episode you've seen.
 
-<br clear="right">
+- **Import exports** from Netflix, Trakt, TV Time and Letterboxd, IMDb ratings,
+  Simkl backups, or a CSV of your own.
+- **Connect your other libraries:** pull watched titles from Stremio, Plex,
+  Jellyfin, Emby or Kodi; Nuvio can exchange watched status in both directions.
+- **Review file imports before adding them.** Re-imports skip duplicate viewings,
+  and an import can be undone.
 
-## "How was it?" (only if you want to say)
+Imports and exports are available on Windows and phone; Kodi imports on the phone
+use a paired PC. Export your diary as Noir CSV/JSON, Letterboxd CSV or Trakt JSON.
 
-<img src="docs/screenshots/just-watched.jpg" width="400" align="right" alt="Just watched card">
+## From your desk to the sofa
 
-When you finish an episode or a movie, a small card slides into the corner. React with one tap, rate it, jot a quick note, or open **What others said** to read the Reddit discussion and reviews for that exact episode.
+Browse, track, stream and download on the phone without a PC, or pair your phone
+or TV with Windows Noir over your home network to share watch history, resume points,
+ratings and My List with the linked PC profile.
 
-It never pops up mid-binge, it disappears on its own after a few seconds, and if you ignore it five times in a row Noir takes the hint and stops asking. You can always do it later from Recently watched, or choose *Always*, *Finales and movies only* or *Never* in Settings → History.
+- **On your phone:** play completed downloads offline, or stream files from your
+  PC while it is reachable.
+- **On your TV:** browse and play with the remote, using your own AIOStreams link
+  or a paired PC.
+- **For later:** choose shows to **Keep ready**, with automatic episode downloads
+  within a storage budget you set on PC or phone.
 
-<br clear="right">
+Keep Noir running on the PC for local sync and PC-file streaming.
+The phone saves offline progress for the next connection; its own streams and
+completed downloads can play with the PC off.
 
-## The player
+## Yours to keep
 
-![Up Next card in the player](docs/screenshots/player.jpg)
+Your library, history, private ratings and notes are saved locally, with device
+sync directly over your home network and no Noir account or cloud account required.
+Separate profiles give each person their own library and viewing record.
 
-- An Up Next card with a countdown ring, and a gentle "Still watching?" check.
-- Skip intros, recaps and credits automatically or with a button, each with Undo.
-- Chapter marks on the seek bar, speed from 0.5× to 2×, and a volume boost up to 200%.
-- Preview thumbnails while scrubbing, on PC and phone.
-- Subtitles that fix their own timing, including the ones built into the video.
+- Back up your history, lists, settings and artwork in a `.noirbackup` file on
+  Windows, and restore it in Noir.
+- Windows can also make automatic weekly backups.
+- Backups leave out video files, passwords and browser sign-ins.
 
-## Noir knows you
+Online discovery, subtitles and optional service connections use their respective providers.
 
-- **Keep ready:** the next episodes of your shows are always downloaded and waiting, within a storage budget you set. Watched episodes can clean themselves up after a week; unwatched ones are never deleted. The phone downloads overnight, on Wi‑Fi, while charging, and can bring over whatever you left unfinished on the PC.
-- **Smart lists:** rows that build themselves: Unfinished business, Comfort rewatches, Directors you love, Short tonight.
-- **Catch me up:** coming back after a break? You get a short recap of the last episodes you watched, and never a spoiler past where you stopped.
-- **Compare taste:** share a QR code or a `noir://taste` link with a friend and see how well your tastes match. You see exactly what's shared, and nothing is uploaded.
+## بالعربية أيضًا
 
-## On your TV
+**أفلامك ومسلسلاتك وسجلّ مشاهداتك، في مكان واحد.**
 
-Noir also runs on Google TV and Android TV, built for the remote. It picks streams your TV can actually play smoothly and switches to another if one stalls. Pair it with your PC using a short code shown on screen.
+Choose English or Arabic, with right-to-left browsing layouts and support for Arabic subtitles.
+
+<p>
+<img src="docs/screenshots/arabic-home.jpg" width="49%" alt="Noir Home in Arabic, arranged right to left">
+<img src="docs/screenshots/arabic-history.jpg" width="49%" alt="Noir watch history in Arabic">
+</p>
 
 ## Get started
 
-1. Download the latest release, unzip it and run **Noir.exe**. Choose **Track what I watch** or **Play my files**.
-2. Install the Android APK on your phone (and the TV APK on your TV if you like), then pair them from **Settings → Phone** on the PC. Pairing is optional; the phone works on its own too.
-3. Want streaming? Add TorBox or Real-Debrid and your AIOStreams link in **Settings → Downloads**.
-
-Noir speaks English and Arabic, right-to-left layout included.
+1. [Download Noir](https://github.com/Yaqoubj/Noir/releases/latest). On Windows,
+   unzip the package and run **Noir.exe**; on Android, install the phone or TV APK
+   for your device.
+2. Make it yours: add your media folders on Windows, search and log what you've
+   watched, or import an existing watch history. The phone works without pairing.
+3. Connect what you want: add your AIOStreams link in download settings for
+   streaming, or use Windows **Settings → Phone → Pair a phone or TV** for
+   local device sync.
 
 [Windows guide and building](Noir/README.md) · [Android guide and building](Noir.Android/README.md) · [MIT license](LICENSE)

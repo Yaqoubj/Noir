@@ -20,6 +20,7 @@ public partial class MainWindow
         if(Environment.GetCommandLineArgs().Contains("--aio-probe")){await ProbeAio();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--removal-discover-only")){await ValidateRemovalDiscover();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--premium-redesign-only")){await ValidatePremiumRedesign();Close();return;}
+        if(Environment.GetCommandLineArgs().Contains("--readme-shots")){await CaptureReadmeShots();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--navigation-only")){await ValidateNavigationDiscover();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--ux-only")){await ValidateUx();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--player-only")){await ValidatePlayer();Close();return;}
