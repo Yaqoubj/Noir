@@ -35,6 +35,7 @@ public final class HistoryToolsActivity extends Activity {
         TextView title=text("Import, export & backup",22,MainActivity.WHITE);title.setTypeface(null,Typeface.BOLD);title.setPadding(dp(14),0,0,0);header.addView(title);root.addView(header);
         ScrollView scroll=new ScrollView(this);body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);scroll.addView(body);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));status=text("",12,MainActivity.MUTED);root.addView(status);
         if(plan!=null){review();return;}
+        PhoneJustWatched.settings(this);
         heading("Import from another app");
         note("Netflix, Letterboxd, Trakt, TV Time, IMDb, Simkl, a spreadsheet, or a Noir export. Matched on Cinemeta; re-importing never duplicates anything.");
         button("Choose a file…",()->open(OPEN_IMPORT,"*/*"),true);

@@ -33,7 +33,7 @@ public partial class MainWindow
             Loc.Use("ar");Press(System.Windows.Input.Key.F1);PlayerOverlay.UpdateLayout();
             Assert(shortcutSheet!=null&&Descendants(shortcutSheet).OfType<System.Windows.Controls.Border>().Any(b=>b.FlowDirection==FlowDirection.RightToLeft&&b.CornerRadius.TopLeft==16)&&Descendants(shortcutSheet).OfType<System.Windows.Controls.TextBlock>().Any(t=>t.Text=="[  ]"&&t.FlowDirection==FlowDirection.LeftToRight),"Arabic player shortcut sheet is right to left with left-to-right key caps");Shot("shortcuts-ar");Press(System.Windows.Input.Key.Escape);
             Assert(BuildSubtitleMenu().Items.OfType<System.Windows.Controls.MenuItem>().Any(m=>m.Header?.ToString()?.StartsWith("التوقيت")==true),"Arabic subtitle menu translates Timing");Loc.Use(store.State.Language);
-            Prefs.VolumeBoost=true;VolumeBar.Value=80;ApplyVolume();Assert(player.Volume==160,"Volume boost sends up to twice the slider volume to VLC");Prefs.VolumeBoost=false;VolumeBar.Value=0;ApplyVolume();Assert(player.Volume==0,"Turning boost off restores the plain slider volume");
+            Prefs.VolumeBoost=true;VolumeBar.Value=80;ApplyVolume();await Until(()=>player.Volume==160,"Volume boost sends up to twice the slider volume to VLC");Prefs.VolumeBoost=false;VolumeBar.Value=0;ApplyVolume();await Until(()=>player.Volume==0,"Turning boost off restores the plain slider volume");
             chapterMarks.Clear();chapterMarks.AddRange([(0d,"Previously"),(currentDuration*.3,"Act One"),(currentDuration*.7,"Act Two")]);DrawChapterTicks();
             Assert(ChapterTicks.Children.Count==2,"Chapter ticks are drawn on the seek bar");Assert(ChapterAt(currentDuration*.5)=="Act One","Hover label knows the chapter under the pointer");
             JumpChapter(1);await Until(()=>pendingTarget==null&&player.Time/1000d>=currentDuration*.3-2,"Next chapter jumps to the following chapter start");
@@ -53,7 +53,7 @@ public partial class MainWindow
             Assert(player.Time/1000d<recapSegment.End-5,"Undo cancels the automatic skip");recapSegment=null;Prefs.SkipRecap=SkipMode.Manual;
             SeekAbsolute(store.CompletionStart(episode,currentDuration)+1);
             await Until(()=>creditsReached&&NextPanel.Visibility==Visibility.Visible,"The Up Next card appears when credits start");
-            Assert(nextTimer?.IsEnabled!=true,"Manual credits mode waits for the viewer");Assert(NextMedia.Visibility==Visibility.Visible&&NextMedia.ActualHeight>150,"Up Next reserves a 16:9 still box");
+            Assert(nextTimer?.IsEnabled!=true,"Manual credits mode waits for the viewer");await Until(()=>{PlayerOverlay.UpdateLayout();return NextMedia.Visibility==Visibility.Visible&&NextMedia.ActualHeight>150;},"Up Next reserves a 16:9 still box");
             await Task.Delay(600);Shot("upnext");
             StartCountdown();await Task.Delay(2500);Assert(NextRing.Data!=null&&((string)NextCountdown.Text).Contains('6'),"The ring counts down around the play button");Shot("upnext-ring");
             TogglePause();await Until(()=>player!.State==LibVLCSharp.Shared.VLCState.Paused,"Playback pauses during Up Next");
@@ -74,10 +74,59 @@ public partial class MainWindow
             Assert(detailKey==next!.GroupKey&&detailTab=="Episodes"&&detailSeason==next.Season&&episodeFilter=="All episodes","Player Episodes opens the current season on the Episodes tab");
             Prefs.SkipIntro=SkipMode.Off;SavePrefs();Assert(!store.State.AutoSkipIntro&&PlaybackPrefs.Load(store.DataDirectory,true).SkipIntro==SkipMode.Off,"Skip choices persist per profile and keep the legacy flag in step");
             Navigate("Settings");UpdateLayout();
+            await ValidateJustWatched(results,episode);
             results.Add("ALL PLAYER CHECKS PASSED");
         }
         catch(Exception error){results.Add(error.ToString());store.Log(error);}
         finally{File.WriteAllText(Path.Combine(store.DataDirectory,"player-checks.json"),JsonSerializer.Serialize(results,new JsonSerializerOptions{WriteIndented=true}));}
+    }
+    async Task ValidateJustWatched(List<string> results,VideoItem episode)
+    {
+        void Check(bool ok,string label){if(!ok)throw new Exception("FAIL: "+label);results.Add("PASS: "+label);}
+        async Task Until(Func<bool> predicate,string label){var until=DateTime.UtcNow.AddSeconds(20);while(!predicate()&&DateTime.UtcNow<until)await Task.Delay(100);Check(predicate(),label);}
+        void Click(string name){var button=Descendants(justWatchedCard!).OfType<System.Windows.Controls.Button>().First(b=>System.Windows.Automation.AutomationProperties.GetName(b)==name);button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));}
+        void Key(System.Windows.UIElement element,System.Windows.Input.Key key)=>element.RaiseEvent(new System.Windows.Input.KeyEventArgs(System.Windows.Input.Keyboard.PrimaryDevice,PresentationSource.FromVisual(this)!,Environment.TickCount,key){RoutedEvent=System.Windows.Input.Keyboard.PreviewKeyDownEvent});
+        async Task Shot(string name){UpdateLayout();await Task.Delay(450);CaptureLibrary(Path.Combine(store.DataDirectory,"player-just-watched"+name+".png"));}
+        var language=store.State.Language;var previous=JsonSerializer.Serialize(HistoryPrefs);var review=store.State.PersonalReviews.GetValueOrDefault(episode.Id);var reaction=store.State.Reactions.GetValueOrDefault(episode.Id)??"";
+        try
+        {
+            SetLanguage("en");SetAfterWatching("Always");HistoryPrefs.JustWatchedNoticeShown=false;validateJustWatched=true;Navigate("Home");store.SetReview10(episode,0,"");store.SetReaction(episode.Id,"");
+            await PlayVideo(episode,true);await Until(()=>player?.IsPlaying==true,"Just watched: real episode starts");
+            Check(justWatchedCard==null,"No corner card between autoplayed episodes or while playing");
+            PlaybackEnded();CancelNext();ReturnToLibrary();await Until(()=>justWatchedCard!=null,"Finishing an episode then returning shows the corner card");
+            Check(!justWatchedCard!.IsKeyboardFocusWithin,"The corner card never takes page keyboard focus");await Shot("");
+            Click("Loved");Check(store.State.Reactions.GetValueOrDefault(episode.Id)=="loved","A Just watched reaction click stores the existing reaction format");
+            var rating=Descendants(justWatchedCard!).OfType<System.Windows.Controls.Button>().First(b=>System.Windows.Automation.AutomationProperties.GetName(b)=="Your rating · optional");
+            rating.ContextMenu!.Items.OfType<System.Windows.Controls.MenuItem>().First(m=>Equals(m.Tag,7)).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.MenuItem.ClickEvent));
+            Check(store.State.PersonalReviews.GetValueOrDefault(episode.Id)?.Rating10==7,"The corner card saves a half-star rating");
+            Click("Add a note…");var editor=Descendants(justWatchedCard!).OfType<System.Windows.Controls.TextBox>().Single();editor.Text="A quiet ending.";Key(editor,System.Windows.Input.Key.Enter);
+            Check(store.State.PersonalReviews[episode.Id].Note=="A quiet ending."&&editor.Visibility==Visibility.Collapsed,"Enter saves the inline note and shows its snippet");
+            Click("Edit note");editor.Text="Cancelled edit";Key(editor,System.Windows.Input.Key.Escape);Check(store.State.PersonalReviews[episode.Id].Note=="A quiet ending."&&justWatchedCard!=null,"Escape cancels a note edit without dismissing the card");
+            Click("Edit note");editor.Text="Saved on focus loss.";editor.RaiseEvent(new System.Windows.Input.KeyboardFocusChangedEventArgs(System.Windows.Input.Keyboard.PrimaryDevice,Environment.TickCount,editor,SearchBox){RoutedEvent=System.Windows.Input.Keyboard.LostKeyboardFocusEvent});
+            Check(store.State.PersonalReviews[episode.Id].Note=="Saved on focus loss.","Leaving the inline editor saves the note");
+            Click("What others said");Check(justWatchedReviewsOpened==episode.Id,"What others said dispatches the exact episode to OpenReviews (validation stub)");
+            Click("Dismiss Just watched");Check(HistoryPrefs.JustWatchedIgnores==0,"Dismissing an interacted card does not count as an ignore");
+            SetLanguage("ar");OfferJustWatched(episode);await Shot("-ar");
+            Check(justWatchedCard!.FlowDirection==FlowDirection.RightToLeft&&Descendants(justWatchedCard).OfType<System.Windows.Controls.TextBlock>().Any(t=>t.Text=="شاهدت للتو"),"Arabic corner card translates its controls and reads right to left");
+            Check(justWatchedCard.TranslatePoint(new Point(justWatchedCard.ActualWidth/2,0),this).X<ActualWidth/2,"Arabic places Just watched at the bottom-left");DismissJustWatched(false);SetLanguage("en");
+            var inline=JustWatchedPanel(episode,true);inline.Measure(new Size(420,double.PositiveInfinity));inline.Arrange(new Rect(new Point(),inline.DesiredSize));
+            Check(Descendants(inline).OfType<System.Windows.Controls.WrapPanel>().First().DesiredSize.Height<35&&inline.DesiredSize.Width<=420,"Compact reactions, half-stars and note/comments links fit one 420 px row");
+            Check(Descendants(inline).OfType<System.Windows.Controls.TextBlock>().Any(t=>t.Text=="Saved on focus loss.")&&Descendants(inline).OfType<System.Windows.Controls.Button>().Any(b=>System.Windows.Automation.AutomationProperties.GetHelpText(b)=="Selected"),"History inline controls reflect the saved note and reaction");
+            for(int n=1;n<=5;n++){OfferJustWatched(episode);Click("Dismiss Just watched");Check(HistoryPrefs.JustWatchedIgnores==n,$"Closing an untouched card counts consecutive ignore {n}");}
+            Check(HistoryPrefs.JustWatchedQuiet&&HistorySettings.Load(store.DataDirectory).JustWatchedQuiet&&justWatchedCard?.Tag as string=="quiet","Five ignores persist quiet mode and show its one-time notice");
+            Click("Keep asking");Check(HistoryPrefs.AfterWatching=="Always"&&!HistoryPrefs.JustWatchedQuiet&&HistoryPrefs.JustWatchedIgnores==0,"Keep asking restores Always and resets ignores");
+            HistoryPrefs.JustWatchedQuiet=true;SaveHistoryPrefs();OfferJustWatched(episode);Check(justWatchedCard==null,"Quiet mode suppresses the next corner card");
+            Check(Descendants(JustWatchedPanel(episode,true)).OfType<System.Windows.Controls.Button>().Any(),"Quiet mode keeps History inline feedback available");
+            SetAfterWatching("Never");OfferJustWatched(episode);Check(justWatchedCard==null,"Never suppresses the corner card");
+            SetAfterWatching("Always");OfferJustWatched(episode,true);Check(justWatchedCard==null,"A running Up Next countdown suppresses Just watched");
+            validateJustWatched=false;OfferJustWatched(episode);Check(justWatchedCard==null,"Ordinary validation never shows Just watched without an explicit trigger");validateJustWatched=true;
+            await PlayVideo(episode,true);await Until(()=>player?.IsPlaying==true,"Halfway-stop test starts playback");creditsReached=false;CancelNext();ReturnToLibrary();await Until(()=>current==null&&LibraryRoot.Visibility==Visibility.Visible,"Stopping partway returns to the library");await Task.Delay(1000);
+            Check(justWatchedCard==null,"Stopping halfway through an already watched episode shows no corner card");
+        }
+        finally
+        {
+            DismissJustWatched(false);validateJustWatched=false;historySettings=JsonSerializer.Deserialize<HistorySettings>(previous);SaveHistoryPrefs();store.SetReview10(episode,review?.Rating10??0,review?.Note??"");store.SetReaction(episode.Id,reaction);SetLanguage(language);
+        }
     }
 }
 #endif

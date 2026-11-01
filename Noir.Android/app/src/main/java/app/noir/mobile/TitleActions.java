@@ -21,6 +21,7 @@ final class TitleActions {
 
     void dismiss() { if(dialog!=null) { dialog.dismiss();dialog=null; } }
 
+    TextView favouriteChip(JSONObject item){TextView chip=a.ui.chip(a.data.liked(item.optString("group"))?"♥ Favourite":"♡ Favourite",()->{PhoneTracker.toggleFavourite(a.data,item);Motion.haptic(a.body);dismiss();a.renderKeep();},false);chip.setContentDescription(Loc.t(a.data.liked(item.optString("group"))?"♥ Favourite":"♡ Favourite"));chip.setFocusable(true);return chip;}
     void show(JSONObject item) {
         dismiss();
         Dialog sheet=new Dialog(a);dialog=sheet;
@@ -59,6 +60,8 @@ final class TitleActions {
             Button nuvio=a.button("▶ Stream in Nuvio",()->{dismiss();a.nuvio(item);},false);nuvio.setContentDescription("Stream in Nuvio");actions.addView(nuvio);}
 
         }
+        actions.addView(favouriteChip(item));
+        actions.addView(a.ui.chip(item.optString("status").equals("Dropped")?"Bring back":"Stop showing (I dropped this)",()->{dismiss();if(item.optString("status").equals("Dropped"))a.tracker.bringBack(item);else a.tracker.stopShowing(item);},false));
         section(actions,"WATCH & ORGANIZE");
         List<Tile> organize=new ArrayList<>(List.of(
             action(MainActivity.completed(item)?"↶":"✓",MainActivity.completed(item)?"Mark unwatched":"Mark watched",()->choose(item,2)),
@@ -80,12 +83,12 @@ final class TitleActions {
         section(actions,"YOUR ACTIVITY & DETAILS");
         tiles(actions,List.of(
             action("☆","Rating & note",()->{dismiss();PhoneTracker.quickRate(a,item);}),
-            action(a.data.liked(item.optString("group"))?"♥":"♡","Like this title",()->{a.data.like(item.optString("group"),!a.data.liked(item.optString("group")));a.data.syncSoon();dismiss();a.renderKeep();}),
+            action(a.data.liked(item.optString("group"))?"♥":"♡","Favourite",()->{PhoneTracker.toggleFavourite(a.data,item);dismiss();a.renderKeep();}),
             action("◷","Viewing dates",()->choose(item,6)),
             action("💬","Comments",()->choose(item,4)),
             action("ⓘ","Description",()->choose(item,13)),
             action("⌕","Correct match",()->choose(item,11))));
-        scroll.addView(body);content.addView(scroll,new LinearLayout.LayoutParams(-1,-1));sheet.setContentView(content);
+        scroll.addView(body);content.addView(scroll,new LinearLayout.LayoutParams(-1,-1));PhoneJustWatched.accessible(content);sheet.setContentView(content);
         Window w=sheet.getWindow();
         if(w!=null){w.setBackgroundDrawableResource(android.R.color.transparent);w.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);WindowManager.LayoutParams p=w.getAttributes();p.gravity=Gravity.BOTTOM;p.dimAmount=.65f;w.setAttributes(p);}
         sheet.setOnDismissListener(d->{if(dialog==sheet)dialog=null;});sheet.show();

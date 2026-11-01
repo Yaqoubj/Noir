@@ -23,11 +23,15 @@ public partial class MainWindow
             {
                 settingsSection=section;Navigate("Settings");await Settle();
                 var buttons=Descendants(ContentPanel).OfType<Button>().ToList();
-                Check(SettingsSections.All(s=>buttons.Any(b=>Name(b)==s.Name)),$"{section}: the section list names all nine sections");
+                Check(SettingsSections.All(s=>buttons.Any(b=>Name(b)==s.Name)),$"{section}: the section list names all ten sections");
                 Check(Descendants(ContentPanel).OfType<TextBlock>().Any(t=>t.Text==section&&t.FontSize==28),$"{section}: the right pane opens with its title");
                 Check(Descendants(ContentPanel).OfType<FrameworkElement>().Count()>12,$"{section}: the section has content");
                 Shot(section.ToLowerInvariant().Replace(" & ","-").Replace(' ','-'));
             }
+            settingsSection="History";Navigate("Settings");await Settle();
+            var afterWatching=ContentPanel;var ask=Descendants(afterWatching).OfType<ComboBox>().Single(c=>Name(c)=="After watching, ask how it was");var savedAsk=HistoryPrefs.AfterWatching;
+            Check(ask.Items.Count==3&&Descendants(afterWatching).OfType<TextBlock>().Any(t=>t.Text=="After watching, ask how it was"),"Settings → History contains the after-watching row with all three choices");
+            foreach(var (index,value) in new[]{(2,"Never"),(1,"Finales"),(0,"Always")}){ask.SelectedIndex=index;Check(HistorySettings.Load(store.DataDirectory).AfterWatching==value,"After-watching setting saves "+value+" per profile");}SetAfterWatching(savedAsk);
             settingsSection="Downloads";Navigate("Settings");await Settle();
             Check(!Descendants(ContentPanel).OfType<Expander>().Any(e=>e.Header as string=="Add Jellyfin / Emby"),"Downloads no longer carries the media-server form");
             // A waiting Trakt queue shows as one folded line with a count, and on the Connections badge.

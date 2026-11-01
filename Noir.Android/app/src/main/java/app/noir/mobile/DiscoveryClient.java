@@ -30,6 +30,18 @@ final class DiscoveryClient {
         }
         if(sources.isEmpty()&&failure!=null)throw failure;JSONArray result=new JSONArray();Set<String> ids=new HashSet<>();int length=sources.stream().mapToInt(JSONArray::length).max().orElse(0);for(int i=0;i<length;i++)for(JSONArray source:sources){JSONObject title=source.optJSONObject(i);if(title!=null&&ids.add(title.optString("noirType")+title.optString("id")))result.put(title);}return result;
     }
+    interface GenreCatalog {JSONArray fetch(String genre,boolean topRated)throws Exception;}
+    static volatile GenreCatalog genreOverride;
+    JSONArray genreCatalog(String genre,boolean topRated)throws Exception{
+        GenreCatalog fake=genreOverride;if(fake!=null)return fake.fetch(genre,topRated);
+        List<JSONArray> sources=new ArrayList<>();Exception failure=null;for(String kind:new String[]{"movie","series"})try{
+            JSONObject response=read("catalog/"+kind+"/top/genre="+URLEncoder.encode(genre,"UTF-8").replace("+","%20")+"&skip=0.json",6*3600000L);JSONArray source=new JSONArray();
+            for(JSONObject title:DataStore.objects(response.optJSONArray("metas"))){if(!title.optString("id").matches("tt[0-9]+"))continue;DataStore.put(title,"noirType",kind);source.put(title);}sources.add(source);
+        }catch(Exception e){failure=e;}
+        if(sources.isEmpty()&&failure!=null)throw failure;List<JSONObject> titles=new ArrayList<>();int length=sources.stream().mapToInt(JSONArray::length).max().orElse(0);for(int n=0;n<length;n++)for(JSONArray source:sources){JSONObject title=source.optJSONObject(n);if(title!=null)titles.add(title);}
+        if(topRated){List<JSONObject> rated=new ArrayList<>();int sampled=0;for(JSONObject title:titles){if(sampled++>=40||rated.size()>=30)break;if(Thread.currentThread().isInterrupted())throw new InterruptedIOException();if(title.optDouble("imdbRating",0)<=0)try{JSONObject meta=details(title);DataStore.put(title,"imdbRating",meta.optDouble("imdbRating",0));}catch(Exception ignored){}if(title.optDouble("imdbRating",0)>0)rated.add(title);}titles=rated;titles.sort((a,b)->Double.compare(b.optDouble("imdbRating",0),a.optDouble("imdbRating",0)));}
+        JSONArray result=new JSONArray();for(JSONObject title:titles)result.put(title);return result;
+    }
     JSONObject details(JSONObject title)throws Exception{
         String type=title.optString("noirType"),id=title.optString("id");if(!id.matches("tt[0-9]+")||!Arrays.asList("movie","series").contains(type))throw new IOException("Choose a title from search.");
         JSONObject result=read("meta/"+type+"/"+id+".json",12*3600000L).getJSONObject("meta");DataStore.put(result,"noirType",type);return result;

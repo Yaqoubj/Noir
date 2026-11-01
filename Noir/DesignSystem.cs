@@ -35,7 +35,7 @@ public partial class MainWindow
     void ShowHoverCard(FrameworkElement owner,FrameworkElement anchor,List<VideoItem> group)
     {
         CloseHoverCard();var item=group[0];var next=store.ContinueFor(group)??store.UpNextFor(group)?.Item??item;var width=Math.Clamp(anchor.ActualWidth*1.35,270,450);
-        var body=new StackPanel();var media=new Border{Height=width*.56,Background=Brush("#19191C"),Child=Art(System.IO.File.Exists(item.Backdrop)?item.Backdrop:item.Poster,item.Title,width*.56),ClipToBounds=true};body.Children.Add(media);if(Motion.Enabled)HoverPreview(media,item);
+        var body=new StackPanel();var media=new Border{Height=width*.56,Background=Brush("#19191C"),Child=Art(System.IO.File.Exists(item.Backdrop)?item.Backdrop:item.Poster,item.Title,width*.56),ClipToBounds=true};body.Children.Add(media);if(Motion.Enabled&&(page!="Home"||detailKey!=null))HoverPreview(media,item);
         var info=new StackPanel{Margin=new(14)};body.Children.Add(info);info.Children.Add(Text(item.Title,17,weight:FontWeights.SemiBold));var label=TileStatus(item);if(label.Length>0){var pill=new Border{HorizontalAlignment=HorizontalAlignment.Left,CornerRadius=new(5),Padding=new(7,3,7,3),Margin=new(0,8,0,4),Background=Brush("#33E4C084"),Child=Text(StatusText(label),11,"#E4C084")};info.Children.Add(pill);}
         var facts=new List<string>();if(next.Duration>0)facts.Add(Loc.Runtime(next.Duration));if(item.Year>0)facts.Add(item.Year.ToString());facts.AddRange(item.Genres.Split('·',StringSplitOptions.TrimEntries|StringSplitOptions.RemoveEmptyEntries).Take(3).Select(T));var meta=Text(string.Join(" · ",facts),11,"#BDB6AC");meta.Margin=new(0,6,0,10);info.Children.Add(meta);
         var actions=new WrapPanel();info.Children.Add(actions);void Add(string text,string name,Action action,bool primary=false){var b=ActionButton(text,()=>{CloseHoverCard();action();},primary);b.Padding=new(10,7,10,7);b.FontSize=12;b.Margin=new(0,0,6,6);System.Windows.Automation.AutomationProperties.SetName(b,name);actions.Children.Add(b);}
@@ -50,16 +50,21 @@ public partial class MainWindow
         var container=new StackPanel{Margin=new(0,8,0,4)};var header=new DockPanel{Margin=new(0,22,0,14)};
         var arrows=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Bottom};DockPanel.SetDock(arrows,Dock.Right);header.Children.Add(arrows);
         var heading=new StackPanel();heading.Children.Add(Text(T(title),21,weight:FontWeights.SemiBold));if(subtitle.Length>0){var s=Body(subtitle,12);s.Margin=new(0,3,0,0);heading.Children.Add(s);}header.Children.Add(heading);
-        var row=new StackPanel{Orientation=Orientation.Horizontal};foreach(var card in cards)row.Children.Add(card);
+        var row=new StackPanel{Orientation=Orientation.Horizontal};foreach(var card in cards){row.Children.Add(card);if(page=="Home"&&detailKey==null)WireHomeRailCard(card);}
         if(row.Children.Count==0) return container;
+        if(seeAll!=null)
+        {
+            var tile=ActionButton(T("See all ›","عرض الكل ›"),seeAll);tile.Tag="HomeSeeAllTile";tile.Width=156;tile.MinHeight=76;tile.VerticalAlignment=VerticalAlignment.Stretch;tile.Margin=new(0,0,18,8);tile.Background=Brush("#161618");tile.Foreground=Brush("#E4C084");tile.Template=TileTemplate();System.Windows.Automation.AutomationProperties.SetName(tile,T("See all {0}","عرض كل {0}",T(title)));row.Children.Add(tile);
+            row.Loaded+=(_,_)=>{tile.Height=Math.Max(76,row.Children.OfType<FrameworkElement>().Where(c=>c!=tile).Max(c=>c.ActualHeight));};
+        }
         var scroll=new ScrollViewer{Content=row,HorizontalScrollBarVisibility=ScrollBarVisibility.Hidden,VerticalScrollBarVisibility=ScrollBarVisibility.Disabled,PanningMode=PanningMode.HorizontalOnly,Padding=new(0,6,0,6),Margin=new(-6,-6,-6,0)};
         row.Margin=new(6,0,6,0);
         Button Arrow(string glyph,string tip,int direction)
         {
             var b=ActionButton(glyph,()=>scroll.ScrollToHorizontalOffset(Math.Clamp(scroll.HorizontalOffset+direction*Math.Max(300,scroll.ViewportWidth*.8),0,scroll.ScrollableWidth)));
-            b.ToolTip=T(tip);b.FontSize=20;b.Width=38;b.Height=34;b.Padding=new(0);b.Margin=new(8,0,0,0);b.Background=Brush("#1C1C1F");return b;
+            b.ToolTip=T(tip);System.Windows.Automation.AutomationProperties.SetName(b,T(tip)+" "+T(title));b.FontSize=20;b.Width=38;b.Height=34;b.Padding=new(0);b.Margin=new(8,0,0,0);b.Background=Brush("#1C1C1F");return b;
         }
-        if(seeAll!=null){var all=ActionButton(seeAllLabel,seeAll);all.Padding=new(14,7,14,7);all.Background=Brush("Transparent");all.Foreground=Brush("#E4C084");arrows.Children.Add(all);}
+        if(seeAll!=null){var all=ActionButton(seeAllLabel,seeAll);System.Windows.Automation.AutomationProperties.SetName(all,T("See all {0}","عرض كل {0}",T(title)));all.Padding=new(14,7,14,7);all.Background=Brush("Transparent");all.Foreground=Brush("#E4C084");arrows.Children.Add(all);}
         var previous=Arrow("‹","Previous",-1);var next=Arrow("›","More",1);arrows.Children.Add(previous);arrows.Children.Add(next);
         void Update(){previous.IsEnabled=scroll.HorizontalOffset>1;next.IsEnabled=scroll.HorizontalOffset<scroll.ScrollableWidth-1;previous.Visibility=next.Visibility=scroll.ScrollableWidth>1?Visibility.Visible:Visibility.Collapsed;}
         scroll.ScrollChanged+=(_,_)=>Update();scroll.Loaded+=(_,_)=>Update();
@@ -122,7 +127,8 @@ public partial class MainWindow
         var meta=item.IsMovie?(item.Year>0?item.Year.ToString():"Movie"):(watched>0?$"{watched} / {total} watched":$"{total} episodes");
         if(!group.Any(CanPlay))meta+=" · Not on PC";
         var line=Text(meta,11,"#9F9A93");line.TextTrimming=TextTrimming.CharacterEllipsis;line.TextWrapping=TextWrapping.NoWrap;panel.Children.Add(line);
-        LazyMenu(panel,item);return HoverCard(Lift(panel,edge),group,edge);
+        if(page=="Home"&&detailKey==null&&!homePosterTitles){name.Visibility=Visibility.Collapsed;line.Visibility=Visibility.Collapsed;}
+        LazyMenu(panel,item);return FollowHomeHero(HoverCard(Lift(panel,edge),group,edge),()=>item);
     }
     void RailCatalog(List<List<VideoItem>> groups,string title,string subtitle="",Action? seeAll=null,int limit=30)
     {

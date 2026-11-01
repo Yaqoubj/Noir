@@ -26,7 +26,7 @@ public partial class MainWindow
     {
         var b=ActionButton("⋯",()=>{});b.Padding=new(11,2,11,8);b.FontSize=17;b.Margin=new(8,0,0,0);b.VerticalAlignment=VerticalAlignment.Center;b.Background=Brush("#1FFFFFFF");
         b.ToolTip=T("More: download, subtitles, match, mark watched… (or right-click)","المزيد: التنزيل والترجمة والمطابقة وتعليم المشاهدة… (أو النقر بالزر الأيمن)");System.Windows.Automation.AutomationProperties.SetName(b,T("More options for","خيارات أخرى لـ")+" "+item.Label);
-        b.Click+=(_,e)=>{e.Handled=true;var menu=ItemMenu(item);menu.PlacementTarget=b;menu.Placement=PlacementMode.Bottom;menu.IsOpen=true;};return b;
+        b.Click+=(_,e)=>{e.Handled=true;var menu=ItemMenu(item);b.ContextMenu=menu;menu.PlacementTarget=b;menu.Placement=PlacementMode.Bottom;menu.IsOpen=true;};return b;
     }
     // Returns true once per id, then remembers it so a tip never comes back.
     bool TipOnce(string id){if(validationMode||!store.State.TipsShown.Add(id))return false;store.Save();return true;}

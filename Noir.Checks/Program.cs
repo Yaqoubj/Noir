@@ -18,6 +18,7 @@ Check(MobileSyncServer.CheckCode("ab12cd34ef567890"+new string('0',48))=="AB12 C
 SmartListChecks.Run(root,Check);
 MobileChecks.Run(root,Check);
 BrowsingChecks.Run(root,Check);
+HomeRedesignChecks.Run(root,Check);
 LetterboxdChecks.Run(root,Check);
 await PhoneProfileChecks.Run(root,Check);
 EmbeddedSubtitleChecks.Run(Check);

@@ -169,7 +169,7 @@ public partial class MainWindow
     void LazyMenu(FrameworkElement target,VideoItem item){target.ContextMenu=new ContextMenu();target.ContextMenuOpening+=(_,_)=>target.ContextMenu=ItemMenu(item);}
     ContextMenu ItemMenu(VideoItem item)
     {
-        var menu=new ContextMenu();
+        var menu=new ContextMenu{FlowDirection=LibraryRoot.FlowDirection};AddHistoryTitleActions(menu,item);
         if(StreamOffered&&System.Text.RegularExpressions.Regex.IsMatch(item.ImdbId,@"^tt\d+$"))
         {
             var stream=new MenuItem{Header="Stream now"};stream.Click+=(_,_)=>StreamItem(item);menu.Items.Add(stream);

@@ -57,6 +57,9 @@ public partial class MainWindow
             Navigate("Home");Check(page=="History","Home leads to History in tracker mode");
             Navigate("Shows");Check(page=="History"&&trackerTab=="Shows","Shows opens the tracker's Shows tab");
             trackerTab="Up next";Navigate("History");await Settle();Shot("tracker-only");
+            var order=ContentPanel.Children.OfType<FrameworkElement>().ToList();var watchIndex=order.FindIndex(e=>e.Tag as string=="HistoryWatchNext");var recentIndex=order.FindIndex(e=>e.Tag as string=="HistoryRecentlyWatched");var statsIndex=order.FindIndex(e=>e.Tag as string=="HistoryStatsStrip");Check(watchIndex>=0&&recentIndex==watchIndex+1&&statsIndex>recentIndex,"Tracker-only puts Recently watched directly after Watch next and stats below both");
+            var selectedPill=Descendants(ContentPanel).OfType<Button>().First(b=>b.Content as string=="Up next");Check(selectedPill.Background.ToString()=="#FFE4C084","Tracker-only highlights the selected pill in gold");
+
             var continuation=TrackedShows().First(t=>t.Status=="Watching"&&t.Next!=null);var continuationItem=continuation.Next!;var countBefore=store.ViewingHistory(continuationItem).Count;var continuationCard=TrackerRow(continuation,false);
             Descendants(continuationCard).OfType<Button>().Single(b=>System.Windows.Automation.AutomationProperties.GetName(b)=="Mark "+continuationItem.EpisodeLabel+" watched").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));await Settle(600);
             Check(smartPopup==null&&store.ViewingHistory(continuationItem).Count==countBefore+1&&store.ViewingHistory(continuationItem)[0].WatchedAt.LocalDateTime.Date==DateTime.Today,"One-tap continuation logs exactly the next episode today without a catch-up prompt");Shot("one-tap-reward");

@@ -145,25 +145,64 @@ public partial class MainWindow
         if(!host.IsLoaded||!host.IsVisible)return false;
         try{var bounds=host.TransformToAncestor(ContentScroll).TransformBounds(new Rect(host.RenderSize));return bounds.Bottom>0&&bounds.Top<ContentScroll.ViewportHeight;}catch(InvalidOperationException){return false;}
     }
-    // Home: up to five titles that matter right now, rotating every nine seconds with a cross-fade.
+    Action<VideoItem?>? homeHeroFocus;string homeHeroTitle="";FrameworkElement? homeHeroCard;
+    readonly System.Runtime.CompilerServices.ConditionalWeakTable<FrameworkElement,object> homeFocusCards=new();
+    FrameworkElement FollowHomeHero(FrameworkElement card,Func<VideoItem> item)
+    {
+        if(page!="Home"||detailKey!=null||homeFocusCards.TryGetValue(card,out _))return card;homeFocusCards.Add(card,new());var dwell=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(350)};var leave=new DispatcherTimer{Interval=TimeSpan.FromSeconds(3)};
+        void Enter(){if(page!="Home"||detailKey!=null)return;homeHeroCard=card;leave.Stop();dwell.Stop();dwell.Start();}
+        void Leave(){if(card.IsKeyboardFocusWithin)return;if(homeHeroCard==card)homeHeroCard=null;dwell.Stop();leave.Stop();leave.Start();}
+        dwell.Tick+=(_,_)=>{dwell.Stop();if(page=="Home"&&detailKey==null)homeHeroFocus?.Invoke(item());};leave.Tick+=(_,_)=>{leave.Stop();if(page=="Home"&&detailKey==null&&homeHeroCard==null)homeHeroFocus?.Invoke(null);};
+        card.MouseEnter+=(_,_)=>Enter();card.MouseLeave+=(_,_)=>Leave();card.GotKeyboardFocus+=(_,_)=>Enter();card.LostKeyboardFocus+=(_,_)=>{if(!card.IsKeyboardFocusWithin)Leave();};card.Unloaded+=(_,_)=>{dwell.Stop();leave.Stop();};return card;
+    }
+    void WireHomeRailCard(FrameworkElement card)
+    {
+        if(ViewElements(card).Any(e=>homeFocusCards.TryGetValue(e,out _)))return;
+        var names=ViewElements(card).OfType<Button>().Select(b=>System.Windows.Automation.AutomationProperties.GetName(b)).ToList();
+        var discover=topTen?.FirstOrDefault(t=>names.Any(n=>n.StartsWith("Top 10 number ",StringComparison.Ordinal)&&n.EndsWith(": "+t.Name,StringComparison.Ordinal)));
+        if(discover!=null){FollowHomeHero(card,()=>HomeHeroItem(discover));return;}
+        var item=store.Archive.FirstOrDefault(i=>names.Any(n=>n==i.Title+" details"||n=="Continue "+i.Label));if(item!=null)FollowHomeHero(card,()=>item);
+    }
+    FrameworkElement HomeTitleMark(VideoItem item,double maxHeight,double maxWidth,double fontSize)
+    {
+        var host=new Grid{MaxHeight=maxHeight,MaxWidth=maxWidth,HorizontalAlignment=HorizontalAlignment.Left};fontSize=item.Title.Length>24?Math.Min(fontSize,40):item.Title.Length>12?Math.Min(fontSize,50):fontSize;host.MaxHeight=Math.Max(maxHeight,fontSize*2.6);var text=Text(item.Title,fontSize,weight:FontWeights.Bold);text.TextWrapping=TextWrapping.Wrap;text.LineHeight=fontSize*1.12;text.TextTrimming=TextTrimming.WordEllipsis;host.Children.Add(text);var logo=titleExtras?.GetValueOrDefault(item.ImdbId)?.Logo;
+        if(File.Exists(logo)){var image=new Image{MaxHeight=maxHeight,MaxWidth=maxWidth,Stretch=Stretch.Uniform,HorizontalAlignment=HorizontalAlignment.Left,FlowDirection=FlowDirection.LeftToRight};host.Children.Add(image);_=Paint();async Task Paint(){await SetArtwork(image,logo!,maxWidth>300?900:384);if(image.Source!=null)text.Visibility=Visibility.Collapsed;}}return host;
+    }
+    FrameworkElement HomeFocusHero(VideoItem item,double height)
+    {
+        var grid=new Grid{Height=height,ClipToBounds=true,Background=Brush("#0B0B0D")};HeroArtwork(grid,File.Exists(item.Backdrop)?item.Backdrop:item.Poster,item.GroupKey);
+        var panel=new StackPanel{Margin=new(sidePad,100,sidePad,80),VerticalAlignment=VerticalAlignment.Bottom,HorizontalAlignment=HorizontalAlignment.Left,MaxWidth=560};panel.Children.Add(Text(T("YOUR NEXT DISCOVERY","اكتشافك القادم"),11,"#E4C084",FontWeights.SemiBold));
+        var mark=HomeTitleMark(item,120,420,item.Title.Length>28?42:60);mark.Margin=new(0,14,0,12);panel.Children.Add(mark);
+        var extra=titleExtras?.GetValueOrDefault(item.ImdbId);var facts=new[]{item.Year>0?item.Year.ToString():"",extra?.Rating.Length>0?"★ "+extra.Rating:"",item.Duration>0?Loc.Runtime(item.Duration):extra?.Runtime??"",string.Join(" · ",HomeDiscovery.Genres(item.Genres).Take(3).Select(T))};panel.Children.Add(Text(string.Join(" · ",facts.Where(f=>f.Length>0)),14,"#C7C2BC"));
+        var summary=Text(item.Summary,15,"#C7C2BC");summary.LineHeight=23;summary.MaxHeight=92;summary.TextTrimming=TextTrimming.WordEllipsis;summary.Margin=new(0,14,0,0);panel.Children.Add(summary);var info=ActionButton(T("More info","المزيد من المعلومات"),()=>{var group=store.EpisodesFor(item.GroupKey);if(group.Count>0)OpenDetails(group);else _=OpenDiscover(new(){Id=item.ImdbId,Name=item.Title,Type=item.IsMovie?"movie":"series",Poster=item.Poster,Background=item.Backdrop,Summary=item.Summary,Genres=HomeDiscovery.Genres(item.Genres).ToList()});});info.HorizontalAlignment=HorizontalAlignment.Left;info.Margin=new(0,24,0,0);System.Windows.Automation.AutomationProperties.SetName(info,T("More info about {0}","المزيد عن {0}",item.Title));panel.Children.Add(info);grid.Children.Add(panel);return grid;
+    }
+    // Home stays at a fixed height while a rail supplies the spotlight.
     FrameworkElement HeroCarousel(List<(VideoItem Item,List<VideoItem> Group,bool Continuing,bool Finished)> slides)
     {
-        if(slides.Count==1) return CinematicHero(slides[0].Item,slides[0].Group,slides[0].Continuing,slides[0].Finished);
-        var host=new Grid();var index=0;FrameworkElement? shown=null;
+        homePosterTitles=HomeLayout.Load(store.DataDirectory).ShowPosterTitles;
+        var host=new Grid{Height=Math.Max(620,HeroHeight(false)),ClipToBounds=true};var index=0;FrameworkElement? shown=null;bool following=false;DateTimeOffset focusAt=DateTimeOffset.MinValue;
         var dots=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Bottom,Margin=new(0,0,0,26)};
+        void Paint(FrameworkElement slide,bool animate)
+        {
+            slide.Margin=new(0);var old=shown;shown=slide;host.Children.Insert(0,slide);
+            if(old!=null&&animate&&Motion.Enabled){Panel.SetZIndex(old,1);Panel.SetZIndex(slide,0);Motion.FadeIn(slide);var fade=new DoubleAnimation(0,TimeSpan.FromMilliseconds(450));fade.Completed+=(_,_)=>{old.BeginAnimation(OpacityProperty,null);host.Children.Remove(old);};old.Unloaded+=(_,_)=>old.BeginAnimation(OpacityProperty,null);old.BeginAnimation(OpacityProperty,fade);}
+            else if(old!=null)host.Children.Remove(old);
+        }
         void Show(int next,bool animate)
         {
-            index=(next+slides.Count)%slides.Count;var s=slides[index];var slide=CinematicHero(s.Item,s.Group,s.Continuing,s.Finished);slide.Margin=new(0);
-            var old=shown;shown=slide;host.Children.Insert(0,slide);
-            if(old!=null&&animate&&Motion.Enabled){Motion.FadeIn(slide);Panel.SetZIndex(old,1);Panel.SetZIndex(slide,0);var fade=new DoubleAnimation(0,TimeSpan.FromMilliseconds(650));fade.Completed+=(_,_)=>{old.BeginAnimation(OpacityProperty,null);host.Children.Remove(old);};old.Unloaded+=(_,_)=>old.BeginAnimation(OpacityProperty,null);old.BeginAnimation(OpacityProperty,fade);}
-            else if(old!=null)host.Children.Remove(old);
+            index=(next+slides.Count)%slides.Count;var s=slides[index];homeHeroTitle=s.Item.Title;Paint(CinematicHero(s.Item,s.Group,s.Continuing,s.Finished),animate);
             var upcoming=slides[(index+1)%slides.Count].Item;_=PreloadHero(File.Exists(upcoming.Backdrop)?upcoming.Backdrop:upcoming.Poster);
-            for(int i=0;i<dots.Children.Count;i++){var d=(Border)dots.Children[i];d.Width=i==index?30:16;d.Background=Brush(i==index?"#F4F1EB":"#4DFFFFFF");}
+            for(int i=0;i<dots.Children.Count;i++){var d=(Button)dots.Children[i];d.Width=i==index?30:16;d.Background=Brush(i==index?"#F4F1EB":"#4DFFFFFF");}
         }
-        for(int i=0;i<slides.Count;i++){var target=i;var dot=new Border{Height=4,Width=16,CornerRadius=new(2),Margin=new(3,0,3,0),Cursor=Cursors.Hand,ToolTip=slides[i].Item.Title,Background=Brush("#4DFFFFFF")};dot.MouseLeftButtonDown+=(_,e)=>{Show(target,true);e.Handled=true;};dots.Children.Add(dot);}
+        void FocusTitle(VideoItem? title)
+        {
+            if(title==null){if(following&&DateTimeOffset.UtcNow-focusAt>=TimeSpan.FromSeconds(2.8)){following=false;Show(index,true);}return;}
+            focusAt=DateTimeOffset.UtcNow;following=true;if(homeHeroTitle==title.Title)return;homeHeroTitle=title.Title;Paint(HomeFocusHero(title,host.Height),true);
+        }
+        homeHeroFocus=FocusTitle;
+        for(int i=0;i<slides.Count;i++){var target=i;var dot=ActionButton("",()=>{following=false;Show(target,true);});dot.Height=6;dot.Width=16;dot.Padding=new(0);dot.Margin=new(3,0,3,0);dot.ToolTip=slides[i].Item.Title;System.Windows.Automation.AutomationProperties.SetName(dot,T("Show {0}","عرض {0}",slides[i].Item.Title));dots.Children.Add(dot);}
         Panel.SetZIndex(dots,5);host.Children.Add(dots);Show(0,false);
-        var timer=new DispatcherTimer{Interval=TimeSpan.FromSeconds(9)};timer.Tick+=(_,_)=>{if(!host.IsMouseOver&&!host.IsKeyboardFocusWithin&&IsActive&&current==null&&CarouselVisible(host))Show(index+1,true);};
-        host.Loaded+=(_,_)=>{if(Motion.Enabled&&!validationMode)timer.Start();};host.Unloaded+=(_,_)=>timer.Stop();
-        return Bleed(host);
+        var timer=new DispatcherTimer{Interval=TimeSpan.FromSeconds(12)};timer.Tick+=(_,_)=>{if(!following&&slides.Count>1&&!host.IsMouseOver&&!host.IsKeyboardFocusWithin&&IsActive&&current==null&&CarouselVisible(host))Show(index+1,true);};
+        host.Loaded+=(_,_)=>{if(Motion.Enabled&&!validationMode)timer.Start();};host.Unloaded+=(_,_)=>{timer.Stop();if(homeHeroFocus==FocusTitle){homeHeroFocus=null;homeHeroCard=null;}};return Bleed(host);
     }
 }

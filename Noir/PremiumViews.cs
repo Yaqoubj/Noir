@@ -52,6 +52,7 @@ public partial class MainWindow
         }
         var status=store.TitleStatus(group);
         var statusButton=Tile("◐",status,()=>{},"Viewing status");statusButton.Click+=(_,_)=>{var menu=new ContextMenu();foreach(var s in LibraryStore.Statuses){var v=s;var m=new MenuItem{Header=s,IsCheckable=true,IsChecked=store.State.TitleStatuses.GetValueOrDefault(item.GroupKey,"Automatic")==s};m.Click+=(_,_)=>{store.SetStatus(item,v);Render();};menu.Items.Add(m);}menu.PlacementTarget=statusButton;menu.Placement=PlacementMode.Bottom;menu.IsOpen=true;};
+        Tile(HistoryLiked(item)?"♥":"♡",HistoryFavouriteLabel(item),()=>ToggleHistoryFavourite(item));
         Tile("▤","Collections",()=>CollectionDialog(item));
         Tile("✎","Diary",()=>OpenDiary(item),"Viewing dates, rating and private note");
         var more=Tile("⋯","More",()=>{});more.Click+=(_,_)=>{var menu=ItemMenu(item);menu.PlacementTarget=more;menu.Placement=PlacementMode.Bottom;menu.IsOpen=true;};

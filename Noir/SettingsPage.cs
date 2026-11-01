@@ -11,7 +11,7 @@ public partial class MainWindow
     string settingsSection="Profile";
     static readonly (string Name,string Hint)[] SettingsSections=
     [
-        ("Profile","You and how you use Noir"),("Playback","Auto-next, intros, subtitles"),("Library & folders","Folders, artwork, organizing"),
+        ("Profile","You and how you use Noir"),("Playback","Auto-next, intros, subtitles"),("History","Rate, react and keep notes"),("Library & folders","Folders, artwork, organizing"),
         ("Connections","Trakt, Nuvio, Stremio, servers"),("Downloads","Sources, quality, folders"),("Phone","Pair and sync Android"),
         ("Appearance & language","Language, side rail, spoilers"),("Backup","Back up, restore, export"),("Advanced","Background, shortcuts, about"),
     ];
@@ -40,6 +40,7 @@ public partial class MainWindow
             switch(settingsSection)
             {
                 case "Playback":RenderPlaybackSettings();break;
+                case "History":RenderHistorySettings();break;
                 case "Library & folders":RenderLibrarySettings();break;
                 case "Connections":RenderConnections();break;
                 case "Downloads":RenderDownloadSettings();break;

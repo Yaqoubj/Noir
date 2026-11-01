@@ -384,6 +384,7 @@ public partial class MainWindow
     VideoItem? keepReadyCandidate;
     async void ReturnToLibrary()
     {
+        var justFinished=current!=null&&creditsReached?current:null;var wasCountingDown=nextTimer?.IsEnabled==true||pausedCountdown!=null;var returnSerial=serial+1;DismissJustWatched(false);
         SavePlayback();CancelNext();CancelSkipNotice();tick?.Stop();DetachEvents();serial++;streamSubtitleCancellation?.Cancel();streamRequest++;
         HidePreview();
         SetSleep(null);
@@ -400,7 +401,9 @@ public partial class MainWindow
         PlayerRoot.Visibility=Visibility.Collapsed;LibraryRoot.Visibility=Visibility.Visible;Title="Noir";Render();
         if(restoreLibraryView){ContentScroll.ScrollToVerticalOffset(libraryScroll);restoreLibraryView=false;if(libraryFocusName.Length>0)ViewElements(ContentPanel).FirstOrDefault(e=>System.Windows.Automation.AutomationProperties.GetName(e)==libraryFocusName)?.Focus();}
         try{if(native!=null)await StopPlayer(native);await store.FlushPendingAsync();}catch(Exception error){store.Log(error);Status.Text="Couldn't finish saving playback. Check library storage.";}
-        if(keepReadyCandidate is {} finished&&!validationMode){keepReadyCandidate=null;OfferKeepReady(finished);}
+        if(closing||serial!=returnSerial||current!=null)return;
+        if(keepReadyCandidate is {} finished&&!validationMode){keepReadyCandidate=null;var mayOffer=downloads!=null&&!downloads.ReadyOfferShown(finished.GroupKey)&&!NoirReadyPolicy.Enabled(downloads.SeasonPreferences(finished.Id));OfferKeepReady(finished);if(mayOffer)return;}
+        OfferJustWatched(justFinished!=null&&store.GetProgress(justFinished) is {Completed:true}?justFinished:null,wasCountingDown);
     }
     void Seek_Begin(object sender,MouseButtonEventArgs e) { seeking=true; }
     void Seek_End(object sender,MouseButtonEventArgs e) { if(seeking) { seeking=false;SeekAbsolute(SeekBar.Value); } }

@@ -37,7 +37,7 @@ final class PhoneHarbor {
   for(Service s:services()){if(!s.on)continue;TextView t=a.text(s.name,17,s.color);t.setTypeface(Typeface.create("sans-serif-black",Typeface.BOLD));t.setGravity(Gravity.CENTER);t.setSingleLine();
    GradientDrawable b=MainActivity.bg(Color.argb(22,255,255,255),a.dp(14));b.setStroke(a.dp(1),Color.argb(26,255,255,255));t.setBackground(b);t.setContentDescription(s.name);t.setOnClickListener(v->s.open.run());
    LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(a.dp(138),a.dp(58));p.setMargins(0,0,a.dp(10),0);t.setLayoutParams(p);tiles.add(t);}
-  a.ui.rail(host,"Your services","",tiles,()->{a.page="Connections";a.render();});
+  Runnable all=()->{a.page="Connections";a.render();};a.homeLayout.endTile(tiles,all);a.ui.rail(host,"Your services","",tiles,all);
  }
  // Large outlined numerals behind each poster; digits never mirror in Arabic.
  void topTenRail(LinearLayout host){
@@ -49,7 +49,7 @@ final class PhoneHarbor {
  }
  void fillTopTen(LinearLayout slot){
   List<View> cards=new ArrayList<>();for(int i=0;i<topTen.length();i++)cards.add(topTenCard(topTen.optJSONObject(i),i+1));
-  a.ui.rail(slot,"Top 10 this week","Most popular on Cinemeta right now.",cards,()->a.startActivity(new Intent(a,DiscoverActivity.class)));
+  Runnable all=()->a.startActivity(new Intent(a,DiscoverActivity.class));a.homeLayout.endTile(cards,all);a.ui.rail(slot,"Top 10 this week","Most popular on Cinemeta right now.",cards,all);
  }
  View topTenCard(JSONObject title,int rank){
   FrameLayout card=new FrameLayout(a);card.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(a.dp(rank==10?196:166),a.dp(200));cp.setMargins(0,0,a.dp(6),0);card.setLayoutParams(cp);

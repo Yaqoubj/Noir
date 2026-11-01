@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -38,7 +39,22 @@ public partial class MainWindow
     }
     FrameworkElement ContinueShelf(IEnumerable<UpNext> videos,string label="Continue Watching",string subtitle="Pick up from your saved time, or play the next episode.")
     {
-        return Rail(label,subtitle,videos.Select(entry=>HoverCard(Lift(ContinueCard(entry.Item,entry)),store.EpisodesFor(entry.Item.GroupKey))).ToList());
+        if(page!="Home")return Rail(label,subtitle,videos.Select(entry=>HoverCard(Lift(ContinueCard(entry.Item,entry)),store.EpisodesFor(entry.Item.GroupKey))).ToList());
+        var layout=HomeLayout.Load(store.DataDirectory);homePosterTitles=layout.ShowPosterTitles;return Rail(label,subtitle,videos.Select(entry=>HomeContinueCard(entry,layout.ContinueStyle!="Poster")).ToList(),()=>{trackerTab="Up next";Navigate("History");});
+    }
+    FrameworkElement HomeContinueCard(UpNext entry,bool wide)
+    {
+        var item=entry.Item;var group=store.EpisodesFor(item.GroupKey);var height=wide?176:264;var panel=new StackPanel{Width=wide?312:176,Margin=new(0,0,18,12),Tag=wide?"HomeWideContinue":"HomePosterContinue"};
+        var progress=store.GetProgress(item);var picture=new Grid{Height=height,ClipToBounds=true};var job=ActiveDownload(item);
+        void Open(){if(entry.Kind==UpNextKind.Upcoming)OpenDetails(group);else if(CanPlay(item))_=PlayVideo(item);else if(job!=null)Navigate("Downloads");else if(CanStream)StreamItem(item);else FindDownloads(item);}
+        var image=wide&&File.Exists(item.EpisodeImage)&&(!store.State.HideSpoilers||entry.Kind==UpNextKind.Resume||store.EverWatched(item))?item.EpisodeImage:wide&&File.Exists(item.Backdrop)?item.Backdrop:item.Poster;
+        var play=ActionButton("",Open);play.Content=Art(image,item.Title,height,!wide);play.Padding=new(0);play.HorizontalAlignment=HorizontalAlignment.Stretch;System.Windows.Automation.AutomationProperties.SetName(play,T("Continue {0}","متابعة {0}",item.Label));picture.Children.Add(play);
+        picture.Children.Add(new Border{IsHitTestVisible=false,Background=new LinearGradientBrush(Colors.Transparent,Color.FromArgb(235,11,11,13),90)});var caption=new StackPanel{Margin=new(14,0,14,14),VerticalAlignment=VerticalAlignment.Bottom,IsHitTestVisible=false};
+        if(wide)caption.Children.Add(HomeTitleMark(item,48,250,19));else if(homePosterTitles)caption.Children.Add(Text(item.Title,15,weight:FontWeights.SemiBold));
+        var episode=item.IsMovie?"":T("S{0} E{1}","م{0} ح{1}",item.Season,item.Episode);var remaining=progress is {Completed:false,Position:>0,Duration:>0}?Loc.MinutesLeft(Math.Max(1,(int)Math.Ceiling((progress.Duration-progress.Position)/60))):entry.Kind==UpNextKind.Upcoming?T("Coming soon","قريبًا"):entry.Kind==UpNextKind.NotOnPc?job!=null?T("Downloading…","جارٍ التنزيل…"):T("Not on this PC","ليس على هذا الكمبيوتر"):T("Ready to play","جاهز للمشاهدة");var line=Text(string.Join(" · ",new[]{episode,remaining}.Where(x=>x.Length>0)),12,"#D9D4CC");caption.Children.Add(line);picture.Children.Add(caption);
+        picture.Children.Add(CardMenu(item));var remove=ActionButton("✕",()=>{store.State.HiddenContinue.Add(item.GroupKey);store.Save();Render();Undoable(T("Hidden from Continue watching","أُخفي من متابعة المشاهدة"),()=>{store.State.HiddenContinue.Remove(item.GroupKey);store.Save();Render();});});remove.HorizontalAlignment=HorizontalAlignment.Left;remove.VerticalAlignment=VerticalAlignment.Top;remove.Margin=new(8);remove.Width=30;remove.Height=30;remove.Padding=new(0);remove.Opacity=0;System.Windows.Automation.AutomationProperties.SetName(remove,T("Hide {0} from Continue watching","إخفاء {0} من متابعة المشاهدة",item.Title));picture.Children.Add(remove);RevealOnFocus(panel,remove);
+        if(progress is {Completed:false,Position:>0,Duration:>0})picture.Children.Add(new ProgressBar{Maximum=progress.Duration,Value=progress.Position,Height=3,VerticalAlignment=VerticalAlignment.Bottom,Foreground=Brush("#E4C084"),Background=Brush("#55000000"),IsHitTestVisible=false,BorderThickness=new(0)});
+        var edge=new Border{CornerRadius=new(12),ClipToBounds=true,Child=picture,BorderBrush=Brush("Transparent"),BorderThickness=new(1.5)};panel.Children.Add(edge);LazyMenu(panel,item);return FollowHomeHero(Lift(panel,edge),()=>item);
     }
     void RenderEpisodeAvailability(VideoItem item)
     {

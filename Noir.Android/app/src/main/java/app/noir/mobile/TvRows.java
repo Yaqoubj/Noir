@@ -58,8 +58,8 @@ final class TvRows {
         List<Row> genreRows=new ArrayList<>(),collectionRows=new ArrayList<>();
         for(String name:genres){List<List<JSONObject>> picks=new ArrayList<>();for(List<JSONObject> g:groups)if(HomeLayout.genre(g.get(0)).contains(name))picks.add(g);r=shelf("genre:"+name,name,picks);available.put(r.id,r);genreRows.add(r);}
         for(String name:collections){List<List<JSONObject>> picks=new ArrayList<>();for(List<JSONObject> g:groups)if(HomeLayout.jsonValues(g.get(0).optJSONArray("collections")).contains(name))picks.add(g);r=shelf("collection:"+name,name,picks);available.put(r.id,r);collectionRows.add(r);}
-        JSONArray saved=prefs.optJSONArray("homeLayout");if(saved==null||saved.length()==0){saved=new JSONArray();for(String id:new String[]{"continue","ready","list","unfinished","comfort","directors","short-tonight","recently-added"}){JSONObject entry=new JSONObject();DataStore.put(entry,"id",id);saved.put(entry);}}
-        Set<String> used=new HashSet<>();for(HomeLayout.Row layout:HomeLayout.resolve(saved,available.keySet())){
+        JSONArray saved=prefs.optJSONArray("homeLayout");if(saved==null||saved.length()==0){saved=new JSONArray();for(String id:new String[]{"continue","top10","because","unfinished","comfort","directors","short-tonight","list","ready","recently-added"}){JSONObject entry=new JSONObject();DataStore.put(entry,"id",id);saved.put(entry);}}
+        Set<String> used=new HashSet<>();for(HomeLayout.Row layout:HomeLayout.resolve(HomeLayout.migrate(saved),available.keySet())){
             if(!layout.visible)continue;
             if(layout.id.equals("genres")||layout.id.equals("collections")){List<Row> expanded=layout.id.equals("genres")?genreRows:collectionRows;for(int n=0;n<Math.min(3,expanded.size());n++)add(rows,expanded.get(n),used);}
             else add(rows,available.get(layout.id),used);

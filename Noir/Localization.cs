@@ -68,7 +68,7 @@ static class Loc
         ["Playback"]="التشغيل",["Library"]="المكتبة",["Phone Sync"]="مزامنة الهاتف",["Community"]="المجتمع",["Advanced"]="متقدم",["English"]="English",["العربية"]="العربية",
         ["Choose the app language. Arabic mirrors the layout right to left."]="اختر لغة التطبيق. العربية تعكس الواجهة من اليمين إلى اليسار.",
         ["Profile"]="الملف الشخصي",["Library & folders"]="المكتبة والمجلدات",["Connections"]="الاتصالات",["Phone"]="الهاتف",["Appearance & language"]="المظهر واللغة",["Backup"]="النسخ الاحتياطي",
-        ["You and how you use Noir"]="أنت وطريقة استخدامك لـ Noir",["Auto-next, intros, subtitles"]="التشغيل التلقائي، المقدمات، الترجمة",["Folders, artwork, organizing"]="المجلدات، الصور، التنظيم",
+        ["You and how you use Noir"]="أنت وطريقة استخدامك لـ Noir",["Auto-next, intros, subtitles"]="التشغيل التلقائي، المقدمات، الترجمة",["Rate, react and keep notes"]="قيّم وتفاعل واحتفظ بملاحظاتك",["Folders, artwork, organizing"]="المجلدات، الصور، التنظيم",
         ["Trakt, Nuvio, Stremio, servers"]="Trakt وNuvio وStremio والخوادم",["Sources, quality, folders"]="المصادر، الجودة، المجلدات",["Pair and sync Android"]="اقتران ومزامنة أندرويد",
         ["Language, side rail, spoilers"]="اللغة، الشريط الجانبي، الحرق",["Back up, restore, export"]="نسخ احتياطي، استعادة، تصدير",["Background, shortcuts, about"]="الخلفية، الاختصارات، حول",
         ["Language"]="اللغة",["Side rail"]="الشريط الجانبي",["Automatic"]="تلقائي",["Labels"]="مع الأسماء",["Icons only"]="أيقونات فقط",["Spoilers"]="الحرق",
