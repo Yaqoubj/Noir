@@ -5,26 +5,25 @@ using System.Windows.Controls;
 namespace Noir;
 public partial class MainWindow
 {
-    void Intro_Click(object sender,RoutedEventArgs e)
+    async void Intro_Click(object sender,RoutedEventArgs e)
     {
         if(current==null || player==null) return;
         var resume=player.IsPlaying;if(resume) player.SetPause(true);SavePlayback();
         var intro=store.GetIntro(current);
         var outro=store.GetOutro(current);
-        var dialog=new Window { Title="Intro & credits · "+current.Title,Width=540,Height=610,MinHeight=500,Owner=this,WindowStartupLocation=WindowStartupLocation.CenterOwner,Background=Brush("#0D0D0F"),Foreground=Brush("#F4F1EB") };
-        var content=new StackPanel { Margin=new(28) };
-        content.Children.Add(Text("Openings & endings.",24,weight:FontWeights.SemiBold));
-        content.Children.Add(Body("Use seconds or mm:ss. Openings can be skipped; credits mark the video watched while it keeps playing.",13));
-        content.Children.Add(Text("Intro starts · optional",12));var start=new TextBox { Text=intro!=null?LibraryStore.Time(intro.Start):"",Margin=new(0,6,0,12) };content.Children.Add(start);
-        content.Children.Add(Text("Intro ends",12));var end=new TextBox { Text=intro!=null?LibraryStore.Time(intro.End):"",Margin=new(0,6,0,0) };content.Children.Add(end);
-        content.Children.Add(Heading("Credits start","Optional. Leave blank to use the detected ending or the near-end fallback."));
-        var credits=new TextBox{Text=outro!=null?LibraryStore.Time(outro.Start):"",Margin=new(0,0,0,8)};content.Children.Add(credits);
+        var dialog=OpenSheet("Intro & credits · "+current.Title,"Use seconds or mm:ss. Openings can be skipped; credits mark the video watched while it keeps playing.",SheetKind.Side,460);
+        var content=new StackPanel();dialog.Add(content);
+        content.Children.Add(SheetSection("Opening","Optional. Leave both blank for no skip button."));
+        var startLabel=Text("Intro starts · optional",12,"#9F9A93");startLabel.Margin=new(0,6,0,0);content.Children.Add(startLabel);var start=new TextBox { Text=intro!=null?LibraryStore.Time(intro.Start):"",Margin=new(0,4,0,8),Padding=new(10,7,10,7) };System.Windows.Automation.AutomationProperties.SetName(start,"Intro starts");content.Children.Add(start);
+        content.Children.Add(Text("Intro ends",12,"#9F9A93"));var end=new TextBox { Text=intro!=null?LibraryStore.Time(intro.End):"",Margin=new(0,4,0,0),Padding=new(10,7,10,7) };System.Windows.Automation.AutomationProperties.SetName(end,"Intro ends");content.Children.Add(end);
+        content.Children.Add(SheetSection("Credits start","Optional. Leave blank to use the detected ending or the near-end fallback."));
+        var credits=new TextBox{Text=outro!=null?LibraryStore.Time(outro.Start):"",Margin=new(0,4,0,8),Padding=new(10,7,10,7)};System.Windows.Automation.AutomationProperties.SetName(credits,"Credits start");content.Children.Add(credits);
         content.Children.Add(ActionButton("Use current position for credits",()=>credits.Text=LibraryStore.Time(lastPosition)));
-        var all=new CheckBox { Content="Use these times for this whole season",IsEnabled=!current.IsMovie };content.Children.Add(all);
-        var error=Text("",12,"#FFAC9C");content.Children.Add(error);
-        var buttons=new StackPanel { Orientation=Orientation.Horizontal,Margin=new(0,6,0,0) };
+        var all=new CheckBox { Content="Use these times for this whole season",IsEnabled=!current.IsMovie,Margin=new(0,12,0,0) };content.Children.Add(all);
+        var error=Text("",12,"#FFAC9C");error.Margin=new(0,8,0,0);content.Children.Add(error);
         var item=current;
-        var save=ActionButton("Save times",()=>
+        dialog.Action("Cancel",()=>dialog.Close(false));
+        dialog.Action("Save times",()=>
         {
             var haveIntro=start.Text.Trim().Length>0 || end.Text.Trim().Length>0;
             double a=0,b=0,c=0;
@@ -37,10 +36,9 @@ public partial class MainWindow
             if(haveCredits) store.State.Outros[outroKey]=new(){Start=c,End=currentDuration};else store.State.Outros.Remove(outroKey);
             if(all.IsChecked==true) store.State.Intros.Remove(item.Path);
             if(all.IsChecked==true) store.State.Outros.Remove(item.Id);
-            store.Save();dialog.Close();
-        },true);buttons.Children.Add(save);
-        var cancel=ActionButton("Cancel",()=>dialog.Close());cancel.Margin=new(10,0,0,0);buttons.Children.Add(cancel);content.Children.Add(buttons);
-        dialog.Content=new ScrollViewer{Content=content};dialog.ShowDialog();if(resume&&!ended) player.SetPause(false);
+            store.Save();dialog.Close(true);
+        },true);
+        await dialog.Done;if(resume&&!ended&&player!=null) player.SetPause(false);
     }
     static bool ParseTime(string text,out double value)
     {

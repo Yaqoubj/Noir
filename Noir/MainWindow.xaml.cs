@@ -31,7 +31,7 @@ public partial class MainWindow : Window
     public MainWindow(string? dataDirectory=null,string? playPath=null,bool validate=false,string? initialPage=null)
     {
         StartupTrace.Mark("MainWindow constructor");StartupTrace.WatchDispatcher(Dispatcher);
-        StartupTrace.Mark("XAML initialization started");InitializeComponent();StartupTrace.Mark("XAML initialization ended");StartupTrace.Mark("Shell setup started");
+        Density.Load(validate?dataDirectory!:dataDirectory!=null&&!Profiles.IsProfileFolder(dataDirectory)?dataDirectory:Profiles.Root);StartupTrace.Mark("XAML initialization started");InitializeComponent();StartupTrace.Mark("XAML initialization ended");StartupTrace.Mark("Shell setup started");
         ContentPanel.AddHandler(TextBox.TextChangedEvent,new TextChangedEventHandler((_,e)=>{if(e.OriginalSource is TextBox box&&!box.IsReadOnly)pageEditInProgress=true;}));
         ApplyNavigationIcons();NavLinks.LayoutUpdated+=(_,_)=>SlideNavIndicator();
         StartupTrace.Mark("UI built");store = new LibraryStore(dataDirectory);StartupTrace.Mark("Library loaded");StartupTrace.Mark("ApplyLanguage started");ApplyLanguage();StartupTrace.Mark("ApplyLanguage ended");
@@ -75,9 +75,9 @@ public partial class MainWindow : Window
     }
     void Library_SizeChanged(object sender,SizeChangedEventArgs e)
     {
-        if(ContentPanel==null)return;
+        if(ContentPanel==null||store==null)return;
         // Generous margins on wide windows; the rail folds to icons and the search field narrows on small ones.
-        var pad=ActualWidth<1000?24:ActualWidth<1400?40:56;sidePad=pad;
+        var pad=Density.PageSide(ActualWidth);sidePad=pad;
         ApplyRailWidth();ApplyPageLayout();
         var content=ActualWidth-RailColumn.Width.Value;SearchHost.Width=Math.Clamp(content-260,200,440);TopBarContent.Margin=new Thickness(Math.Max(16,pad-16),0,Math.Max(16,pad-20),0);
         if(PlayerSurfaceBuilt)PlayerVolume.Visibility=ActualWidth<1000?Visibility.Collapsed:Visibility.Visible;
@@ -281,20 +281,20 @@ public partial class MainWindow : Window
     bool MetadataFocusSafe=>Keyboard.FocusedElement is not DependencyObject focus||focus is not System.Windows.Controls.Primitives.TextBoxBase&&PresentationSource.FromDependencyObject(focus)==PresentationSource.FromVisual(this);
     bool CanRenderMetadata=>!closing&&current==null&&!hiddenInTray&&IsActive&&MetadataFocusSafe&&!pageEditInProgress&&!SearchBox.IsKeyboardFocusWithin&&discoverPanel==null&&smartPopup==null&&hoverCard==null&&!logging&&(page is "Home" or "Movies" or "Shows" or "My List" or "Discover" or "History")&&!(page=="History"&&trackerTab=="Add history");
     internal static SolidColorBrush Brush(string value) => (SolidColorBrush)new BrushConverter().ConvertFromString(value)!;
-    internal static TextBlock Text(string value,double size=14,string color="#F4F1EB",FontWeight? weight=null) => new() { Text=value,FontSize=size,Foreground=Brush(color),FontWeight=weight??FontWeights.Normal,TextWrapping=TextWrapping.Wrap };
-    internal static TextBlock Body(string value,double size=14) { var t=Text(T(value),size,"#AAA6A0"); t.Margin=new(0,4,0,12); return Bidi(t); }
+    internal static TextBlock Text(string value,double size=double.NaN,string color="#F4F1EB",FontWeight? weight=null) => new() { Text=value,FontSize=double.IsNaN(size)?Density.Text:size,Foreground=Brush(color),FontWeight=weight??FontWeights.Normal,TextWrapping=TextWrapping.Wrap };
+    internal static TextBlock Body(string value,double size=double.NaN) { var t=Text(T(value),double.IsNaN(size)?Density.Body:size,"#AAA6A0"); t.Margin=Density.BodyMargin; return Bidi(t); }
     static StackPanel Heading(string title,string subtitle="")
     {
-        var p = new StackPanel { Margin=new(0,24,0,15) };
-        p.Children.Add(Text(T(title),21,weight:FontWeights.SemiBold));
-        if(subtitle.Length>0) { var t=Body(subtitle,12);t.Margin=new(0,4,0,0);p.Children.Add(t); }
+        var p = new StackPanel { Margin=Density.SectionMargin };
+        p.Children.Add(Text(T(title),Density.SectionTitle,weight:FontWeights.SemiBold));
+        if(subtitle.Length>0) { var t=Body(subtitle,Density.SectionSubtitle);t.Margin=new(0,4,0,0);p.Children.Add(t); }
         return p;
     }
     Button ActionButton(string label,Action action,bool primary=false)
     {
         var b=new Button { Content=T(label),HorizontalAlignment=HorizontalAlignment.Left };
         if(primary) b.Style=(Style)FindResource("Primary");
-        Motion.ButtonFeedback(b);b.Click+=(_,_)=>action();
+        System.Windows.Automation.AutomationProperties.SetName(b,T(label));Motion.ButtonFeedback(b);b.Click+=(_,_)=>action();
         return b;
     }
     readonly Dictionary<string,Task<BitmapImage?>> imageLoads=new(StringComparer.OrdinalIgnoreCase);

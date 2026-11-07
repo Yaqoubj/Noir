@@ -19,6 +19,10 @@ static class Loc
     public static bool Latin(string text)=>text.Length>0&&!text.Any(c=>c>='؀'&&c<='ۿ');
     static readonly Dictionary<string,string> Ar=new()
     {
+        ["Size"]="الحجم",
+        ["Compact"]="مضغوط",
+        ["Comfortable"]="مريح",
+        ["Compact fits more on screen. Comfortable gives everything more room. Applies only to this device."]="يعرض الحجم المضغوط المزيد على الشاشة، ويمنح الحجم المريح العناصر مساحة أوسع. يسري على هذا الجهاز فقط.",
         ["Stremio subtitle addon link · optional"]="رابط إضافة ترجمة Stremio · اختياري",
         ["Use only this source"]="استخدم هذا المصدر فقط",
         ["Checking subtitle addon…"]="جارٍ التحقق من إضافة الترجمة…",

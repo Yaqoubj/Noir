@@ -19,7 +19,7 @@ public partial class MainWindow
         ("Ctrl + F  ·  /","Search","البحث"),("Right-click  ·  ⋯","Every action for a title or episode","كل الإجراءات الخاصة بعمل أو حلقة"),("Tab · Enter","Move around and open","التنقل والفتح"),
         ("Esc","Close a panel or popup","إغلاق لوحة أو نافذة منبثقة"),("?  ·  F1","Show this list","عرض هذه القائمة"),
     ];
-    Grid? shortcutSheet;
+    NoirSheet? shortcutSheet;
     void Help_Click(object sender,RoutedEventArgs e)=>ToggleShortcutSheet(false);
     // The ⋯ twin of right-click: ItemMenu is otherwise invisible on rows and tracker cards.
     Button MoreButton(VideoItem item)
@@ -47,7 +47,7 @@ public partial class MainWindow
         if(IsHelpKey(e)){ToggleShortcutSheet(false);e.Handled=true;}
         else if(e.Key is Key.OemQuestion or Key.Divide&&Keyboard.Modifiers==ModifierKeys.None&&SearchBox.IsVisible){SearchBox.Focus();SearchBox.SelectAll();e.Handled=true;}
     }
-    void CloseShortcutSheet(){if(shortcutSheet is {} sheet&&sheet.Parent is Panel host)host.Children.Remove(sheet);shortcutSheet=null;}
+    void CloseShortcutSheet(){var sheet=shortcutSheet;shortcutSheet=null;sheet?.Close(false);}
     FrameworkElement ShortcutRows((string Keys,string English,string Arabic)[] rows,bool player)
     {
         var list=new StackPanel();
@@ -77,26 +77,20 @@ public partial class MainWindow
     void ToggleShortcutSheet(bool inPlayer)
     {
         if(shortcutSheet!=null){CloseShortcutSheet();return;}
-        Panel host=inPlayer?PlayerOverlay:LibraryRoot;var shade=new Grid{Background=Brush("#B3080809")};Panel.SetZIndex(shade,40);if(!inPlayer)Grid.SetColumnSpan(shade,2);
-        shade.MouseLeftButtonDown+=(_,e)=>{if(ReferenceEquals(e.OriginalSource,shade))CloseShortcutSheet();e.Handled=true;};
-        // Close stays pinned below the scrolling list so it is never clipped.
-        var body=new StackPanel();var frame=new DockPanel();frame.Children.Add(new ScrollViewer{Content=body,VerticalScrollBarVisibility=ScrollBarVisibility.Auto});var card=new Border{Background=Brush("#F71A1A1D"),BorderBrush=Brush("#55E4C084"),BorderThickness=new(1),CornerRadius=new(16),Padding=new(28,24,28,20),Margin=new(24),MaxWidth=inPlayer?560:860,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center,Child=frame};
         string L(string english,string arabic)=>inPlayer?PL(english,arabic):T(english,arabic);
-        // The player keeps a left-to-right layout; the sheet itself still reads right to left in Arabic.
-        if(inPlayer&&Loc.Arabic)card.FlowDirection=FlowDirection.RightToLeft;
-        body.Children.Add(Text(L(inPlayer?"Keyboard shortcuts":"Shortcuts & tips",inPlayer?"اختصارات لوحة المفاتيح":"الاختصارات والنصائح"),22,weight:FontWeights.SemiBold));
-        var sub=Text(L(inPlayer?"Subtitles, audio and timing live under CC. Speed is the 1× button.":"Everything here also has a button; these are the quick ways.",inPlayer?"الترجمة والصوت والتوقيت تحت CC. السرعة هي زر 1×.":"لكل ما هنا زر أيضًا؛ هذه هي الطرق السريعة."),12.5,"#9F9A93");sub.Margin=new(0,4,0,18);body.Children.Add(sub);
+        var sheet=OpenSheet(L(inPlayer?"Keyboard shortcuts":"Shortcuts & tips",inPlayer?"اختصارات لوحة المفاتيح":"الاختصارات والنصائح"),L(inPlayer?"Subtitles, audio and timing live under CC. Speed is the 1× button.":"Everything here also has a button; these are the quick ways.",inPlayer?"الترجمة والصوت والتوقيت تحت CC. السرعة هي زر 1×.":"لكل ما هنا زر أيضًا؛ هذه هي الطرق السريعة."),SheetKind.Dialog,inPlayer?540:800);
+        var body=new StackPanel();sheet.Add(body);
         if(inPlayer)body.Children.Add(ShortcutRows(PlayerShortcuts,true));
         else
         {
             var columns=new WrapPanel();body.Children.Add(columns);
-            var left=new StackPanel{Width=380,Margin=new(0,0,28,8)};left.Children.Add(Text(T("In the library","في المكتبة"),12,"#E4C084",FontWeights.SemiBold));left.Children.Add(new Border{Height=8});left.Children.Add(ShortcutRows(LibraryShortcuts,false));
+            var left=new StackPanel{Width=360,Margin=new(0,0,24,8)};left.Children.Add(Text(T("In the library","في المكتبة"),12,"#E4C084",FontWeights.SemiBold));left.Children.Add(new Border{Height=8});left.Children.Add(ShortcutRows(LibraryShortcuts,false));
             left.Children.Add(Text(T("In the player","في المشغّل"),12,"#E4C084",FontWeights.SemiBold));left.Children.Add(new Border{Height=8});left.Children.Add(ShortcutRows(PlayerShortcuts,false));columns.Children.Add(left);
-            var right=new StackPanel{Width=340};right.Children.Add(Text(T("Places you might miss","أماكن قد تفوتك"),12,"#E4C084",FontWeights.SemiBold));right.Children.Add(new Border{Height=6});right.Children.Add(ShortcutPlaces());columns.Children.Add(right);
+            var right=new StackPanel{Width=320};right.Children.Add(Text(T("Places you might miss","أماكن قد تفوتك"),12,"#E4C084",FontWeights.SemiBold));right.Children.Add(new Border{Height=6});right.Children.Add(ShortcutPlaces());columns.Children.Add(right);
         }
-        var close=ActionButton(L("Close  ·  Esc","إغلاق  ·  Esc"),CloseShortcutSheet);close.HorizontalAlignment=HorizontalAlignment.Right;close.Margin=new(0,10,0,0);System.Windows.Automation.AutomationProperties.SetName(close,"Close shortcuts");DockPanel.SetDock(close,Dock.Bottom);frame.Children.Insert(0,close);
-        shade.Children.Add(card);host.Children.Add(shade);shortcutSheet=shade;shade.Opacity=0;Motion.Opacity(shade,1);
-        if(inPlayer)ShowControls();else Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input,()=>{if(shortcutSheet==shade)close.Focus();});
+        var close=sheet.Action(L("Close  ·  Esc","إغلاق  ·  Esc"),CloseShortcutSheet,true);System.Windows.Automation.AutomationProperties.SetName(close,"Close shortcuts");
+        shortcutSheet=sheet;sheet.Closed+=_=>{if(shortcutSheet==sheet)shortcutSheet=null;};
+        if(inPlayer)ShowControls();
     }
     // History's overflow: the tracker extras that otherwise sit at the bottom of Stats or Upcoming.
     void ShowHistoryMore(Button target)

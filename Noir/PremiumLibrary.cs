@@ -18,20 +18,18 @@ public partial class MainWindow
     }
     void CollectionDialog(VideoItem? item)
     {
-        var w=new Window{Title="Collections",Owner=this,Width=440,Height=360,Background=Brush("#0D0D0F"),Foreground=Brush("#F4F1EB"),WindowStartupLocation=WindowStartupLocation.CenterOwner};var p=new StackPanel{Margin=new(24)};
-        p.Children.Add(Heading(item==null?"New collection":"Save to a collection"));
-        if(item!=null)foreach(var c in store.State.Collections){var name=c.Key;var check=new CheckBox{Content=name,IsChecked=c.Value.Contains(item.GroupKey),Margin=new(0,6,0,6)};check.Click+=(_,_)=>{store.SetCollection(item,name,check.IsChecked==true);Render();};p.Children.Add(check);}
-        var input=new TextBox{MaxLength=60,Margin=new(0,12,0,12)};p.Children.Add(input);var error=Body("",12);p.Children.Add(error);
-        p.Children.Add(ActionButton("Create",()=>{var name=input.Text.Trim();if(name.Length==0){error.Text="Give the collection a name.";return;}try{if(item!=null)store.SetCollection(item,name,true);else store.CreateCollection(name);collectionFilter=name;w.Close();Render();}catch(Exception e){error.Text=e.Message;}},true));w.Content=new ScrollViewer{Content=p};w.ShowDialog();
+        var w=OpenSheet("Collections",item==null?"New collection":"Save to a collection",SheetKind.Side,420);var p=new StackPanel();w.Add(p);
+        if(item!=null)foreach(var c in store.State.Collections){var name=c.Key;var check=new CheckBox{Content=name,IsChecked=c.Value.Contains(item.GroupKey),Margin=new(0,5,0,5)};check.Click+=(_,_)=>{store.SetCollection(item,name,check.IsChecked==true);Render();};p.Children.Add(check);}
+        p.Children.Add(SheetSection("New collection"));var input=new TextBox{MaxLength=60,Margin=new(0,6,0,8),Padding=new(10,8,10,8)};System.Windows.Automation.AutomationProperties.SetName(input,"Collection name");p.Children.Add(input);var error=Body("",12);error.Foreground=Brush("#E5736B");p.Children.Add(error);
+        w.Action("Cancel",()=>w.Close(false));w.Action("Create",()=>{var name=input.Text.Trim();if(name.Length==0){error.Text="Give the collection a name.";return;}try{if(item!=null)store.SetCollection(item,name,true);else store.CreateCollection(name);collectionFilter=name;w.Close(true);Render();}catch(Exception e){error.Text=e.Message;}},true);
     }
     void MatchDialog(VideoItem item)
     {
-        var w=new Window{Title="Correct match",Owner=this,Width=520,Height=550,Background=Brush("#0D0D0F"),Foreground=Brush("#F4F1EB"),WindowStartupLocation=WindowStartupLocation.CenterOwner};var p=new StackPanel{Margin=new(24)};
-        p.Children.Add(Heading("Correct this match","History and file names stay intact. Preview your numbers before saving."));
-        TextBox Field(string label,string value){p.Children.Add(Body(label,12));var b=new TextBox{Text=value};p.Children.Add(b);return b;}
+        var w=OpenSheet("Correct match","History and file names stay intact. Preview your numbers before saving.",SheetKind.Side,460);var p=new StackPanel();w.Add(p);
+        TextBox Field(string label,string value){var l=Body(label,12);l.Foreground=Brush("#9F9A93");l.Margin=new(0,8,0,3);p.Children.Add(l);var b=new TextBox{Text=value,Padding=new(10,7,10,7)};System.Windows.Automation.AutomationProperties.SetName(b,T(label));p.Children.Add(b);return b;}
         var title=Field("Title",item.Title);var year=Field("Year (0 if unknown)",item.Year.ToString());var imdb=Field("IMDb ID (optional)",item.ImdbId);var season=Field("Season",item.Season.ToString());var episode=Field("Episode",item.Episode.ToString());
-        var whole=new CheckBox{Content="Apply title/year and season offset to the whole show",IsChecked=!item.IsMovie,Margin=new(0,16,0,10)};p.Children.Add(whole);var error=Body("",12);p.Children.Add(error);
-        p.Children.Add(ActionButton("Save correction",()=>{try{store.CorrectMatch(item,title.Text,int.Parse(year.Text),imdb.Text.Trim(),int.Parse(season.Text),int.Parse(episode.Text),whole.IsChecked==true);w.Close();Render();}catch(Exception e){error.Text=e.Message;}},true));w.Content=new ScrollViewer{Content=p};w.ShowDialog();
+        var whole=new CheckBox{Content="Apply title/year and season offset to the whole show",IsChecked=!item.IsMovie,Margin=new(0,16,0,6)};p.Children.Add(whole);var error=Body("",12);error.Foreground=Brush("#E5736B");p.Children.Add(error);
+        w.Action("Cancel",()=>w.Close(false));w.Action("Save correction",()=>{try{store.CorrectMatch(item,title.Text,int.Parse(year.Text),imdb.Text.Trim(),int.Parse(season.Text),int.Parse(episode.Text),whole.IsChecked==true);w.Close(true);Render();}catch(Exception e){error.Text=e.Message;}},true);
     }
     void RenderHomeExtras(List<List<VideoItem>> groups)
     {

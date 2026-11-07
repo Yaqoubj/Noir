@@ -10,8 +10,8 @@ public partial class MainWindow
     // Landscape artwork, remaining time and play / remove controls on hover or focus.
     FrameworkElement ContinueCard(VideoItem item,UpNext? next=null)
     {
-        var panel=new StackPanel {Width=272,Margin=new(0,0,16,12)};
-        var picture=new Grid {Height=153,ClipToBounds=true};
+        var panel=new StackPanel {Width=Density.Pick(248,272),Margin=new(0,0,16,12)};
+        var picture=new Grid {Height=Density.Pick(140,153),ClipToBounds=true};
         var kind=next?.Kind??UpNextKind.Ready;var job=kind==UpNextKind.NotOnPc?ActiveDownload(item):null;
         Action open=kind switch
         {
@@ -23,7 +23,7 @@ public partial class MainWindow
         };
         var episodeArt=item.EpisodeImage.Length>0&&System.IO.File.Exists(item.EpisodeImage)&&(!store.State.HideSpoilers||kind==UpNextKind.Resume||store.EverWatched(item));
         var image=episodeArt?item.EpisodeImage:System.IO.File.Exists(item.Backdrop)?item.Backdrop:item.Poster;
-        var play=ActionButton("",open);play.Content=Art(image,item.Title,153);play.Padding=new(0);play.HorizontalAlignment=HorizontalAlignment.Stretch;
+        var play=ActionButton("",open);play.Content=Art(image,item.Title,Density.Pick(140,153));play.Padding=new(0);play.HorizontalAlignment=HorizontalAlignment.Stretch;
         var verb=kind switch{UpNextKind.Upcoming=>"Details for ",UpNextKind.NotOnPc=>job!=null?"Download progress for ":CanStream?"Stream ":"Download ",UpNextKind.Resume=>"Resume ",_=>"Play "};
         play.ToolTip=verb+item.Label;System.Windows.Automation.AutomationProperties.SetName(play,"Continue "+item.Label);picture.Children.Add(play);
         var shade=new LinearGradientBrush{StartPoint=new(0,0),EndPoint=new(0,1)};shade.GradientStops.Add(new(Color.FromArgb(0,0,0,0),.35));shade.GradientStops.Add(new(Color.FromArgb(kind is UpNextKind.Upcoming or UpNextKind.NotOnPc?(byte)200:(byte)170,8,8,10),1));
@@ -155,7 +155,7 @@ public partial class MainWindow
         if(item.EpisodeSummary.Length>0&&reveal){var summary=Body(item.EpisodeSummary,12);summary.LineHeight=19;summary.MaxHeight=38;summary.TextTrimming=TextTrimming.WordEllipsis;summary.Cursor=System.Windows.Input.Cursors.Hand;summary.ToolTip=T("Expand synopsis","توسيع الملخص");summary.MouseLeftButtonUp+=(_,e)=>{summary.MaxHeight=double.IsPositiveInfinity(summary.MaxHeight)?38:double.PositiveInfinity;summary.ToolTip=T(double.IsPositiveInfinity(summary.MaxHeight)?"Collapse synopsis":"Expand synopsis",double.IsPositiveInfinity(summary.MaxHeight)?"طي الملخص":"توسيع الملخص");e.Handled=true;};info.Children.Add(summary);}
         var actions=new WrapPanel { VerticalAlignment=VerticalAlignment.Center };
         var available=CanPlay(item);var stream=!available&&StreamOffered&&store.Aired(item,DateTimeOffset.UtcNow);
-        var play=ActionButton(stream?"▶ Stream":!available?"↓ Download":bookmark is {Completed:false,Position:>0}?"▶ Resume":"▶ Play",()=>{if(available)_=PlayVideo(item);else if(stream)StreamItem(item);else FindDownloads(item);},true);play.MinWidth=100;actions.Children.Add(play);
+        var play=ActionButton(stream?"▶ Stream":!available?"↓ Download":bookmark is {Completed:false,Position:>0}?"▶ Resume":"▶ Play",()=>{if(available)_=PlayVideo(item);else if(stream)StreamItem(item);else FindDownloads(item);},true);play.MinWidth=Density.EpisodeActionMin;actions.Children.Add(play);
         if(stream){var get=ActionButton("↓",()=>FindDownloads(item));get.ToolTip=T("Download to this PC");get.Margin=new(8,0,0,0);actions.Children.Add(get);}
         var reviews=ActionButton("Reviews",()=>OpenReviews(item));reviews.Margin=new(8,0,0,0);actions.Children.Add(reviews);
         var seen=store.EverWatched(item);var mark=CheckCircle(seen,seen?"Mark unwatched":"Mark watched",()=>{if(seen)SmartWatchedClick(item);else SmartCheckOff(item,item.Label+" watched");},36);mark.Margin=new(12,0,0,0);actions.Children.Add(mark);actions.Children.Add(MoreButton(item));
@@ -214,7 +214,7 @@ public partial class MainWindow
         var row=new WrapPanel{Margin=new(0,14,0,8)};
         foreach(var option in options)
         {
-            var chip=ActionButton(option,()=>choose(option));chip.Style=(Style)FindResource("Pill");chip.Padding=new(16,8,16,8);chip.Margin=new(0,0,8,8);
+            var chip=ActionButton(option,()=>choose(option));chip.Style=(Style)FindResource("Pill");chip.Padding=Density.ChipPadding;chip.FontSize=Density.ChipFont;chip.Margin=new(0,0,8,8);
             chip.Background=Brush(option==selected?"#E4C084":"#14FFFFFF");chip.Foreground=Brush(option==selected?"#16120C":"#D9D4CC");chip.BorderBrush=Brush(option==selected?"#E4C084":"#2EFFFFFF");chip.FontWeight=option==selected?FontWeights.SemiBold:FontWeights.Normal;
             row.Children.Add(chip);
         }

@@ -30,6 +30,8 @@ public sealed class MobileSyncServer : IAsyncDisposable
     readonly MobileSubtitleTools subtitleTools;
     readonly Func<string,CancellationToken,Task<bool>>? confirmSettingsShare;
     readonly SemaphoreSlim settingsShare=new(1,1);
+    readonly SemaphoreSlim downloadDelete=new(1,1);
+    readonly Func<DownloadLocalFile,DownloadDeleteChoice,CancellationToken,Task<DownloadDeleteChoice?>>? confirmDownloadDelete;
     readonly PhoneCloudDownloads? phoneCloud;
     readonly Dictionary<string,(int Count,DateTimeOffset Since)> attempts=[];
     WebApplication? app;
@@ -45,9 +47,9 @@ public sealed class MobileSyncServer : IAsyncDisposable
     public string Pin=>Convert.ToHexString(SHA256.HashData(certificate.RawData));
     /// <summary>The short code a TV shows before it sends the pairing code: the first 12 hex digits of the certificate fingerprint, "AB12 CD34 EF56". Mirrors DataStore.checkCode on Android.</summary>
     public static string CheckCode(string pin){var p=pin.ToUpperInvariant();return $"{p[..4]} {p[4..8]} {p[8..12]}";}
-    public MobileSyncServer(LibraryStore store,Func<MobileSnapshot> snapshot,Func<List<MobileOperation>,List<string>> merge,int port=Port,PcDownloads? downloads=null,Func<string,CancellationToken,Task<bool>>? confirmSettingsShare=null,bool ephemeralCertificate=false)
+    public MobileSyncServer(LibraryStore store,Func<MobileSnapshot> snapshot,Func<List<MobileOperation>,List<string>> merge,int port=Port,PcDownloads? downloads=null,Func<string,CancellationToken,Task<bool>>? confirmSettingsShare=null,bool ephemeralCertificate=false,Func<DownloadLocalFile,DownloadDeleteChoice,CancellationToken,Task<DownloadDeleteChoice?>>? confirmDownloadDelete=null)
     {
-        this.store=store;this.snapshot=snapshot;this.merge=merge;this.port=port;this.downloads=downloads;subtitleTools=new(store);this.confirmSettingsShare=confirmSettingsShare;phoneCloud=downloads==null?null:new(store,downloads);
+        this.store=store;this.snapshot=snapshot;this.merge=merge;this.port=port;this.downloads=downloads;subtitleTools=new(store);this.confirmSettingsShare=confirmSettingsShare;this.confirmDownloadDelete=confirmDownloadDelete;phoneCloud=downloads==null?null:new(store,downloads);
         var shared=MobileProfiles.Root(store.DataDirectory);Directory.CreateDirectory(shared);
         configPath=Path.Combine(shared,"mobile-peers.json");
         if(File.Exists(configPath))
@@ -115,6 +117,7 @@ public sealed class MobileSyncServer : IAsyncDisposable
         try {File.Move(temp,configPath,true);break;}
         catch(IOException) when(attempt<4) {Thread.Sleep(40*(attempt+1));}
     }
+    internal Action<Microsoft.Extensions.DependencyInjection.IServiceCollection>? ConfigureServices {get;set;}
     public string StartFailure {get;private set;}="";
     public async Task SetEnabled(bool enabled)
     {
@@ -136,6 +139,7 @@ public sealed class MobileSyncServer : IAsyncDisposable
                 // Previously paired phones retain their address and certificate pin.
                 if(port==Port) o.ListenAnyIP(LegacyPort,l=>l.UseHttps(certificate));
             });
+            ConfigureServices?.Invoke(builder.Services);
             host=builder.Build();
             host.UseResponseCompression();
             host.Use(async(ctx,next)=>
@@ -188,6 +192,7 @@ public sealed class MobileSyncServer : IAsyncDisposable
             host.MapPost("/v1/profiles/{id}/unlock",(string id,ProfileUnlock input,HttpContext ctx)=>
             {var status=UnlockProfile(ctx.Request.Headers.Authorization.ToString()[7..],id,input.Pin);return Results.Json(new{unlocked=status==200},Json,statusCode:status);});
             host.MapGet("/v1/library",()=>Results.Json(snapshot(),Json));
+            host.MapGet("/v1/changes",()=>Results.Json(new{revision=store.MobileRevision(),profile=MobileProfiles.Active(store.DataDirectory).Id},Json));
             host.MapPost("/v1/discover/save",async(DiscoverInput input,HttpContext ctx)=>
             {
                 if(input.Type is not ("movie" or "series")||!System.Text.RegularExpressions.Regex.IsMatch(input.Id??"",@"^tt\d{1,16}$"))return Results.Json(new{error="Choose a movie or show from Discover."},Json,statusCode:400);
@@ -216,9 +221,10 @@ public sealed class MobileSyncServer : IAsyncDisposable
             host.MapGet("/v1/phone-downloads/search/{id}",(string id,HttpContext ctx)=>DownloadApi(async()=>await phoneCloud!.Search(id,Peer(ctx),ctx.RequestAborted)));
             host.MapPost("/v1/phone-downloads/prepare",(PhonePrepare input,HttpContext ctx)=>DownloadApi(async()=>await phoneCloud!.Prepare(input,Peer(ctx),ctx.RequestAborted)));
             host.MapGet("/v1/phone-downloads/content/{token}",async(string token,HttpContext ctx)=>{if(phoneCloud==null){ctx.Response.StatusCode=503;return;}try{await phoneCloud.Send(token,Peer(ctx),ctx);}catch(Exception){if(!ctx.Response.HasStarted)ctx.Response.StatusCode=502;else ctx.Abort();}});
-            host.MapGet("/v1/pc-downloads",()=>Results.Json(new{configured=downloads?.Configured??false,jobs=downloads?.PublicJobs()??[]},Json));
+            host.MapGet("/v1/pc-downloads",()=>Results.Json(DownloadQueue(),Json));
+            host.MapPost("/v1/pc-downloads/delete",(DownloadDeleteInput input,HttpContext ctx)=>DeleteFinishedDownload(input.Id,ctx));
             host.MapGet("/v1/pc-downloads/search/{id}",(string id,bool? season,HttpContext ctx)=>DownloadApi(async()=>await downloads!.SearchDetailed(id,season==true,null,ctx.RequestAborted)));
-            host.MapPost("/v1/pc-downloads/plan/{id}",(string id,DownloadPlanRequest input,HttpContext ctx)=>DownloadApi(async()=>await downloads!.Plan(id,input.ReleaseIds,ctx.RequestAborted)));
+            host.MapPost("/v1/pc-downloads/plan/{id}",(string id,DownloadPlanRequest input,HttpContext ctx)=>DownloadApi(async()=>await downloads!.PlanRequest(id,input,ctx.RequestAborted)));
             host.MapPost("/v1/pc-downloads/match",(DownloadMappingRequest input)=>DownloadApi(()=>Task.FromResult<object>(downloads!.MapFile(input.FileId,input.Episode))));
             host.MapGet("/v1/pc-downloads/files/{id}",(string id,HttpContext ctx)=>DownloadApi(async()=>new{files=await downloads!.Files(id,ctx.RequestAborted)}));
             host.MapPost("/v1/pc-downloads",(DownloadRequest input)=>DownloadApi(()=>Task.FromResult<object>(new{ids=downloads!.Enqueue(input)})));
@@ -244,7 +250,7 @@ public sealed class MobileSyncServer : IAsyncDisposable
                 if(ops==null||ops.Count>500) return Results.BadRequest();
                 var result=SyncProfile(ctx.Request.Headers["X-Noir-Profile"].ToString(),ops,ctx.Request.Headers["X-Noir-Host"].ToString());
                 if(result.Status!=200){var active=MobileProfiles.Active(store.DataDirectory);return Results.Json(new{activeProfileId=active.Id,activeProfileName=active.Name},Json,statusCode:409);}
-                return Results.Json(new {acknowledged=result.Acknowledged,library=result.Library},Json);
+                return Results.Json(new {acknowledged=result.Acknowledged,library=result.Library,revision=result.Library!.Revision},Json);
             });
             host.MapGet("/v1/art/{name}",(string name)=>
             {
@@ -299,6 +305,31 @@ public sealed class MobileSyncServer : IAsyncDisposable
             return(200,new(){SubtitleAddonUrl=c.SubtitleAddonUrl,SubtitleAddonOnly=c.SubtitleAddonOnly,Manifest=c.Manifest,TorBoxKey=c.TorBoxKey.Length>0?c.TorBoxKey:c.Service=="TorBox"?c.Key:"",RealDebridKey=c.RealDebridKey.Length>0?c.RealDebridKey:c.Service=="Real-Debrid"?c.Key:"",PreferredResolution=c.PreferredResolution,Language=c.BrowseLanguage=="All"?"Any":c.BrowseLanguage,MaxEpisodeBytes=c.MaxEpisodeBytes});
         }catch(Exception){return(403,null);}finally{settingsShare.Release();}
     }
+    public object DownloadQueue()=>new{configured=downloads?.Configured??false,capabilities=new{deleteFinished=downloads!=null&&confirmDownloadDelete!=null},jobs=downloads?.PublicJobs()??[]};
+    public async Task<IResult> DeleteFinishedDownload(string id,HttpContext ctx)
+    {
+        IResult Error(int status,string en,string ar)=>Results.Json(new{error=store.State.Language=="ar"?ar:en},Json,statusCode:status);
+        var auth=ctx.Request.Headers.Authorization.ToString();if(!auth.StartsWith("Bearer ",StringComparison.Ordinal)||!Authorized(auth[7..]))return Results.Unauthorized();
+        var requested=ctx.Request.Headers["X-Noir-Profile"].ToString();if(!MobileProfiles.Matches(requested,store.DataDirectory))return Results.StatusCode(409);if(requested.Length>0&&!ProfileAllowed(ctx,requested))return Results.StatusCode(403);
+        if(downloads==null||confirmDownloadDelete==null)return Error(409,"Open Noir on your PC to confirm deletion.","افتح نوار على الكمبيوتر لتأكيد الحذف.");
+        if(!await downloadDelete.WaitAsync(0,ctx.RequestAborted))return Error(409,"Another deletion is waiting for confirmation on your PC.","تنتظر عملية حذف أخرى التأكيد على الكمبيوتر.");
+        try{
+            var job=downloads.Jobs().FirstOrDefault(j=>j.Id==id);if(job==null)return Results.NotFound();
+            if(job.Status!="Completed")return Error(409,"Wait for this download to finish before deleting it.","انتظر اكتمال هذا التنزيل قبل حذفه.");
+            var file=downloads.LocalLibrary().SelectMany(g=>g.Files).FirstOrDefault(f=>f.Path.Equals(job.Destination,StringComparison.OrdinalIgnoreCase));if(file==null)return Results.NotFound();
+            var profile=MobileProfiles.Active(store.DataDirectory).Id;
+            using var timeout=CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);timeout.CancelAfter(TimeSpan.FromMinutes(2));
+            DownloadDeleteChoice? choice;try{choice=await confirmDownloadDelete(file,downloads.ManagementPreferences.WhenDeleting,timeout.Token).WaitAsync(timeout.Token);}catch(OperationCanceledException){choice=null;}
+            if(choice is not (DownloadDeleteChoice.Recycle or DownloadDeleteChoice.Permanent)||timeout.IsCancellationRequested)return Error(409,"Deletion was cancelled on your PC.","أُلغي الحذف على الكمبيوتر.");
+            if(!Authorized(ctx.Request.Headers.Authorization.ToString()[7..]))return Results.Unauthorized();
+            if(!MobileProfiles.Matches(profile,store.DataDirectory)||!ProfileAllowed(ctx,profile))return Results.StatusCode(409);
+            var current=downloads.Jobs().FirstOrDefault(j=>j.Id==id);if(current==null)return Results.NotFound();
+            if(current.Status!="Completed"||!current.Destination.Equals(file.Path,StringComparison.OrdinalIgnoreCase))return Error(409,"This download changed. Refresh and try again.","تغير هذا التنزيل. حدّث وحاول مجددًا.");
+            var result=await downloads.DeleteLocal([file],choice.Value,ct:ctx.RequestAborted);
+            return result.Errors.Count==0&&result.Files==1?Results.Json(new{ok=true,files=result.Files,bytes=result.Bytes},Json):Error(409,"Couldn't delete this download. Check Noir on your PC and try again.","تعذر حذف هذا التنزيل. تحقق من نوار على الكمبيوتر وحاول مجددًا.");
+        }finally{downloadDelete.Release();}
+    }
+    sealed class DownloadDeleteInput {public string Id {get;set;}="";}
     bool ProfileAllowed(HttpContext ctx,string id)
     {
         var p=Profiles.Load(MobileProfiles.Root(store.DataDirectory)).Profiles.FirstOrDefault(p=>p.Id==id);if(p==null)return false;if(p.PinHash.Length==0)return true;

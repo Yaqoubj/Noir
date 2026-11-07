@@ -36,21 +36,23 @@ public partial class MainWindow
         if(stream!=null)streamSubtitleCancellation?.Cancel();
         var streamTarget=stream==null?null:SubtitleDownloads.StreamTarget(store.DataDirectory,item,stream.Name);
         if(syncOnly&&stream!=null){SavedLabel.Text=PL("Streaming subtitles: use Subtitles → Timing (Earlier / Later). Automatic analysis needs a local video.","ترجمة البث: استخدم الترجمة ← التوقيت (أبكر / لاحقًا). يحتاج الضبط التلقائي إلى فيديو محفوظ على الجهاز.‏");ShowControls();return;}
-        var window=new Window{ShowActivated=!validationMode,Owner=this,Title=PL("Subtitles","الترجمة"),Width=560,Height=440,Background=Brush("#101012"),Foreground=Brush("#F4F1EB"),WindowStartupLocation=WindowStartupLocation.CenterOwner,FlowDirection=Loc.Arabic?FlowDirection.RightToLeft:FlowDirection.LeftToRight};
-        var body=new StackPanel{Margin=new(24)};window.Content=body;body.Children.Add(Heading(syncOnly?PL("Check subtitle timing","فحص توقيت الترجمة"):PL("Download subtitles","تنزيل الترجمة"),item.Label));
-        var english=new CheckBox{Content=PL("English","الإنجليزية"),IsChecked=true,Margin=new(0,12,0,8)};var arabic=new CheckBox{Content=PL("Arabic","العربية"),IsChecked=true,Margin=new(0,8,0,12)};var auto=new CheckBox{Content=PL("Automatically adjust timing when the match is plausible","اضبط التوقيت تلقائيًا عندما تكون المطابقة مرجّحة"),IsChecked=true,Margin=new(0,8,0,12)};
+        var window=OpenSheet(PL("Subtitles","الترجمة"),item.Label,SheetKind.Side,500);
+        var body=new StackPanel();window.Add(body);
+        var english=new CheckBox{Content=PL("English","الإنجليزية"),IsChecked=true,Margin=new(0,4,0,6)};var arabic=new CheckBox{Content=PL("Arabic","العربية"),IsChecked=true,Margin=new(0,4,0,6)};var auto=new CheckBox{Content=PL("Automatically adjust timing when the match is plausible","اضبط التوقيت تلقائيًا عندما تكون المطابقة مرجّحة"),IsChecked=true,Margin=new(0,4,0,6)};
+        body.Children.Add(SheetSection(syncOnly?PL("Check subtitle timing","فحص توقيت الترجمة"):PL("Download subtitles","تنزيل الترجمة")));
         if(!syncOnly){body.Children.Add(english);body.Children.Add(arabic);if(stream==null)body.Children.Add(auto);}
         body.Children.Add(Body(stream!=null?PL("Download subtitles while you stream. They are saved on this PC for this release and load again next time. Use Subtitles → Timing if the text appears early or late.","نزّل الترجمة أثناء البث. تُحفظ على هذا الكمبيوتر لهذه النسخة وتُحمَّل مجددًا في المرة القادمة. استخدم الترجمة ← التوقيت إذا ظهر النص مبكرًا أو متأخرًا."):PL("Subtitles stay beside your video and work offline on PC and phone. Timing analysis uses the local video and keeps the original subtitle backup. Subtitles built into the video are checked too; a corrected copy is saved beside it only when they are off.","تبقى الترجمة بجانب الفيديو وتعمل دون اتصال على الكمبيوتر والهاتف. يستخدم تحليل التوقيت الفيديو المحفوظ ويحتفظ بنسخة احتياطية من الترجمة الأصلية. تُفحص الترجمة المضمّنة في الفيديو أيضًا، ولا تُحفظ نسخة مصحّحة بجانبه إلا إذا كان توقيتها غير مضبوط."),12));
-        var feedback=Body("",13);body.Children.Add(feedback);var cancellation=new CancellationTokenSource();window.Closed+=(_,_)=>{cancellation.Cancel();};
-        Button? start=null;start=ActionButton(syncOnly?PL("Check subtitle timing","فحص توقيت الترجمة"):PL("Find and download","ابحث ونزّل"),async()=>{
+        var feedback=Body("",13);body.Children.Add(feedback);var cancellation=new CancellationTokenSource();window.Closed+=_=>{cancellation.Cancel();};
+        window.Action(PL("Close","إغلاق"),()=>window.Close(false));
+        Button? start=null;start=window.Action(syncOnly?PL("Check subtitle timing","فحص توقيت الترجمة"):PL("Find and download","ابحث ونزّل"),async()=>{
             if(!syncOnly&&english.IsChecked!=true&&arabic.IsChecked!=true){feedback.Text=PL("Choose at least one language.","اختر لغة واحدة على الأقل.");return;}
             start!.IsEnabled=false;feedback.Text=syncOnly?PL("Analyzing subtitle timing in the background…","جارٍ تحليل توقيت الترجمة في الخلفية…"):PL("Matching subtitles for this episode / movie…","جارٍ مطابقة الترجمة مع هذه الحلقة / هذا الفيلم…");
             try{
-                var engine=new SubtitleDownloads(store.DataDirectory,source:()=>{var c=downloads?.Config;return(c?.SubtitleAddonUrl??"",c?.SubtitleAddonOnly??true);});string message;
+                var engine=new SubtitleDownloads(store.DataDirectory,source:()=>{var c=downloads?.Config;return(c?.SubtitleAddonUrl??"",c?.SubtitleAddonOnly??true);});string message;var corrected=new List<string>();
                 if(syncOnly){
-                    var saved=MobileSubtitles.Find(item);var results=new List<string>();foreach(var sub in saved)results.Add(sub.Info.Name+" · "+await engine.Sync(item.Path,sub.Path,cancellation.Token));
+                    var saved=MobileSubtitles.Find(item);var results=new List<string>();foreach(var sub in saved){var outcome=await engine.Sync(item.Path,sub.Path,cancellation.Token);if(outcome.StartsWith("auto-synced",StringComparison.Ordinal))corrected.Add(sub.Path);results.Add(sub.Info.Name+" · "+outcome);}
                     // Built-in tracks get a checked copy unless one was already made for that language.
-                    foreach(var lang in await EmbeddedSubtitles.Probe(item.Path,cancellation.Token))if(!saved.Any(s=>SubtitleDownloads.IsSyncedCopy(Path.GetFileNameWithoutExtension(s.Path))&&SubtitleDownloads.SidecarLanguage(s.Path)==lang))results.Add((lang=="ar"?PL("Arabic (built into the video)","الترجمة العربية (المضمّنة في الفيديو)"):PL("English (built into the video)","الترجمة الإنجليزية (المضمّنة في الفيديو)"))+" · "+await engine.SyncEmbedded(item.Path,lang,cancellation.Token));
+                    foreach(var lang in await EmbeddedSubtitles.Probe(item.Path,cancellation.Token))if(!saved.Any(s=>SubtitleDownloads.IsSyncedCopy(Path.GetFileNameWithoutExtension(s.Path))&&SubtitleDownloads.SidecarLanguage(s.Path)==lang)){var outcome=await engine.SyncEmbedded(item.Path,lang,cancellation.Token);if(outcome.StartsWith("auto-synced",StringComparison.Ordinal))corrected.AddRange(MobileSubtitles.Find(item).Select(s=>s.Path).Where(p=>SubtitleDownloads.IsSyncedCopy(Path.GetFileNameWithoutExtension(p))&&SubtitleDownloads.SidecarLanguage(p)==lang));results.Add((lang=="ar"?PL("Arabic (built into the video)","الترجمة العربية (المضمّنة في الفيديو)"):PL("English (built into the video)","الترجمة الإنجليزية (المضمّنة في الفيديو)"))+" · "+outcome);}
                     message=results.Count>0?string.Join("\n",results):PL("No English or Arabic subtitles found in or beside this video. Download subtitles first.","لم يُعثر على ترجمة إنجليزية أو عربية داخل هذا الفيديو أو بجانبه. نزّل الترجمة أولًا.");
                 }
                 else{
@@ -59,9 +61,20 @@ public partial class MainWindow
                     message=await engine.Fetch(item,release,new[]{english.IsChecked==true?"en":"",arabic.IsChecked==true?"ar":""}.Where(l=>l.Length>0).ToList(),auto.IsChecked==true,cancellation.Token,streamTarget:streamTarget);
                 }
                 if(cancellation.IsCancellationRequested)return;feedback.Text=SubtitleResultText(message);
-                if(current?.Id==item.Id&&serial==playbackSerial&&player!=null){if(stream!=null)AttachStreamSubtitles();else foreach(var sub in MobileSubtitles.Find(item))player.AddSlave(MediaSlaveType.Subtitle,new Uri(sub.Path).AbsoluteUri,false);ApplyPreferredTracks();}
+                if(current?.Id==item.Id&&serial==playbackSerial&&player!=null){if(stream!=null)AttachStreamSubtitles();else if(corrected.Count>0)ReloadCorrectedSubtitles(corrected);else{foreach(var sub in MobileSubtitles.Find(item))player.AddSlave(MediaSlaveType.Subtitle,new Uri(sub.Path).AbsoluteUri,false);ApplyPreferredTracks();}}
             }catch(OperationCanceledException)when(cancellation.IsCancellationRequested){}catch(Exception e){feedback.Text=e is IOException?SubtitleResultText(e.Message):PL("Couldn't get subtitles. Playback is unaffected; retry when connected.","تعذر جلب الترجمة. لم يتأثر التشغيل؛ أعد المحاولة عند الاتصال.");}finally{if(!cancellation.IsCancellationRequested)start.IsEnabled=true;}
-        },true);body.Children.Add(start);window.Show();
+        },true);
+    }
+    // VLC keeps a loaded subtitle in memory and picks tracks by name, so a corrected file at the same path never shows.
+    // Load a copy from a fresh folder (same file name, so the track label stays) and select it directly.
+    void ReloadCorrectedSubtitles(List<string> corrected)
+    {
+        if(player==null)return;var root=Path.Combine(store.DataDirectory,"subtitle-reload");
+        try{if(Directory.Exists(root))foreach(var old in Directory.EnumerateDirectories(root))if(Directory.GetCreationTimeUtc(old)<DateTime.UtcNow.AddDays(-1))try{Directory.Delete(old,true);}catch(IOException){}catch(UnauthorizedAccessException){}}catch(IOException){}
+        var preferred=corrected.FirstOrDefault(p=>SubtitleDownloads.SidecarLanguage(p)==(Loc.Arabic?"ar":"en"))??corrected[0];
+        foreach(var path in corrected.OrderBy(p=>p==preferred))
+            try{var folder=Path.Combine(root,Guid.NewGuid().ToString("N"));Directory.CreateDirectory(folder);var copy=Path.Combine(folder,Path.GetFileName(path));File.Copy(path,copy);player.AddSlave(MediaSlaveType.Subtitle,new Uri(copy).AbsoluteUri,path==preferred);}
+            catch(Exception e)when(e is IOException or UnauthorizedAccessException){}
     }
     // The subtitle engine reports in English ("Arabic saved · auto-synced (+1.20s)"); Arabic mode translates each " · " part.
     static string SubtitleResultText(string message)

@@ -36,6 +36,7 @@ public partial class App : Application
         var tasteLink=e.Args.FirstOrDefault(a=>a.StartsWith(TasteCode.Prefix,StringComparison.OrdinalIgnoreCase));
         if(validate && dataDirectory==null) { Shutdown(2);return; }
         if(validate)Profiles.RootOverride=Path.GetFullPath(dataDirectory!);
+        Density.Load(dataDirectory!=null&&!Profiles.IsProfileFolder(dataDirectory)?dataDirectory:Profiles.Root);
         // Profiles share one running instance: a folder given on the command line is a separate
         // instance only when it isn't one of the profile folders (tests and validation copies).
         var instanceSuffix=dataDirectory==null||!validate&&Profiles.IsProfileFolder(dataDirectory)?"":Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(dataDirectory).ToUpperInvariant())))[..16];

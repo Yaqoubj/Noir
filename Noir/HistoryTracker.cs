@@ -72,12 +72,12 @@ public partial class MainWindow
         PageTitle.Text=T("Your viewing life","حكاية مشاهداتك");
         var views=AllViewings();
         LibraryHeader.Visibility=Visibility.Collapsed;
-        var header=new DockPanel{Margin=new(0,108,0,0),LastChildFill=true};
+        var header=new DockPanel{Margin=new(0,TopBar.Height+Density.Pick(22,30),0,0),LastChildFill=true};
         var actions=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Bottom};DockPanel.SetDock(actions,Dock.Right);header.Children.Add(actions);
-        var log=ActionButton(T("＋  Log","＋  سجّل"),()=>OpenLog(null),true);log.Padding=new(20,11,22,11);log.ToolTip=T("Log movies and episodes watched anywhere","سجّل الأفلام والحلقات التي شاهدتها في أي مكان");System.Windows.Automation.AutomationProperties.SetName(log,log.Content.ToString());actions.Children.Add(log);
-        var import=ActionButton(T("⇅  Add history","⇅  أضف سجلّك"),()=>{trackerTab="Add history";Render();});import.Padding=new(18,11,20,11);import.Margin=new(10,0,0,0);import.ToolTip=T("Import history from other apps","استورد سجلّك من التطبيقات الأخرى");System.Windows.Automation.AutomationProperties.SetName(import,import.Content.ToString());actions.Children.Add(import);
+        var log=ActionButton(T("＋  Log","＋  سجّل"),()=>OpenLog(null),true);log.Padding=Density.Compact?Density.ButtonPadding:new(20,11,22,11);log.ToolTip=T("Log movies and episodes watched anywhere","سجّل الأفلام والحلقات التي شاهدتها في أي مكان");System.Windows.Automation.AutomationProperties.SetName(log,log.Content.ToString());actions.Children.Add(log);
+        var import=ActionButton(T("⇅  Add history","⇅  أضف سجلّك"),()=>{trackerTab="Add history";Render();});import.Padding=Density.Compact?Density.ButtonPadding:new(18,11,20,11);import.Margin=new(10,0,0,0);import.ToolTip=T("Import history from other apps","استورد سجلّك من التطبيقات الأخرى");System.Windows.Automation.AutomationProperties.SetName(import,import.Content.ToString());actions.Children.Add(import);
         var extras=ActionButton("⋯",()=>{});extras.Padding=new(14,6,14,12);extras.FontSize=17;extras.Margin=new(10,0,0,0);extras.ToolTip=T("More: year story, compare taste, calendar, backup","المزيد: حكاية العام ومقارنة الذوق والتقويم والنسخ الاحتياطي");System.Windows.Automation.AutomationProperties.SetName(extras,T("More history tools","المزيد من أدوات السجل"));extras.Click+=(_,_)=>ShowHistoryMore(extras);actions.Children.Add(extras);
-        var caption=new StackPanel();var heading=Text(PageTitle.Text,28,"#F4F1EB",FontWeights.SemiBold);heading.TextWrapping=TextWrapping.NoWrap;heading.TextTrimming=TextTrimming.CharacterEllipsis;caption.Children.Add(heading);caption.Children.Add(Text(T("Every story, remembered.","كل حكاية تبقى."),12,"#9F9A93"));header.Children.Add(caption);header.SizeChanged+=(_,e)=>DockPanel.SetDock(actions,e.NewSize.Width<640?Dock.Bottom:Dock.Right);ContentPanel.Children.Add(header);
+        var caption=new StackPanel();var heading=Text(PageTitle.Text,Density.Pick(24,28),"#F4F1EB",FontWeights.SemiBold);heading.TextWrapping=TextWrapping.NoWrap;heading.TextTrimming=TextTrimming.CharacterEllipsis;caption.Children.Add(heading);caption.Children.Add(Text(T("Every story, remembered.","كل حكاية تبقى."),12,"#9F9A93"));header.Children.Add(caption);header.SizeChanged+=(_,e)=>DockPanel.SetDock(actions,e.NewSize.Width<640?Dock.Bottom:Dock.Right);ContentPanel.Children.Add(header);
         ContentPanel.Children.Add(HistoryPillTabs());
         switch(trackerTab)
         {
@@ -150,15 +150,15 @@ public partial class MainWindow
     FrameworkElement TrackerGrid(IEnumerable<FrameworkElement> rows)
     {
         var grid=new UniformGrid{Columns=2,Margin=new(-6,0,-6,8)};foreach(var r in rows){r.Margin=new(6,0,6,12);grid.Children.Add(r);}
-        grid.SizeChanged+=(_,e)=>{if(e.WidthChanged)grid.Columns=Math.Max(1,Math.Min(3,(int)(e.NewSize.Width/540)));};
+        grid.SizeChanged+=(_,e)=>{if(e.WidthChanged)grid.Columns=Math.Max(1,Math.Min(3,(int)(e.NewSize.Width/Density.Pick(480,540))));};
         return grid;
     }
     FrameworkElement TrackerRow(Tracked t,bool dormant,string badge="")
     {
         var show=t.Group[0];var next=t.Next!;var left=t.Released-t.Watched;
         var card=new Border{Tag="HistoryTrackerRow:"+show.GroupKey,Background=Brush("#161618"),CornerRadius=new(14),BorderBrush=Brush("#00000000"),BorderThickness=new(1.5),Padding=new(12),Opacity=dormant?.82:1};
-        var g=new Grid();g.ColumnDefinitions.Add(new(){Width=new(78)});g.ColumnDefinitions.Add(new(){Width=new(1,GridUnitType.Star)});g.ColumnDefinitions.Add(new(){Width=GridLength.Auto});card.Child=g;
-        var poster=new Button{Content=Art(show.Poster,show.Title,117,true),Padding=new(0),Height=117,Background=Brush("Transparent"),ToolTip=T("Open {0}","افتح {0}",show.Title)};poster.Click+=(_,_)=>OpenHistoryTitle(t.Group);
+        var g=new Grid();g.ColumnDefinitions.Add(new(){Width=new(Density.Pick(66,78))});g.ColumnDefinitions.Add(new(){Width=new(1,GridUnitType.Star)});g.ColumnDefinitions.Add(new(){Width=GridLength.Auto});card.Child=g;
+        var poster=new Button{Content=Art(show.Poster,show.Title,Density.Pick(99,117),true),Padding=new(0),Height=Density.Pick(99,117),Background=Brush("Transparent"),ToolTip=T("Open {0}","افتح {0}",show.Title)};poster.Click+=(_,_)=>OpenHistoryTitle(t.Group);
         System.Windows.Automation.AutomationProperties.SetName(poster,poster.ToolTip.ToString());g.Children.Add(new Border{CornerRadius=new(8),ClipToBounds=true,Child=poster,VerticalAlignment=VerticalAlignment.Center});
         var info=new StackPanel{Margin=new(16,2,12,2),VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(info,1);g.Children.Add(info);
         var remaining=t.Group.Where(i=>store.Counts(i)&&store.Aired(i,DateTimeOffset.UtcNow)&&!store.EverWatched(i)).ToList();
@@ -184,7 +184,7 @@ public partial class MainWindow
         var tools=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(tools,2);g.Children.Add(tools);
         if(!TrackerOnly&&CanPlay(next)){var play=SmallRound("▶","Play "+next.EpisodeLabel,()=>_=PlayVideo(next));tools.Children.Add(play);}
         else if(!TrackerOnly&&StreamOffered){var stream=SmallRound("▶","Stream "+next.EpisodeLabel,()=>StreamItem(next));tools.Children.Add(stream);}
-        tools.Children.Add(CheckCircle(false,"Mark "+next.EpisodeLabel+" watched",()=>{historyContinued=show.GroupKey;LogBatch([new(next,DateTimeOffset.UtcNow)],$"{show.Title} {next.EpisodeLabel.Replace(" · "," ")} watched",next);},54));
+        tools.Children.Add(CheckCircle(false,"Mark "+next.EpisodeLabel+" watched",()=>{historyContinued=show.GroupKey;LogBatch([new(next,DateTimeOffset.UtcNow)],$"{show.Title} {next.EpisodeLabel.Replace(" · "," ")} watched",next);},Density.Pick(46,54)));
         if(historyContinued==show.GroupKey){historyContinued="";card.Loaded+=(_,_)=>HistoryPop(card);}
         LazyMenu(card,next);tools.Children.Add(MoreButton(next));
         var stopQuick=ActionButton("✕",()=>StopShowing(show));stopQuick.ToolTip=T("Stop showing","إيقاف الإظهار");System.Windows.Automation.AutomationProperties.SetName(stopQuick,stopQuick.ToolTip.ToString());stopQuick.Padding=new(8,5,8,5);stopQuick.Opacity=0;tools.Children.Add(stopQuick);
@@ -257,9 +257,9 @@ public partial class MainWindow
     }
     FrameworkElement TrackerPoster(Tracked t)
     {
-        var show=t.Group[0];var panel=new StackPanel{Width=176,Margin=new(0,0,18,8)};
-        var picture=new Grid{Height=264,ClipToBounds=true};
-        var open=new Button{Content=Art(show.Poster,show.Title,264,true),Padding=new(0),Background=Brush("Transparent"),HorizontalContentAlignment=HorizontalAlignment.Stretch,ToolTip=show.Title+" · Episodes"};open.Click+=(_,_)=>OpenHistoryTitle(t.Group);picture.Children.Add(open);
+        var show=t.Group[0];var panel=new StackPanel{Width=Density.PosterWidth,Margin=new(0,0,Density.CardGap,8)};
+        var picture=new Grid{Height=Density.PosterHeight,ClipToBounds=true};
+        var open=new Button{Content=Art(show.Poster,show.Title,Density.PosterHeight,true),Padding=new(0),Background=Brush("Transparent"),HorizontalContentAlignment=HorizontalAlignment.Stretch,ToolTip=show.Title+" · Episodes"};open.Click+=(_,_)=>OpenHistoryTitle(t.Group);picture.Children.Add(open);
         var shade=new LinearGradientBrush{StartPoint=new(0,0),EndPoint=new(0,1)};shade.GradientStops.Add(new(Color.FromArgb(0,0,0,0),.6));shade.GradientStops.Add(new(Color.FromArgb(200,8,8,10),1));picture.Children.Add(new Border{Background=shade,IsHitTestVisible=false});
         var ring=Ring(t.Released==0?0:t.Watched/(double)t.Released,46,t.Released==0?"–":Math.Max(t.Watched>0?1:0,t.Watched*100/t.Released)+"%");ring.Margin=new(10);ring.HorizontalAlignment=HorizontalAlignment.Right;ring.VerticalAlignment=VerticalAlignment.Bottom;ring.IsHitTestVisible=false;picture.Children.Add(ring);
         var chip=t.Status switch{"Caught up"=>T("CAUGHT UP","أكملت المتاح"),"Finished"=>T("FINISHED","مكتمل"),"Dropped"=>T("STOPPED","متوقف"),"Not started"=>T("NOT STARTED","لم تبدأ"),"Unfinished"=>T("UNFINISHED","غير مكتمل"),_=>""};
@@ -308,8 +308,8 @@ public partial class MainWindow
         var wrap=new WrapPanel{Margin=new(0,8,0,0)};
         foreach(var (item,list) in shown.Take(trackerLimit))
         {
-            var panel=new StackPanel{Width=176,Margin=new(0,0,18,22)};var picture=new Grid{Height=264,ClipToBounds=true};
-            var open=new Button{Content=Art(item.Poster,item.Title,264,true),Padding=new(0),Background=Brush("Transparent"),HorizontalContentAlignment=HorizontalAlignment.Stretch,ToolTip=item.Title};open.Click+=(_,_)=>OpenHistoryTitle(store.EpisodesFor(item.GroupKey));picture.Children.Add(open);
+            var panel=new StackPanel{Width=Density.PosterWidth,Margin=new(0,0,Density.CardGap,22)};var picture=new Grid{Height=Density.PosterHeight,ClipToBounds=true};
+            var open=new Button{Content=Art(item.Poster,item.Title,Density.PosterHeight,true),Padding=new(0),Background=Brush("Transparent"),HorizontalContentAlignment=HorizontalAlignment.Stretch,ToolTip=item.Title};open.Click+=(_,_)=>OpenHistoryTitle(store.EpisodesFor(item.GroupKey));picture.Children.Add(open);
             if(list.Count>1)picture.Children.Add(new Border{IsHitTestVisible=false,Background=Brush("#E4C084"),CornerRadius=new(6),Padding=new(7,3,7,3),Margin=new(10),HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Top,Child=Text("×"+list.Count,11,"#16120C",FontWeights.Bold)});
             if(!TrackerOnly)picture.Children.Add(CardMenu(item));
             var edge=new Border{CornerRadius=new(10),ClipToBounds=true,Child=picture,BorderThickness=new(1.5),BorderBrush=Brush("#00000000")};panel.Children.Add(edge);
@@ -397,9 +397,9 @@ public partial class MainWindow
     FrameworkElement DiaryRow(VideoItem item,ViewingRecord view)
     {
         var card=new Border{Background=Brush("#141416"),CornerRadius=new(12),Padding=new(10),Margin=new(0,0,0,8),BorderBrush=Brush("#00000000"),BorderThickness=new(1)};
-        var g=new Grid();card.Child=g;g.ColumnDefinitions.Add(new(){Width=new(58)});g.ColumnDefinitions.Add(new(){Width=new(78)});g.ColumnDefinitions.Add(new(){Width=new(1,GridUnitType.Star)});g.ColumnDefinitions.Add(new(){Width=GridLength.Auto});
+        var g=new Grid();card.Child=g;g.ColumnDefinitions.Add(new(){Width=new(58)});g.ColumnDefinitions.Add(new(){Width=new(Density.Pick(66,78))});g.ColumnDefinitions.Add(new(){Width=new(1,GridUnitType.Star)});g.ColumnDefinitions.Add(new(){Width=GridLength.Auto});
         var time=Text(view.DateUnknown?"—":view.WatchedAt.ToLocalTime().ToString("HH:mm"),13,"#817E78");time.VerticalAlignment=VerticalAlignment.Center;time.Margin=new(6,0,0,0);g.Children.Add(time);
-        var poster=new Border{CornerRadius=new(8),ClipToBounds=true,Child=HistoryArt(item,110),Height=110,Width=74};Grid.SetColumn(poster,1);g.Children.Add(poster);
+        var poster=new Border{CornerRadius=new(8),ClipToBounds=true,Child=HistoryArt(item,Density.Pick(93,110)),Height=Density.Pick(93,110),Width=Density.Pick(62,74)};Grid.SetColumn(poster,1);g.Children.Add(poster);
         var info=new StackPanel{Margin=new(14,0,12,0),VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(info,2);g.Children.Add(info);
         var title=ActionButton("",()=>OpenHistoryTitle(store.EpisodesFor(item.GroupKey)));title.Content=Text(item.Title,15.5,weight:FontWeights.SemiBold);title.Background=Brush("Transparent");title.Padding=new(0);info.Children.Add(title);
         var line=new TextBlock{FontSize=12.5,Margin=new(0,3,0,0),TextTrimming=TextTrimming.CharacterEllipsis};
@@ -429,7 +429,7 @@ public partial class MainWindow
     {
         var popup=new Popup{PlacementTarget=anchor,Placement=anchor==null?PlacementMode.MousePoint:PlacementMode.Bottom,StaysOpen=false,AllowsTransparency=true,PopupAnimation=PopupAnimation.Fade};
         var shown=new DateTime(initial.Year,initial.Month,1);var body=new StackPanel{Margin=new(14)};
-        popup.Child=new Border{Background=Brush("#F21A1A1D"),BorderBrush=Brush("#40E4C084"),BorderThickness=new(1),CornerRadius=new(14),Child=body,Width=300};
+        popup.Child=new Border{Background=Brush("#F7141416"),BorderBrush=Brush("#2EFFFFFF"),BorderThickness=new(1),CornerRadius=new(14),Child=body,Width=300};
         void Draw()
         {
             body.Children.Clear();var head=new DockPanel{Margin=new(0,0,0,8)};

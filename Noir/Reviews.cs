@@ -186,7 +186,7 @@ public sealed class ReviewBrowser : Window
         {
             initialization??=InitializeBrowser();await initialization;token.ThrowIfCancellationRequested();
             status.Text="Finding this exact episode on Serializd…";
-            var url=await CommunityPages.ResolveSerializd(web.CoreWebView2,item,library,token);
+            var url=await CommunityPages.ResolveSerializd(web.CoreWebView2,item,library,token,true);
             if(!closed&&!token.IsCancellationRequested) {sources[source]=url;targetUrl=url;address.Text=url;status.Text=SourceHint();}
         }
         catch(OperationCanceledException) { }
@@ -254,11 +254,14 @@ public sealed class ReviewBrowser : Window
     }
     void ChooseRedditLink()
     {
-        var dialog=new Window{Title="Choose a Reddit discussion",Owner=this,Width=580,Height=230,WindowStartupLocation=WindowStartupLocation.CenterOwner,Background=Background,Foreground=Foreground};
-        var content=new StackPanel{Margin=new(20)};content.Children.Add(MainWindow.Body("Paste a Reddit post or comment link. Noir remembers it for this episode or movie."));
-        var link=new TextBox{Text=ReviewLinks.TopDiscussion(targetUrl)??"",Margin=new(0,12,0,12)};content.Children.Add(link);
-        var error=MainWindow.Body("",12);content.Children.Add(error);
-        content.Children.Add(Button("Show discussion",async()=>{if(ReviewLinks.TopDiscussion(link.Text.Trim()) is not {} thread){error.Text="Use a full https://www.reddit.com/r/…/comments/… link.";return;}RememberThread(thread);dialog.Close();await Navigate(thread);}));dialog.Content=content;dialog.ShowDialog();
+        // Stays a small window: the web view above it would cover an in-window sheet. Styled like the sheets.
+        var dialog=new Window{Title="Choose a Reddit discussion",Owner=this,Width=560,SizeToContent=SizeToContent.Height,ResizeMode=ResizeMode.NoResize,WindowStartupLocation=WindowStartupLocation.CenterOwner,Background=MainWindow.Brush("#141416"),Foreground=MainWindow.Brush("#F4F1EB")};
+        var content=new StackPanel{Margin=new(22,20,22,18)};content.Children.Add(MainWindow.Text("Choose a Reddit discussion",16,"#F4F1EB",FontWeights.SemiBold));var hint=MainWindow.Body("Paste a Reddit post or comment link. Noir remembers it for this episode or movie.",12);hint.Foreground=MainWindow.Brush("#9F9A93");hint.Margin=new(0,4,0,0);content.Children.Add(hint);
+        var link=new TextBox{Text=ReviewLinks.TopDiscussion(targetUrl)??"",Margin=new(0,14,0,8),Padding=new(10,8,10,8),FontSize=13};content.Children.Add(link);
+        var error=MainWindow.Body("",12);error.Foreground=MainWindow.Brush("#E5736B");content.Children.Add(error);
+        var actions=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right,Margin=new(0,10,0,0)};var cancel=Button("Cancel",()=>dialog.Close());cancel.Margin=new(0,0,8,0);actions.Children.Add(cancel);
+        var show=Button("Show discussion",async()=>{if(ReviewLinks.TopDiscussion(link.Text.Trim()) is not {} thread){error.Text="Use a full https://www.reddit.com/r/…/comments/… link.";return;}RememberThread(thread);dialog.Close();await Navigate(thread);});show.Style=(Style)FindResource("Primary");actions.Children.Add(show);content.Children.Add(actions);
+        dialog.PreviewKeyDown+=(_,e)=>{if(e.Key==System.Windows.Input.Key.Escape){dialog.Close();e.Handled=true;}};dialog.Content=content;dialog.ShowDialog();
     }
     string SourceHint()=>selectedSource switch
     {
@@ -292,10 +295,10 @@ public partial class MainWindow
 {
     void OpenPersonalRating(VideoItem item)
     {
-        var review=store.State.PersonalReviews.GetValueOrDefault(item.Id);var rating=review?.Rating10??0;var dialog=new Window{Owner=this,Title=T("Your rating & note","تقييمك وملاحظتك"),Width=520,Height=500,MinWidth=400,MinHeight=400,WindowStartupLocation=WindowStartupLocation.CenterOwner,Background=Brush("#111113"),Foreground=Brush("#F4F1EB")};var body=new StackPanel{Margin=new(26)};dialog.Content=new ScrollViewer{Content=body,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
-        body.Children.Add(Text(item.Title,23,"#E4C084",FontWeights.SemiBold));body.Children.Add(Text(T("Your rating is always optional","تقييمك اختياري دائماً"),12,"#B9AC97"));var stars=new Button{Content=HalfRating(rating,30),HorizontalAlignment=HorizontalAlignment.Left,Background=Brush("Transparent"),Padding=new(0),Margin=new(0,16,0,10),ToolTip=T("Click a half star to rate","انقر نصف نجمة للتقييم")};System.Windows.Automation.AutomationProperties.SetName(stars,T("Your rating · optional","تقييمك · اختياري"));body.Children.Add(stars);stars.PreviewMouseLeftButtonUp+=(_,e)=>{var score=Math.Clamp((int)Math.Ceiling(e.GetPosition(stars).X/32*2),1,10);rating=rating==score?0:score;stars.Content=HalfRating(rating,30);e.Handled=true;};
+        var review=store.State.PersonalReviews.GetValueOrDefault(item.Id);var rating=review?.Rating10??0;var dialog=OpenSheet(T("Your rating & note","تقييمك وملاحظتك"),item.Title+" · "+T("your rating is always optional","تقييمك اختياري دائماً"),SheetKind.Side,460);var body=new StackPanel();dialog.Add(body);
+        var stars=new Button{Content=HalfRating(rating,30),HorizontalAlignment=HorizontalAlignment.Left,Background=Brush("Transparent"),Padding=new(0),Margin=new(0,6,0,10),ToolTip=T("Click a half star to rate","انقر نصف نجمة للتقييم")};System.Windows.Automation.AutomationProperties.SetName(stars,T("Your rating · optional","تقييمك · اختياري"));body.Children.Add(stars);stars.PreviewMouseLeftButtonUp+=(_,e)=>{var score=Math.Clamp((int)Math.Ceiling(e.GetPosition(stars).X/32*2),1,10);rating=rating==score?0:score;stars.Content=HalfRating(rating,30);e.Handled=true;};
         var options=new WrapPanel();for(int n=1;n<=10;n++){var score=n;var option=ActionButton((n/2.0).ToString("0.#",Loc.Culture),()=>{rating=score;stars.Content=HalfRating(rating,30);});option.Padding=new(7,3,7,3);option.Margin=new(0,0,4,4);option.ToolTip=T("{0:0.#} stars","{0:0.#} نجمة",n/2.0);options.Children.Add(option);}body.Children.Add(options);
-        var note=new TextBox{Text=review?.Note??"",AcceptsReturn=true,TextWrapping=TextWrapping.Wrap,Height=108,MaxLength=10000,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,Margin=new(0,12,0,14),Padding=new(10),Background=Brush("#222226"),Foreground=Brush("#F4F1EB")};System.Windows.Automation.AutomationProperties.SetName(note,T("Private note · optional","ملاحظة خاصة · اختيارية"));body.Children.Add(note);var actions=new WrapPanel();actions.Children.Add(ActionButton(T("Save","حفظ"),()=>{store.SetReview10(item,rating,note.Text);dialog.Close();RenderQuiet();},true));var clear=ActionButton(T("Clear rating","مسح التقييم"),()=>{rating=0;stars.Content=HalfRating(0,30);});clear.Margin=new(10,0,0,0);actions.Children.Add(clear);body.Children.Add(actions);dialog.Show();
+        var note=new TextBox{Text=review?.Note??"",AcceptsReturn=true,TextWrapping=TextWrapping.Wrap,Height=108,MaxLength=10000,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,Margin=new(0,12,0,4),Padding=new(10),Background=Brush("#222226"),Foreground=Brush("#F4F1EB")};System.Windows.Automation.AutomationProperties.SetName(note,T("Private note · optional","ملاحظة خاصة · اختيارية"));body.Children.Add(note);dialog.Action(T("Clear rating","مسح التقييم"),()=>{rating=0;stars.Content=HalfRating(0,30);});dialog.Action(T("Cancel","إلغاء"),()=>dialog.Close(false));dialog.Action(T("Save","حفظ"),()=>{store.SetReview10(item,rating,note.Text);dialog.Close(true);RenderQuiet();},true);
     }
     Task? episodeLookup;
     async Task RefreshEpisodeLinks()
@@ -325,8 +328,8 @@ public partial class MainWindow
     }
     void OpenEpisodeInfo(VideoItem item)
     {
-        var dialog=new Window{Title=item.Label,Width=760,Height=660,MinWidth=600,MinHeight=480,Owner=this,WindowStartupLocation=WindowStartupLocation.CenterOwner,Background=Brush("#0D0D0F"),Foreground=Brush("#F4F1EB")};
-        var panel=new StackPanel{Margin=new(28)};
+        var dialog=OpenSheet(item.Label,null,SheetKind.Side,680);
+        var panel=new StackPanel();dialog.Add(panel);
         panel.Children.Add(Art(File.Exists(item.Backdrop)?item.Backdrop:item.Poster,item.Title,215));
         panel.Children.Add(Heading(item.IsMovie?item.Title:item.EpisodeLabel+" · "+item.EpisodeTitle,item.IsMovie?item.Year.ToString():item.Title));
         var bookmark=store.GetProgress(item);panel.Children.Add(Body(bookmark?.Completed==true?"✓ Watched":bookmark is {Position:>0}?"Saved at "+LibraryStore.Time(bookmark.Position):"Not watched yet"));
@@ -337,13 +340,11 @@ public partial class MainWindow
             panel.Children.Add(ActionButton("Show episode description · spoilers",()=>summary.Visibility=Visibility.Visible));
         }
         panel.Children.Add(summary);
-        var actions=new WrapPanel();
-        var play=ActionButton(bookmark is {Completed:false,Position:>0}?"▶ Resume":"▶ Play",()=>{dialog.Close();_ = PlayVideo(item);},true);
-        play.IsEnabled=item.Available&&File.Exists(item.Path);actions.Children.Add(play);
-        var reviews=ActionButton("Reviews & comments",()=>{dialog.Close();OpenReviews(item);});reviews.Margin=new(10,0,0,0);actions.Children.Add(reviews);panel.Children.Add(actions);
-        panel.Children.Add(ActionButton("Viewing diary & my rating",()=>{dialog.Close();OpenDiary(item);}));
         panel.Children.Add(Body(string.Join(" · ",ReviewLinks.Sources(item).Keys),12));
-        dialog.Content=new ScrollViewer{Content=panel};dialog.Show();
+        dialog.Action("Viewing diary & my rating",()=>{dialog.Close(true);OpenDiary(item);});
+        dialog.Action("Reviews & comments",()=>{dialog.Close(true);OpenReviews(item);});
+        var play=dialog.Action(bookmark is {Completed:false,Position:>0}?"▶ Resume":"▶ Play",()=>{dialog.Close(true);_ = PlayVideo(item);},true);
+        play.IsEnabled=item.Available&&File.Exists(item.Path);
     }
 }
 

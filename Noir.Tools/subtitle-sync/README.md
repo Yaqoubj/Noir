@@ -27,8 +27,22 @@ compared with itself.
    With `--audio` the minima are 0.55/0.50 and a meaningful change needs >=0.10
    precision improvement: speech detection on real soundtracks caps precision
    lower, so the floor drops only with stronger recall and a larger gain.
-   Additionally, neither precision nor recall may regress against the input,
-   overall or in any eligible local window.
+   Overall precision and recall must not regress on this existing path.
+   Global corrections use fixed-window F1 (2PR/(P+R)): no useful window may
+   lose more than .02 F1. This allows local precision/recall tradeoffs.
+   Neither global path may lower whole-file F1 or produce negative,
+   non-finite, inverted or reordered cue times.
+   Ordinary audio references have an additional strong-evidence global path:
+   a successful ffsubsync score >=100 and valid model, a meaningful correction,
+   whole-file F1 gain >=.08, precision gain >=.03, final precision >=.30 and
+   recall >=.50, and F1 improvement in >=75% of useful fixed windows with no
+   F1 regression beyond .02. The scale must be within .15% of 1 or either
+   direction of 25/23.976, 24/23.976 or 25/24; alternatively |offset| >=1 s
+   with |scale-1| <=.003. The existing path retains its meaningful definition:
+   |offset| >1 s or |scale-1| >.003. The strong path also counts a model that
+   moves any cue edge by >1 s, allowing pure 24/23.976 drift on long files.
+   Embedded-text and `--audio` checks keep
+   their existing floors and gains, with only the F1 window comparison changed.
 3. Verify non-overlapping 240 s windows, requiring >=8 fully contained cues,
    >=10 s speech and the same density limits. Exclude 15 s of edge padding
    when choosing cues, then search +/-15 s every 10 ms using reference prefix
@@ -95,6 +109,11 @@ a cut inside a window, 25/23.976 drift in both directions (including a missed
 global fit), small steady drift, audio activity jitter, silence/noise, insufficient
 gains, precision-only gains, local regression, neighbour crossing, quality gates,
 sparse data and out-of-reference cue activity.
+The noisy-audio suite covers all six fps ratios with and without offsets, positive/negative
+3 s offsets, wrong 7 s shifts, marginal .03 F1 gains, unchanged noisy timing,
+a genuinely worse window, special-reference thresholds, nonstandard scales,
+negative times and ffsubsync quality failures. A small derived real-film
+fixture contains activity and cue arrays only (see `tests/fixtures/README.md`).
 
 The optional smoke script uses the existing runtime's ffmpeg to mux an embedded
 text track into Matroska, then runs the actual frozen executable for synchronized,

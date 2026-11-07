@@ -49,14 +49,14 @@ public partial class MainWindow
     }
     FrameworkElement RecentHistoryCard(Watched view,bool newest)
     {
-        var item=view.Item;var panel=new StackPanel{Tag=item.Id,Width=newest?400:300,Margin=new(0,0,18,8)};var picture=new Grid{Height=168,ClipToBounds=true};
+        var item=view.Item;var panel=new StackPanel{Tag=item.Id,Width=newest?420:400,Margin=new(0,0,18,8)};var picture=new Grid{Height=168,ClipToBounds=true};
         var art=System.IO.File.Exists(item.EpisodeImage)?item.EpisodeImage:System.IO.File.Exists(item.Backdrop)?item.Backdrop:item.Poster;
         var open=new Button{Content=Art(art,item.Title,168),Padding=new(0),Background=Brush("Transparent"),HorizontalContentAlignment=HorizontalAlignment.Stretch,ToolTip=T("Open {0}","افتح {0}",item.Title)};System.Windows.Automation.AutomationProperties.SetName(open,open.ToolTip.ToString());open.Click+=(_,_)=>OpenHistoryTitle(store.EpisodesFor(item.GroupKey));picture.Children.Add(open);
         var more=MoreButton(item);more.HorizontalAlignment=HorizontalAlignment.Right;more.VerticalAlignment=VerticalAlignment.Top;more.Margin=new(8);picture.Children.Add(more);panel.Children.Add(new Border{CornerRadius=new(12),ClipToBounds=true,Child=picture});
         var title=Text(item.Title,16,"#F4F1EB",FontWeights.SemiBold);title.Margin=new(0,9,0,3);title.TextTrimming=TextTrimming.CharacterEllipsis;title.TextWrapping=TextWrapping.NoWrap;panel.Children.Add(title);
         panel.Children.Add(Text((item.IsMovie?T("Movie","فيلم"):T("S{0} E{1}","م{0} ح{1}",item.Season,item.Episode))+"  ·  "+RecentHistoryWhen(view.At),12,"#9F9A93"));
         var rating=store.State.PersonalReviews.GetValueOrDefault(item.Id)?.Rating10??0;if(rating>0)panel.Children.Add(HalfRating(rating,14));
-        if(newest){var moment=JustWatchedPanel(item,true);moment.Margin=new(0,10,0,0);panel.Children.Add(moment);}return panel;
+        var moment=JustWatchedPanel(item,true);moment.Margin=new(0,12,0,0);panel.Children.Add(moment);return panel;
     }
     void RenderHistoryFavourites()
     {

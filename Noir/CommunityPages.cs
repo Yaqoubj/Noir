@@ -9,7 +9,7 @@ namespace Noir;
 // These adapters use the sites' own signed-in controls. Credentials stay in WebView2.
 public static class CommunityPages
 {
-    public static async Task Navigate(CoreWebView2 web,string url,CancellationToken token)
+    public static async Task Navigate(CoreWebView2 web,string url,CancellationToken token,bool interactive=false)
     {
         var completion=new TaskCompletionSource<bool>();
         void Completed(object? sender,CoreWebView2NavigationCompletedEventArgs e)=>completion.TrySetResult(e.IsSuccess && e.HttpStatusCode<400);
@@ -17,39 +17,61 @@ public static class CommunityPages
         try
         {
             token.ThrowIfCancellationRequested();web.Navigate(url);
-            if(!await completion.Task.WaitAsync(TimeSpan.FromSeconds(40),token)) throw new IOException("The website could not load. Noir will retry later.");
+            // A visible browser may land on a Cloudflare check; it reloads the page once the person passes it, so wait for that load.
+            var deadline=DateTime.UtcNow.AddMinutes(3);var wait=TimeSpan.FromSeconds(40);var challenged=false;
+            while(true)
+            {
+                bool loaded;
+                try {loaded=await completion.Task.WaitAsync(wait,token);}
+                catch(TimeoutException) {throw new IOException(challenged?"The website's security check wasn't completed.":"The website could not load. Noir will retry later.");}
+                if(!interactive || !await Challenge(web)) {if(!loaded) throw new IOException("The website could not load. Noir will retry later.");return;}
+                challenged=true;wait=deadline-DateTime.UtcNow;
+                if(wait<=TimeSpan.Zero) throw new IOException("The website's security check wasn't completed.");
+                completion=new TaskCompletionSource<bool>();
+            }
         }
         finally {web.NavigationCompleted-=Completed;}
     }
+    static async Task<bool> Challenge(CoreWebView2 web)=>(await Read(web,"document.title.startsWith('Just a moment')||location.pathname.startsWith('/cdn-cgi/')||!!document.querySelector('#challenge-form,#challenge-running,#cf-challenge-running,[name=\"cf-turnstile-response\"],script[src*=\"challenges.cloudflare.com\"]')"))?.GetValue<bool>()==true;
     public static async Task<JsonNode?> Read(CoreWebView2 web,string script)=>JsonNode.Parse(await web.ExecuteScriptAsync(script));
+    const string SerializdResults="[...document.querySelectorAll('a[href]')].filter(a=>/^https:\\/\\/www.serializd.com\\/show\\/[^/?#]+$/.test(a.href)).map(a=>({url:a.href,name:(a.querySelector('img')?.alt?.replace(/^Poster for /,'')||a.innerText.split('\\n')[0]).replace(/\\s*\\(\\d{4}\\)\\s*$/,'')}))";
     static string Normalize(string name)=>Regex.Replace(name.ToLowerInvariant(),@"[^\p{L}\p{N}]","");
-    public static async Task<string> ResolveSerializd(CoreWebView2 web,VideoItem item,LibraryStore? store,CancellationToken token)
+    public static async Task<string> ResolveSerializd(CoreWebView2 web,VideoItem item,LibraryStore? store,CancellationToken token,bool interactive=false)
     {
         var cached=store==null?"":CommunityQueue.SerializdEpisode(store.State,item);
-        if(cached.Length>0) {await Navigate(web,cached,token);return cached;}
+        if(cached.Length>0) {await Navigate(web,cached,token,interactive);return cached;}
         if(item.IsMovie || item.Episode<1) throw new IOException("Serializd tracks TV episodes only.");
-        await Navigate(web,ReviewLinks.SerializdUrl(item),token);
+        await Navigate(web,ReviewLinks.SerializdUrl(item),token,interactive);
         var name=Normalize(item.ReviewTitle.Length>0?item.ReviewTitle:item.Title);
-        string? show=null;
+        var candidates=new List<string>();
         for(int attempt=0;attempt<40;attempt++)
         {
             token.ThrowIfCancellationRequested();
-            var matches=await Read(web,"[...document.querySelectorAll('a[href]')].filter(a=>/^https:\\/\\/www.serializd.com\\/show\\/[^/?#]+$/.test(a.href)).map(a=>({url:a.href,name:a.querySelector('img')?.alt?.replace(/^Poster for /,'')||a.innerText.split('\\n')[0]}))");
-            var candidates=(matches as JsonArray)?.Where(a=>Normalize(a?["name"]?.GetValue<string>()??"")==name).Select(a=>a!["url"]!.GetValue<string>()).Distinct().ToList()??[];
-            if(candidates.Count>1) throw new IOException("More than one show matches. Open Serializd and select the correct episode first.");
-            if(candidates.Count==1) {show=candidates[0];break;}
+            var matches=await Read(web,SerializdResults);
+            candidates=(matches as JsonArray)?.Where(a=>Normalize(a?["name"]?.GetValue<string>()??"")==name).Select(a=>a!["url"]!.GetValue<string>()).Distinct().ToList()??[];
+            if(candidates.Count>0) {await Task.Delay(700,token);break;}
             await Task.Delay(500,token);
         }
-        if(show==null) throw new IOException("No exact Serializd title match yet. Choose the correct episode in its review tab.");
-        await Navigate(web,show,token);
-        var details=await Read(web,"(()=>{try {const d=JSON.parse(document.querySelector('#__NEXT_DATA__').textContent).props.pageProps.data.showDetails;return {name:d.name,date:d.premiereDate,seasons:d.seasons?.map(s=>({id:s.seasonId||s.id,number:s.seasonNumber}))};}catch{return null;}})()");
-        if(details==null || Normalize(details["name"]?.GetValue<string>()??"")!=name || (item.Year>0 && !(details["date"]?.GetValue<string>()??"").StartsWith(item.Year.ToString())))
+        if(candidates.Count==0) throw new IOException("No exact Serializd title match yet. Choose the correct episode in its review tab.");
+        // Results load in as the page settles, and remakes share a name (East of Eden 2026 and 2008), so read once more and let the premiere year decide.
+        var settled=await Read(web,SerializdResults);
+        candidates=candidates.Union((settled as JsonArray)?.Where(a=>Normalize(a?["name"]?.GetValue<string>()??"")==name).Select(a=>a!["url"]!.GetValue<string>())??[]).Distinct().ToList();
+        if(candidates.Count>1 && item.Year<=0) throw new IOException("More than one show matches. Open Serializd and select the correct episode first.");
+        string? show=null;JsonNode? details=null;
+        foreach(var candidate in candidates.Take(6))
+        {
+            await Navigate(web,candidate,token,interactive);
+            var found=await Read(web,"(()=>{try {const d=JSON.parse(document.querySelector('#__NEXT_DATA__').textContent).props.pageProps.data.showDetails;return {name:d.name,date:d.premiereDate,seasons:d.seasons?.map(s=>({id:s.seasonId||s.id,number:s.seasonNumber}))};}catch{return null;}})()");
+            if(found==null || Normalize(found["name"]?.GetValue<string>()??"")!=name || (item.Year>0 && !(found["date"]?.GetValue<string>()??"").StartsWith(item.Year.ToString()))) continue;
+            show=candidate;details=found;break;
+        }
+        if(show==null || details==null)
             throw new IOException("Serializd's title/year could not be verified. Select its exact episode in Reviews & comments.");
         var season=(details["seasons"] as JsonArray)?.SingleOrDefault(s=>s?["number"]?.GetValue<int>()==item.Season);
         if(season==null) throw new IOException("Serializd does not have this season yet.");
         var seasonUrl=show+"/season/"+season["id"]!.ToString()+"/"+item.Season;
         var url=seasonUrl+"/episode/"+item.Episode;
-        await Navigate(web,url,token);
+        await Navigate(web,url,token,interactive);
         if(!await VerifySerializdEpisode(web,item)) throw new IOException("Serializd's episode could not be verified.");
         if(store!=null) {store.State.SerializdSeasons[CommunityQueue.SeasonKey(item)]=seasonUrl;store.Save();}
         return url;

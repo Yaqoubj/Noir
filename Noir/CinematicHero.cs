@@ -11,23 +11,28 @@ namespace Noir;
 // Full-bleed artwork heroes: Home rotates through a few titles; title pages show one.
 public partial class MainWindow
 {
-    double HeroHeight(bool detail)=>Math.Max(detail?440:500,(ContentScroll.ViewportHeight>0?ContentScroll.ViewportHeight:ActualHeight-40)*(detail?.66:.78));
+    double HeroHeight(bool detail)=>Math.Max(detail?Density.DetailHeroMin:Density.HomeHeroMin,(ContentScroll.ViewportHeight>0?ContentScroll.ViewportHeight:ActualHeight-40)*(detail?Density.DetailHeroFactor:Density.HomeHeroFactor));
+    FrameworkElement ContainedHero(FrameworkElement hero,double bottom=0)
+    {
+        var card=new Border{Tag="DensityHeroCard",CornerRadius=new(16),Background=Brush("#151517"),BorderBrush=Brush("#26FFFFFF"),BorderThickness=new(1),Margin=new(0,TopBar.Height+8,0,bottom),Child=hero};
+        card.SizeChanged+=(_,_)=>card.Clip=new RectangleGeometry(new Rect(0,0,card.ActualWidth,card.ActualHeight),16,16);return card;
+    }
     // Reserve the top navigation area even on short screens and with wrapped, long titles.
     void FitHero(Grid hero,FrameworkElement content,bool detail)
     {
         void Fit()
         {
             var width=hero.ActualWidth>0?hero.ActualWidth:Math.Max(780,ActualWidth);
-            content.MaxWidth=Math.Min(700,Math.Max(300,width-2*sidePad));
+            content.MaxWidth=Math.Min(Density.Pick(620,700),Math.Max(200,width-2*(Density.Compact?24:sidePad)));
             content.Measure(new Size(width,double.PositiveInfinity));
-            hero.Height=Math.Max(HeroHeight(detail),content.DesiredSize.Height+TopBar.Height+24);
+            hero.Height=Density.Compact?HeroHeight(detail):Math.Max(HeroHeight(detail),content.DesiredSize.Height+TopBar.Height+24);
         }
         hero.Loaded+=(_,_)=>Fit();hero.SizeChanged+=(_,e)=>{if(e.WidthChanged)Fit();};
     }
     Button RoundAction(string glyph,string tip,Action action,bool on=false)
     {
-        var b=new Button{Width=48,Height=48,Padding=new(0),ToolTip=T(tip),Background=Brush(on?"#E4C084":"#40FFFFFF"),Foreground=Brush(on?"#16120C":"#F4F1EB"),Margin=new(10,0,0,0)};
-        b.Content=new TextBlock{Text=glyph,FontSize=19,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
+        var b=new Button{Width=Density.HeroRound,Height=Density.HeroRound,Padding=new(0),ToolTip=T(tip),Background=Brush(on?"#E4C084":"#40FFFFFF"),Foreground=Brush(on?"#16120C":"#F4F1EB"),Margin=new(10,0,0,0)};
+        b.Content=new TextBlock{Text=glyph,FontSize=Density.Pick(16,19),HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
         Motion.ButtonFeedback(b);b.Template=RoundTemplate();System.Windows.Automation.AutomationProperties.SetName(b,T(tip));b.Click+=(_,_)=>action();return b;
     }
     static ControlTemplate RoundTemplate()
@@ -41,7 +46,7 @@ public partial class MainWindow
     }
     Button BigButton(string text,Action action,bool primary)
     {
-        var b=ActionButton(text,action,primary);b.FontSize=16;b.Padding=new(28,14,30,14);b.FontWeight=FontWeights.SemiBold;
+        var b=ActionButton(text,action,primary);b.FontSize=Density.HeroButtonFont;b.Padding=Density.HeroButtonPadding;b.FontWeight=FontWeights.SemiBold;
         if(!primary){b.Background=Brush("#40FFFFFF");b.Foreground=Brush("#F4F1EB");}
         b.Margin=new(0,0,12,0);return b;
     }
@@ -50,20 +55,20 @@ public partial class MainWindow
         var detail=detailKey!=null;var height=HeroHeight(detail);
         var grid=new Grid{Height=height,ClipToBounds=true,Background=Brush("#151517")};
         var media=new Border{ClipToBounds=true};var artwork=new Grid();media.Child=artwork;HeroArtwork(artwork,File.Exists(item.Backdrop)?item.Backdrop:item.Poster,item.GroupKey);grid.Children.Add(media);var overlay=new Grid();while(artwork.Children.Count>1){var shade=artwork.Children[1];artwork.Children.RemoveAt(1);overlay.Children.Add(shade);}grid.Children.Add(overlay);PreviewHost.Configure(store.DataDirectory,store.GetProgress,store.EverWatched,TmdbKey());PreviewHost.Attach(media,item,detail?1800:1500);PreviewHost.SetOverlay(media,overlay);
-        var panel=new StackPanel{Margin=new(sidePad,0,sidePad,detail?42:70),MaxWidth=700,HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Bottom};
+        var panel=new StackPanel{Margin=new(Density.Compact?24:sidePad,0,Density.Compact?24:sidePad,Density.Compact?(detail?24:38):detail?42:70),MaxWidth=Density.Pick(620,700),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Bottom};
         var pro=store.GetProgress(item);var playable=CanPlay(item);
         var eyebrow=justFinished?(item.IsMovie?"YOU JUST WATCHED":"YOU FINISHED THIS SHOW"):continuing&&!playable?"UP NEXT · NOT ON THIS PC YET":continuing&&pro is {Completed:false,Position:>=1}?"CONTINUE WATCHING":continuing?"UP NEXT":detail?(store.TitleStatus(group)).ToUpperInvariant():"TONIGHT'S PICK";
         var tag=new Border{Background=Brush("#33E4C084"),BorderBrush=Brush("#66E4C084"),BorderThickness=new(1),CornerRadius=new(4),Padding=new(9,3,9,3),HorizontalAlignment=HorizontalAlignment.Left,Child=Text(T(eyebrow),11,"#F0D3A0",FontWeights.SemiBold)};panel.Children.Add(tag);
         // The title's own logo artwork when Cinemeta has one; otherwise the name in display type.
-        if(TitleLogo(item,detail?120:150,480) is {} logo){logo.Margin=new(0,18,0,18);panel.Children.Add(logo);}
-        else{var title=Text(item.Title,item.Title.Length>24?50:66,weight:FontWeights.Bold);title.FontFamily=new FontFamily("Segoe UI Variable Display, Segoe UI");title.LineHeight=item.Title.Length>24?56:72;title.Margin=new(0,14,0,10);panel.Children.Add(title);}
+        if(TitleLogo(item,Density.HeroLogoHeight(detail),Density.HeroLogoWidth) is {} logo){logo.Margin=new(0,18,0,18);panel.Children.Add(logo);}
+        else{var title=Text(item.Title,Density.HeroTitle(item.Title.Length>24),weight:FontWeights.Bold);title.FontFamily=new FontFamily("Segoe UI Variable Display, Segoe UI");title.LineHeight=Density.HeroLine(item.Title.Length>24);title.Margin=new(0,14,0,10);panel.Children.Add(title);}
         // One quiet line of facts instead of a row of badges.
         var rating=store.State.PersonalReviews.GetValueOrDefault(item.Id)?.Rating??0;
         panel.Children.Add(HeroFacts(item,group,rating));
         var showEpisode=!item.IsMovie&&(continuing||detail);
         if(showEpisode){var ep=Bidi(Text(item.EpisodeLabel+(item.EpisodeTitle.Length>0&&(!store.State.HideSpoilers||store.EverWatched(item)||pro is {Position:>0})?"  ·  "+item.EpisodeTitle:""),15,"#F4F1EB",FontWeights.SemiBold));ep.Margin=new(0,14,0,0);panel.Children.Add(ep);}
         var summaryText=item.Summary.Length>0?item.Summary:"";
-        if(summaryText.Length>0){var summary=Bidi(Text(summaryText,15,"#C9C4BD"));summary.MaxHeight=66;summary.LineHeight=22;summary.TextTrimming=TextTrimming.WordEllipsis;summary.Margin=new(0,12,0,0);summary.MaxWidth=520;summary.HorizontalAlignment=HorizontalAlignment.Left;panel.Children.Add(summary);}
+        if(summaryText.Length>0){var summary=Bidi(Text(summaryText,Density.HeroSummary,"#C9C4BD"));summary.MaxHeight=Density.HeroSummaryMax;summary.LineHeight=Density.HeroSummaryLine;summary.TextTrimming=TextTrimming.WordEllipsis;summary.Margin=new(0,12,0,0);summary.MaxWidth=520;summary.HorizontalAlignment=HorizontalAlignment.Left;panel.Children.Add(summary);}
         if(pro is {Completed:false,Position:>=1,Duration:>0})
         {
             var progress=new DockPanel{Margin=new(0,18,0,0),MaxWidth=420,HorizontalAlignment=HorizontalAlignment.Left};
@@ -71,7 +76,7 @@ public partial class MainWindow
             progress.Children.Add(new ProgressBar{Value=pro.Position,Maximum=pro.Duration,Height=4,Width=300,VerticalAlignment=VerticalAlignment.Center,Background=Brush("#55FFFFFF")});panel.Children.Add(progress);
         }
         if(!detail&&continuing&&CatchUpCard(group,true) is {} catchUp)panel.Children.Add(catchUp);
-        var actions=new WrapPanel{Orientation=Orientation.Horizontal,Margin=new(0,26,0,0)};
+        var actions=new WrapPanel{Orientation=Orientation.Horizontal,Margin=new(0,Density.Pick(16,26),0,0)};
         if(justFinished)
         {
             actions.Children.Add(HeroButton(rating>0?"★  Your rating":"★  Rate it",()=>OpenDiary(item),true));
@@ -91,8 +96,8 @@ public partial class MainWindow
         if(!justFinished)actions.Children.Add(RoundAction(rating>0?"★":"☆","Rate & note",()=>OpenDiary(item)));
         actions.Children.Add(RoundAction("💬","Reviews & comments",()=>OpenReviews(item)));
         if(detail)actions.Children.Add(TrailerAction(item));
-        foreach(FrameworkElement action in actions.Children)action.Margin=new(action.Margin.Left,action.Margin.Top,action.Margin.Right,8);panel.Children.Add(actions);overlay.Children.Add(panel);FitHero(grid,panel,detail);panel.SizeChanged+=(_,e)=>{if(e.HeightChanged)FitHeroContent();};void FitHeroContent(){panel.Measure(new Size(Math.Max(300,grid.ActualWidth-2*sidePad),double.PositiveInfinity));grid.Height=Math.Max(HeroHeight(detail),panel.DesiredSize.Height+TopBar.Height+24);}
-        return Bleed(grid,detail?6:0);
+        foreach(FrameworkElement action in actions.Children)action.Margin=new(action.Margin.Left,action.Margin.Top,action.Margin.Right,8);panel.Children.Add(actions);overlay.Children.Add(panel);FitHero(grid,panel,detail);panel.SizeChanged+=(_,e)=>{if(e.HeightChanged)FitHeroContent();};void FitHeroContent(){panel.Measure(new Size(Math.Max(300,grid.ActualWidth-2*sidePad),double.PositiveInfinity));grid.Height=Density.Compact?HeroHeight(detail):Math.Max(HeroHeight(detail),panel.DesiredSize.Height+TopBar.Height+24);}
+        return Density.Compact?(detail?ContainedHero(grid,6):grid):Bleed(grid,detail?6:0);
     }
     readonly Dictionary<string,Task<BitmapImage?>> heroPreloads=new(StringComparer.OrdinalIgnoreCase);
     readonly Dictionary<string,Task<Color>> heroTints=new(StringComparer.OrdinalIgnoreCase);
@@ -171,16 +176,16 @@ public partial class MainWindow
     FrameworkElement HomeFocusHero(VideoItem item,double height)
     {
         var grid=new Grid{Height=height,ClipToBounds=true,Background=Brush("#0B0B0D")};HeroArtwork(grid,File.Exists(item.Backdrop)?item.Backdrop:item.Poster,item.GroupKey);
-        var panel=new StackPanel{Margin=new(sidePad,100,sidePad,80),VerticalAlignment=VerticalAlignment.Bottom,HorizontalAlignment=HorizontalAlignment.Left,MaxWidth=560};panel.Children.Add(Text(T("YOUR NEXT DISCOVERY","اكتشافك القادم"),11,"#E4C084",FontWeights.SemiBold));
-        var mark=HomeTitleMark(item,120,420,item.Title.Length>28?42:60);mark.Margin=new(0,14,0,12);panel.Children.Add(mark);
+        var panel=new StackPanel{Margin=new(Density.Compact?24:sidePad,Density.Pick(20,100),Density.Compact?24:sidePad,Density.Pick(38,80)),VerticalAlignment=VerticalAlignment.Bottom,HorizontalAlignment=HorizontalAlignment.Left,MaxWidth=560};panel.Children.Add(Text(T("YOUR NEXT DISCOVERY","اكتشافك القادم"),11,"#E4C084",FontWeights.SemiBold));
+        var mark=HomeTitleMark(item,Density.Pick(72,120),Density.Pick(320,420),item.Title.Length>28?Density.Pick(40,42):Density.Pick(48,60));mark.Margin=new(0,14,0,12);panel.Children.Add(mark);
         var extra=titleExtras?.GetValueOrDefault(item.ImdbId);var facts=new[]{item.Year>0?item.Year.ToString():"",extra?.Rating.Length>0?"★ "+extra.Rating:"",item.Duration>0?Loc.Runtime(item.Duration):extra?.Runtime??"",string.Join(" · ",HomeDiscovery.Genres(item.Genres).Take(3).Select(T))};panel.Children.Add(Text(string.Join(" · ",facts.Where(f=>f.Length>0)),14,"#C7C2BC"));
-        var summary=Text(item.Summary,15,"#C7C2BC");summary.LineHeight=23;summary.MaxHeight=92;summary.TextTrimming=TextTrimming.WordEllipsis;summary.Margin=new(0,14,0,0);panel.Children.Add(summary);var info=ActionButton(T("More info","المزيد من المعلومات"),()=>{var group=store.EpisodesFor(item.GroupKey);if(group.Count>0)OpenDetails(group);else _=OpenDiscover(new(){Id=item.ImdbId,Name=item.Title,Type=item.IsMovie?"movie":"series",Poster=item.Poster,Background=item.Backdrop,Summary=item.Summary,Genres=HomeDiscovery.Genres(item.Genres).ToList()});});info.HorizontalAlignment=HorizontalAlignment.Left;info.Margin=new(0,24,0,0);System.Windows.Automation.AutomationProperties.SetName(info,T("More info about {0}","المزيد عن {0}",item.Title));panel.Children.Add(info);grid.Children.Add(panel);return grid;
+        var summary=Text(item.Summary,Density.HeroSummary,"#C7C2BC");summary.LineHeight=Density.Pick(20,23);summary.MaxHeight=Density.Pick(60,92);summary.TextTrimming=TextTrimming.WordEllipsis;summary.Margin=new(0,14,0,0);panel.Children.Add(summary);var info=ActionButton(T("More info","المزيد من المعلومات"),()=>{var group=store.EpisodesFor(item.GroupKey);if(group.Count>0)OpenDetails(group);else _=OpenDiscover(new(){Id=item.ImdbId,Name=item.Title,Type=item.IsMovie?"movie":"series",Poster=item.Poster,Background=item.Backdrop,Summary=item.Summary,Genres=HomeDiscovery.Genres(item.Genres).ToList()});});info.HorizontalAlignment=HorizontalAlignment.Left;info.Margin=new(0,24,0,0);System.Windows.Automation.AutomationProperties.SetName(info,T("More info about {0}","المزيد عن {0}",item.Title));panel.Children.Add(info);grid.Children.Add(panel);return grid;
     }
     // Home stays at a fixed height while a rail supplies the spotlight.
     FrameworkElement HeroCarousel(List<(VideoItem Item,List<VideoItem> Group,bool Continuing,bool Finished)> slides)
     {
         homePosterTitles=HomeLayout.Load(store.DataDirectory).ShowPosterTitles;
-        var host=new Grid{Height=Math.Max(620,HeroHeight(false)),ClipToBounds=true};var index=0;FrameworkElement? shown=null;bool following=false;DateTimeOffset focusAt=DateTimeOffset.MinValue;
+        var host=new Grid{Height=Math.Max(Density.CarouselMin,HeroHeight(false)),ClipToBounds=true};var index=0;FrameworkElement? shown=null;bool following=false;DateTimeOffset focusAt=DateTimeOffset.MinValue;
         var dots=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Bottom,Margin=new(0,0,0,26)};
         void Paint(FrameworkElement slide,bool animate)
         {
@@ -203,6 +208,6 @@ public partial class MainWindow
         for(int i=0;i<slides.Count;i++){var target=i;var dot=ActionButton("",()=>{following=false;Show(target,true);});dot.Height=6;dot.Width=16;dot.Padding=new(0);dot.Margin=new(3,0,3,0);dot.ToolTip=slides[i].Item.Title;System.Windows.Automation.AutomationProperties.SetName(dot,T("Show {0}","عرض {0}",slides[i].Item.Title));dots.Children.Add(dot);}
         Panel.SetZIndex(dots,5);host.Children.Add(dots);Show(0,false);
         var timer=new DispatcherTimer{Interval=TimeSpan.FromSeconds(12)};timer.Tick+=(_,_)=>{if(!following&&slides.Count>1&&!host.IsMouseOver&&!host.IsKeyboardFocusWithin&&IsActive&&current==null&&CarouselVisible(host))Show(index+1,true);};
-        host.Loaded+=(_,_)=>{if(Motion.Enabled&&!validationMode)timer.Start();};host.Unloaded+=(_,_)=>{timer.Stop();if(homeHeroFocus==FocusTitle){homeHeroFocus=null;homeHeroCard=null;}};return Bleed(host);
+        host.Loaded+=(_,_)=>{if(Motion.Enabled&&!validationMode)timer.Start();};host.Unloaded+=(_,_)=>{timer.Stop();if(homeHeroFocus==FocusTitle){homeHeroFocus=null;homeHeroCard=null;}};return Density.Compact?ContainedHero(host):Bleed(host);
     }
 }

@@ -104,8 +104,28 @@ public partial class MainWindow
         RenderProfiles();
         RenderModeSettings();
     }
+    void SetDensity(UiDensity mode,bool save=true)
+    {
+        var offset=ContentScroll.VerticalOffset;Density.Set(mode,save);CloseHoverCard();BuildSideRail();sidePad=Density.PageSide(ActualWidth);ApplyRailWidth();TopBarContent.Margin=new Thickness(Math.Max(16,sidePad-16),0,Math.Max(16,sidePad-20),0);ApplyPageLayout();RenderQuiet();ContentScroll.ScrollToVerticalOffset(offset);
+    }
+    static ControlTemplate DensityChoiceTemplate()
+    {
+        var border=new FrameworkElementFactory(typeof(Border),"Chrome");border.SetValue(Border.CornerRadiusProperty,new CornerRadius(8));border.SetValue(Border.BorderThicknessProperty,new Thickness(1));border.SetValue(Border.BorderBrushProperty,Brushes.Transparent);
+        border.SetBinding(Border.BackgroundProperty,new System.Windows.Data.Binding("Background"){RelativeSource=System.Windows.Data.RelativeSource.TemplatedParent});border.SetBinding(Border.PaddingProperty,new System.Windows.Data.Binding("Padding"){RelativeSource=System.Windows.Data.RelativeSource.TemplatedParent});
+        var content=new FrameworkElementFactory(typeof(ContentPresenter));content.SetValue(FrameworkElement.HorizontalAlignmentProperty,HorizontalAlignment.Center);border.AppendChild(content);var template=new ControlTemplate(typeof(RadioButton)){VisualTree=border};
+        var focus=new Trigger{Property=IsKeyboardFocusedProperty,Value=true};focus.Setters.Add(new Setter(Border.BorderBrushProperty,Brush("#F4F1EB"),"Chrome"));template.Triggers.Add(focus);return template;
+    }
     void RenderAppearanceSettings()
     {
+        ContentPanel.Children.Add(Heading("Size","Compact fits more on screen. Comfortable gives everything more room. Applies only to this device."));
+        var sizes=new Border{CornerRadius=new(10),Background=Brush("#161618"),BorderBrush=Brush("#26FFFFFF"),BorderThickness=new(1),Padding=new(3),HorizontalAlignment=HorizontalAlignment.Left};
+        var choices=new System.Windows.Controls.Primitives.UniformGrid{Columns=2};sizes.Child=choices;
+        foreach(var mode in new[]{UiDensity.Compact,UiDensity.Comfortable})
+        {
+            var on=Density.Mode==mode;var choice=new RadioButton{Content=T(mode.ToString()),IsChecked=on,Padding=Density.ButtonPadding,FontSize=Density.ButtonFont,MinWidth=110,Margin=new(1),Background=Brush(on?"#E4C084":"Transparent"),Foreground=Brush(on?"#16120C":"#C7C2BC"),Template=DensityChoiceTemplate()};
+            System.Windows.Automation.AutomationProperties.SetName(choice,T("Size")+" · "+T(mode.ToString()));choice.Checked+=(_,_)=>{SetDensity(mode);ViewElements(ContentPanel).OfType<RadioButton>().FirstOrDefault(b=>Equals(b.Content,T(mode.ToString())))?.Focus();};choices.Children.Add(choice);
+        }
+        ContentPanel.Children.Add(sizes);
         ContentPanel.Children.Add(Heading("Language","Choose the app language. Arabic mirrors the layout right to left."));
         ContentPanel.Children.Add(Chips(["English","العربية"],store.State.Language=="ar"?"العربية":"English",v=>SetLanguage(v=="العربية"?"ar":"en")));
         ContentPanel.Children.Add(Heading("Side rail","Labels beside the icons, or icons only. Automatic folds to icons in narrow windows."));

@@ -47,7 +47,7 @@ public final class ReachPhoneTest {
  @Test public void keepReadyFromATitleTurnsKeepReadyOn()throws Exception{
   show("ready");MainActivity a=f.launch(MainActivity.class);assertFalse(PhoneReadyJob.policy(f.data).enabled());
   f.ui(()->DownloadHubActivity.openKeepReady(a,"ready"));View dialog=waitDialog("Keep this show ready");
-  f.ui(()->{Switch on=(Switch)AuditPhoneFixture.find(dialog,v->v instanceof Switch);assertNotNull(on);on.setChecked(true);Button save=dialog.findViewById(android.R.id.button1);assertNotNull(save);assertTrue(save.performClick());});f.idle();
+  f.ui(()->{Switch on=(Switch)AuditPhoneFixture.find(dialog,v->v instanceof Switch);assertNotNull(on);on.setChecked(true);assertNotNull("Keep ready opens the shared Noir sheet",AuditPhoneFixture.find(dialog,v->"noir-sheet".equals(v.getTag())));AuditPhoneFixture.click(dialog,"Save");});f.idle();
   PhoneReady p=PhoneReadyJob.policy(f.data);assertTrue("Saving a show turns Keep ready on",p.enabled());assertTrue(p.keepReadyJson().has("ready"));
  }
 }

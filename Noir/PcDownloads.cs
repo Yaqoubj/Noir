@@ -24,22 +24,24 @@ public sealed partial class PcDownloads : IDisposable
     readonly Dictionary<string,CancellationTokenSource> running=[];
     DateTime progressSaved=DateTime.MinValue;
     public int ActiveCount {get{lock(gate)return jobs.Count(j=>j.Status is "Queued" or "Preparing" or "Downloading" or "Subtitles");}}
+    public int JobCount {get{lock(gate)return jobs.Count;}}
     public event Action? Changed;
     public event Action? Completed;
     static readonly JsonSerializerOptions Json=new(){WriteIndented=true};
-    public PcDownloads(LibraryStore store,IDownloadProvider? provider=null,HttpClient? transfer=null,bool start=true,SubtitleDownloads? subtitles=null,Func<string,long>? freeSpace=null)
+    public PcDownloads(LibraryStore store,IDownloadProvider? provider=null,HttpClient? transfer=null,bool start=true,SubtitleDownloads? subtitles=null,Func<string,long>? freeSpace=null,TorrentEngineOptions? torrentOptions=null)
     {
-        this.store=store;this.freeSpace=freeSpace;credentialsPath=Path.Combine(store.DataDirectory,"downloads-settings.dpapi");jobsPath=Path.Combine(store.DataDirectory,"pc-downloads.json");parts=Path.Combine(store.DataDirectory,"download-parts");Directory.CreateDirectory(parts);
+        this.torrentOptions=torrentOptions??new();this.store=store;this.freeSpace=freeSpace;credentialsPath=Path.Combine(store.DataDirectory,"downloads-settings.dpapi");jobsPath=Path.Combine(store.DataDirectory,"pc-downloads.json");parts=Path.Combine(store.DataDirectory,"download-parts");Directory.CreateDirectory(parts);
         if(File.Exists(credentialsPath))credentials=JsonSerializer.Deserialize<DownloadCredentials>(ProtectedData.Unprotect(File.ReadAllBytes(credentialsPath),null,DataProtectionScope.CurrentUser))??new();
         else SaveCredentials();
         if(File.Exists(jobsPath))jobs=JsonSerializer.Deserialize<List<PcDownloadJob>>(File.ReadAllText(jobsPath),Json)??[];
-        foreach(var j in jobs.Where(j=>j.Status=="Downloading")){j.Status="Paused";j.Message="Interrupted · resume to continue";}
-        this.provider=provider??new DownloadProviders(()=>Config);this.transfer=transfer??DownloadSecurity.Client(Timeout.InfiniteTimeSpan);
+        foreach(var j in jobs.Where(j=>j.Status=="Downloading"||j.Service=="Torrents"&&j.Status is "Preparing" or "Subtitles")){j.Status="Paused";j.Message="Interrupted · resume to continue";}
+        this.provider=provider??new DownloadProviders(()=>Config,torrentRuntime:()=>TorrentRuntime);this.transfer=transfer??DownloadSecurity.Client(Timeout.InfiniteTimeSpan);
         this.subtitles=subtitles??new SubtitleDownloads(store.DataDirectory,source:()=>{var c=Config;return(c.SubtitleAddonUrl,c.SubtitleAddonOnly);});
-        if(start)_=Task.Run(Worker);
+        Changed+=CaptureTorrentJobs;
+        if(start){_=Task.Run(Worker);torrentWorker=Task.Run(TorrentWorker);}
     }
     public DownloadCredentials Config {get {lock(gate)return JsonSerializer.Deserialize<DownloadCredentials>(JsonSerializer.Serialize(credentials))!;}}
-    public bool Configured {get{var c=Config;return c.Servers.Count>0||(c.Service=="AIOStreams links"?c.Manifest.Length>0:c.Key.Length>0);}}
+    public bool Configured {get{var c=Config;return c.Servers.Count>0||(c.Service is "AIOStreams links" or "Torrents"?c.Manifest.Length>0:c.Key.Length>0);}}
     public void AddServer(MediaServerAccount server)
     {
         server.BaseUrl=MediaServers.BaseUrl(server.BaseUrl);if(server.Token.Length==0)throw new IOException("Connect the media server account first.");
@@ -58,25 +60,36 @@ public sealed partial class PcDownloads : IDisposable
         lock(gate){credentials.BrowseQuality=quality;credentials.BrowseLanguage=language;credentials.BrowseReadyOnly=readyOnly;credentials.BrowseSizeLimit=sizeLimit;
             Atomic(credentialsPath,ProtectedData.Protect(JsonSerializer.SerializeToUtf8Bytes(credentials),null,DataProtectionScope.CurrentUser));}
     }
-    public void Configure(string manifest,string key,string shows,string movies,string? resolution=null,long? maxEpisodeBytes=null,List<string>? subtitleLanguages=null,bool? autoSync=null,string? service=null)
+    public void Configure(string manifest,string key,string shows,string movies,string? resolution=null,long? maxEpisodeBytes=null,List<string>? subtitleLanguages=null,bool? autoSync=null,string? service=null,string? seeding=null,int? uploadLimitKB=null,int? downloadLimitKB=null,bool? autoSwitch=null,int? maxActiveTorrents=null)
     {
-        service??=Config.Service;if(service is not ("TorBox" or "Real-Debrid" or "AIOStreams links"))throw new IOException("Choose a download service.");
-        if(!string.IsNullOrWhiteSpace(manifest))_=TorboxProvider.Manifest(manifest);if(service!="AIOStreams links"&&string.IsNullOrWhiteSpace(key)&&Config.Servers.Count==0)throw new IOException($"Enter your {service} API key.");
+        service??=Config.Service;if(service is not ("TorBox" or "Real-Debrid" or "AIOStreams links" or "Torrents"))throw new IOException("Choose a download service.");
+        if(!string.IsNullOrWhiteSpace(manifest))_=TorboxProvider.Manifest(manifest);if(service=="Torrents"&&string.IsNullOrWhiteSpace(manifest))throw new IOException(store.State.Language=="ar"?"أضف رابط تثبيت AIOStreams أو Torrentio.":"Add an AIOStreams or Torrentio installation link.");if(service is not ("AIOStreams links" or "Torrents")&&string.IsNullOrWhiteSpace(key)&&Config.Servers.Count==0)throw new IOException($"Enter your {service} API key.");
         foreach(var root in new[]{shows,movies}.Where(r=>r.Length>0))if(!store.State.Roots.Any(r=>r.Path.Equals(root,StringComparison.OrdinalIgnoreCase)))throw new IOException("Choose a folder already added to the library.");
         var c=Config;if(c.Service=="TorBox")c.TorBoxKey=c.Key;else if(c.Service=="Real-Debrid")c.RealDebridKey=c.Key;
-        c.Service=service;c.Manifest=manifest.Trim();c.Key=service=="AIOStreams links"?"":key.Trim();if(service=="TorBox")c.TorBoxKey=c.Key;else if(service=="Real-Debrid")c.RealDebridKey=c.Key;c.ShowsRoot=shows;c.MoviesRoot=movies;
+        c.Service=service;c.Manifest=manifest.Trim();c.Key=service is "AIOStreams links" or "Torrents"?"":key.Trim();if(service=="TorBox")c.TorBoxKey=c.Key;else if(service=="Real-Debrid")c.RealDebridKey=c.Key;c.ShowsRoot=shows;c.MoviesRoot=movies;
         if(resolution!=null)c.PreferredResolution=resolution is "1080p" or "720p" or "2160p"?resolution:"Any";
         if(maxEpisodeBytes!=null)c.MaxEpisodeBytes=Math.Max(0,maxEpisodeBytes.Value);
         if(subtitleLanguages!=null)c.SubtitleLanguages=subtitleLanguages.Where(l=>l is "en" or "ar").Distinct().ToList();
         if(autoSync!=null)c.AutoSyncSubtitles=autoSync.Value;
+        if(seeding!=null)c.Seeding=seeding is "off" or "open"?seeding:"ratio";
+        if(uploadLimitKB!=null)c.UploadLimitKB=Math.Clamp(uploadLimitKB.Value,0,2097151);
+        if(downloadLimitKB!=null)c.DownloadLimitKB=Math.Clamp(downloadLimitKB.Value,0,2097151);
+        if(autoSwitch!=null)c.AutoSwitch=autoSwitch.Value;
+        if(maxActiveTorrents!=null)c.MaxActiveTorrents=Math.Clamp(maxActiveTorrents.Value,1,20);
         Atomic(credentialsPath,ProtectedData.Protect(JsonSerializer.SerializeToUtf8Bytes(c),null,DataProtectionScope.CurrentUser));lock(gate)credentials=c;Changed?.Invoke();Signal();
     }
     public void ConfigureSubtitleSource(string link,bool only)
     {
         var normalized=SubtitleAddon.Normalize(link);lock(gate){credentials.SubtitleAddonUrl=normalized;credentials.SubtitleAddonOnly=only;SaveCredentials();}Changed?.Invoke();
     }
-    public List<object> PublicJobs() {lock(gate)return jobs.Select(j=>(object)new{id=j.Id,name=j.Name,status=j.Status,message=j.Message,size=j.Size,bytes=j.Bytes,createdAt=j.CreatedAt,subtitleMessage=j.SubtitleMessage}).ToList();}
-    public List<PcDownloadJob> Jobs() {lock(gate)return JsonSerializer.Deserialize<List<PcDownloadJob>>(JsonSerializer.Serialize(jobs))!;}
+    public List<object> PublicJobs() {lock(gate)return jobs.Select(j=>(object)new{id=j.Id,name=j.Name,status=j.Status,message=j.Message,size=j.Size,bytes=j.Bytes,createdAt=j.CreatedAt,subtitleMessage=j.SubtitleMessage,peers=j.Peers,seeds=j.Seeds,health=j.Health,uploaded=j.Uploaded,seedUntil=j.SeedUntil}).ToList();}
+    public List<PcDownloadJob> Jobs() {lock(gate){var copy=JsonSerializer.Deserialize<List<PcDownloadJob>>(JsonSerializer.Serialize(jobs))!;for(var i=0;i<copy.Count;i++){copy[i].Speed=jobs[i].Speed;copy[i].EtaSeconds=jobs[i].EtaSeconds;}return copy;}}
+    // Free bytes on the drive that holds a download folder; -1 when the drive cannot be read.
+    public long FreeBytesFor(string root){try{return FreeSpace(root);}catch(Exception){return -1;}}
+#if NOIR_VALIDATE
+    internal void Mutate(string id,Action<PcDownloadJob> edit){lock(gate){edit(jobs.First(j=>j.Id==id));}Changed?.Invoke();}
+    internal void Inject(PcDownloadJob job){lock(gate){jobs.Add(job);}Changed?.Invoke();}
+#endif
     public async Task<List<DownloadChoice>> Search(string itemId,bool season,CancellationToken ct=default)
     {
         var result=await SearchDetailed(itemId,season,null,ct);
@@ -197,7 +210,7 @@ public sealed partial class PcDownloads : IDisposable
         lock(gate)
         {
             var j=jobs.FirstOrDefault(j=>j.Id==id)??throw new IOException("Download not found.");if(j.Status=="Completed")return;
-            if(action=="pause"||action=="cancel"){j.Status=action=="pause"?"Paused":"Cancelled";running.GetValueOrDefault(id)?.Cancel();}
+            if(action=="pause"||action=="cancel"){j.Status=action=="pause"?"Paused":"Cancelled";j.Speed=0;j.EtaSeconds=-1;running.GetValueOrDefault(id)?.Cancel();TorrentStop(j,false);}
             else if(action=="resume"){if(j.Status is "Downloading" or "Subtitles")return;j.Status="Queued";j.Message="";j.NextAttempt=null;}
             else throw new IOException("Unknown download action.");Save();Signal();Changed?.Invoke();
         }
@@ -207,8 +220,8 @@ public sealed partial class PcDownloads : IDisposable
     {
         while(!stop.IsCancellationRequested)
         {
-            PcDownloadJob? job;lock(gate)job=jobs.FirstOrDefault(j=>(j.Status is "Queued" or "Preparing" or "Subtitles")&&(j.NextAttempt==null||j.NextAttempt<=DateTimeOffset.UtcNow));
-            if(job==null){TimeSpan delay;lock(gate){var next=jobs.Where(j=>j.Status is "Queued" or "Preparing" or "Subtitles").Select(j=>j.NextAttempt).OfType<DateTimeOffset>().Order().FirstOrDefault();delay=next==default?Timeout.InfiniteTimeSpan:TimeSpan.FromMilliseconds(Math.Clamp((next-DateTimeOffset.UtcNow).TotalMilliseconds,0,int.MaxValue));}try{await wake.WaitAsync(delay,stop.Token);}catch(OperationCanceledException){break;}continue;}
+            PcDownloadJob? job;lock(gate)job=jobs.FirstOrDefault(j=>j.Service!="Torrents"&&(j.Status is "Queued" or "Preparing" or "Subtitles")&&(j.NextAttempt==null||j.NextAttempt<=DateTimeOffset.UtcNow));
+            if(job==null){TimeSpan delay;lock(gate){var next=jobs.Where(j=>j.Service!="Torrents"&&(j.Status is "Queued" or "Preparing" or "Subtitles")).Select(j=>j.NextAttempt).OfType<DateTimeOffset>().Order().FirstOrDefault();delay=next==default?Timeout.InfiniteTimeSpan:TimeSpan.FromMilliseconds(Math.Clamp((next-DateTimeOffset.UtcNow).TotalMilliseconds,0,int.MaxValue));}try{await wake.WaitAsync(delay,stop.Token);}catch(OperationCanceledException){break;}continue;}
             using var ct=CancellationTokenSource.CreateLinkedTokenSource(stop.Token);lock(gate)running[job.Id]=ct;
             try
             {
@@ -237,7 +250,7 @@ public sealed partial class PcDownloads : IDisposable
             }
             catch(OperationCanceledException)when(ct.IsCancellationRequested){lock(gate){if(job.Status is "Downloading" or "Preparing"||stop.IsCancellationRequested&&job.Status=="Queued")job.Status="Paused";Save();}}
             catch(Exception e){var secrets=new List<string>();if(job.ProtectedDirectSource.Length>0)try{secrets.AddRange(DownloadSecurity.SourceSecrets(DownloadSecurity.Unprotect(job.ProtectedDirectSource)));}catch{}var message=DownloadSecurity.SafeText(e.Message,Config,secrets).Trim();if(e is not (IOException or HttpRequestException or TimeoutException or OperationCanceledException))try{store.Log(new Exception(DownloadSecurity.SafeText(e.ToString(),Config,secrets)));}catch{}Update(job,"Failed",message.Length>0?message:store.State.Language=="ar"?"توقف التنزيل. تحقق من الاتصال والمصدر ومساحة القرص ثم استأنف.":"Download stopped. Check connection, source availability and disk space, then Resume.");}
-            finally {lock(gate)running.Remove(job.Id);Changed?.Invoke();}
+            finally {lock(gate){running.Remove(job.Id);job.Speed=0;job.EtaSeconds=-1;}Changed?.Invoke();}
         }
     }
     bool SavedVideo(PcDownloadJob job)=>job.Size>0&&File.Exists(job.Destination)&&new FileInfo(job.Destination).Length==job.Size&&store.Archive.Any(i=>i.Id==job.Target.Id&&i.Available&&i.Path.Equals(job.Destination,StringComparison.OrdinalIgnoreCase));
@@ -281,7 +294,7 @@ public sealed partial class PcDownloads : IDisposable
         await using(var output=new FileStream(part,start>0?FileMode.Append:FileMode.Create,FileAccess.Write,FileShare.Read,65536,true))
         await using(var input=await response.Content.ReadAsStreamAsync(ct))
         {
-            var buf=new byte[131072];var saved=DateTime.UtcNow;
+            var buf=new byte[131072];var saved=DateTime.UtcNow;var meter=new SpeedMeter();var sampled=saved;meter.Add(saved,job.Bytes);
             using var idle=CancellationTokenSource.CreateLinkedTokenSource(ct);
             while(true)
             {
@@ -293,9 +306,10 @@ public sealed partial class PcDownloads : IDisposable
                 if(count==0)break;
                 if(job.Bytes+count>expected)throw new IOException("Download exceeded its expected size.");
                 await output.WriteAsync(buf.AsMemory(0,count),ct);job.Bytes+=count;
+                var now=DateTime.UtcNow;if(now-sampled>=TimeSpan.FromMilliseconds(250)){sampled=now;job.Speed=meter.Add(now,job.Bytes);job.EtaSeconds=DownloadEta.Seconds(job.Size,job.Bytes,job.Speed);}
                 if(DateTime.UtcNow-saved>TimeSpan.FromSeconds(1)){lock(gate)if(DateTime.UtcNow-progressSaved>=TimeSpan.FromSeconds(10))Save();Changed?.Invoke();saved=DateTime.UtcNow;}
             }
-            await output.FlushAsync(ct);output.Flush(true);
+            await output.FlushAsync(ct);output.Flush(true);job.Speed=0;job.EtaSeconds=-1;
         }
         ct.ThrowIfCancellationRequested();if(new FileInfo(part).Length!=expected)throw new TransferReadException(store.State.Language=="ar"?"التنزيل غير مكتمل.":"The download is incomplete.");
         DownloadNaming.Validate(job.Root,job.Destination);File.Move(part,job.Destination,false);store.RegisterDownload(job.Target,job.Destination);
@@ -315,10 +329,10 @@ public sealed partial class PcDownloads : IDisposable
         }
         throw new IOException("The download returned too many redirects.");
     }
-    void Update(PcDownloadJob j,string status,string message){lock(gate){if(j.Status is "Paused" or "Cancelled")return;j.Status=status;j.Message=message;Save();}Changed?.Invoke();}
+    void Update(PcDownloadJob j,string status,string message){lock(gate){if(j.Status is "Paused" or "Cancelled")return;j.Status=status;j.Message=message;j.Speed=0;j.EtaSeconds=-1;Save();}Changed?.Invoke();}
     void Save(){Atomic(jobsPath,JsonSerializer.SerializeToUtf8Bytes(jobs,Json));progressSaved=DateTime.UtcNow;}
     static void Atomic(string path,byte[] bytes){var temp=path+".tmp";using(var f=new FileStream(temp,FileMode.Create,FileAccess.Write,FileShare.None)){f.Write(bytes);f.Flush(true);}for(int attempt=0;;attempt++){try{File.Move(temp,path,true);break;}catch(Exception e)when(attempt<5&&(e is IOException or UnauthorizedAccessException)){Thread.Sleep(40*(attempt+1));}}}
-    public void Dispose(){stop.Cancel();Signal();}
+    public void Dispose(){stop.Cancel();Signal();DisposeTorrents();}
 }
 public sealed partial class LibraryStore
 {

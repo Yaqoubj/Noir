@@ -37,18 +37,24 @@ public final class PremiumUiTest {
         test.runOnMainSync(()->{home.page="Library";home.open(item);home.options(item);});test.waitForIdleSync();
         assertNotNull(home.titleActions.dialog);assertTrue(home.titleActions.dialog.isShowing());
         View sheet=home.titleActions.dialog.getWindow().getDecorView();
-        assertNotNull(find(sheet,"Watch now or resume"));assertNotNull(find(sheet,"Season to PC"));assertNotNull(find(sheet,"Save on phone"));
+        assertNotNull(find(sheet,"Watch now or resume"));assertNotNull(find(sheet,"Download…"));
         assertTrue("Sheet stays within the visible screen",sheet.getHeight()<=home.getWindow().getDecorView().getHeight());
         capture("redesign-options.png");
         ScrollView scrolling=scroll(sheet);assertNotNull(scrolling);test.runOnMainSync(()->scrolling.scrollTo(0,scrolling.getChildAt(0).getHeight()));test.waitForIdleSync();
         assertTrue("Secondary actions remain reachable",scrolling.getScrollY()>0);assertTrue(find(sheet,"Correct match").isShown());capture("redesign-options-details.png");
         test.runOnMainSync(()->find(sheet,"Play queue").performClick());test.waitForIdleSync();
         assertNull("Action dismisses the sheet",home.titleActions.dialog);assertTrue(data.playQueue().toString().contains(item.optString("id")));data.consumeVideo(item.optString("id"));
-        JSONObject missing=DataStore.copy(item);DataStore.put(missing,"id","ui-unavailable");DataStore.put(missing,"available",false);
+        JSONObject missing=DataStore.copy(item);DataStore.put(missing,"id","ui-unavailable");DataStore.put(missing,"group","show:ui-unavailable");DataStore.put(missing,"imdb","tt993305");DataStore.put(missing,"available",false);DataStore.put(missing,"inLibrary",false);DataStore.put(missing,"libraryAt",0);data.rememberPhoneItem(missing);
         test.runOnMainSync(()->home.options(missing));test.waitForIdleSync();View unavailable=home.titleActions.dialog.getWindow().getDecorView();
-        assertFalse("Unavailable PC video cannot start a phone save",find(unavailable,"Save on phone").isEnabled());
+        assertTrue("Unavailable PC media can still discover downloads",find(unavailable,"Download…").isEnabled());
         assertFalse("Unavailable video cannot restart",find(unavailable,"Start over").isEnabled());
-        test.runOnMainSync(()->find(unavailable,"Close episode actions").performClick());assertNull(home.titleActions.dialog);
+        Instrumentation.ActivityMonitor downloads=test.addMonitor(PhoneDownloadsActivity.class.getName(),null,false);
+        test.runOnMainSync(()->find(unavailable,"Download…").performClick());
+        PhoneDownloadsActivity discovery=(PhoneDownloadsActivity)test.waitForMonitorWithTimeout(downloads,5000);test.removeMonitor(downloads);assertNotNull("Download discovery opens for unavailable PC media",discovery);test.waitForIdleSync();
+        test.runOnMainSync(()->{assertFalse(discovery.item.optBoolean("available"));assertNotNull(discovery.scopeSheet);assertTrue(discovery.scopeSheet.dialog.isShowing());discovery.finish();});assertNull(home.titleActions.dialog);
+        // The PC fixture never acknowledges this fake title; a leaked op breaks later sync tests. The download screen's
+        // background setup can queue it again after finish, so let that settle before dropping it.
+        test.waitForIdleSync();for(int n=0;n<20;n++){data.dropPending("ui-unavailable");Thread.sleep(100);}data.dropPending("ui-unavailable");
         // Calendar layout gets a deterministic future episode even when the real library has no upcoming dates.
         JSONObject ep=new JSONObject();DataStore.put(ep,"season",2);DataStore.put(ep,"episode",3);DataStore.put(ep,"airsAt",java.time.Instant.now().plusSeconds(3*86400).toString());
         test.runOnMainSync(()->{home.page="More";home.detail="";home.render();home.body.addView(home.ui.calendarCard(item,ep),0);});capture("redesign-calendar.png");

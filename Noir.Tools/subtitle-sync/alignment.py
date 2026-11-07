@@ -11,6 +11,7 @@ RATE = 100
 WINDOW_S = 240
 MAX_SEGMENTS = 3
 MIN_GAIN = .05
+FPS_RATIOS = (1., 25 / 23.976, 23.976 / 25, 24 / 23.976, 23.976 / 24, 25 / 24, 24 / 25)
 
 
 def cue_array(cues):
@@ -163,6 +164,34 @@ def _no_local_regression(speech, before, after):
     return True
 
 
+def _f1(metrics):
+    precision, recall = metrics
+    return 2 * precision * recall / max(1e-12, precision + recall)
+
+
+def _window_f1(speech, before, after):
+    """Compare fixed useful reference windows, including newly covered dialogue."""
+    masks = [activity_mask(c, len(speech)) for c in (before, after)]
+    scores = []
+    for start in range(0, len(speech), WINDOW_S * RATE):
+        end = min(len(speech), start + WINDOW_S * RATE)
+        ref = speech[start:end]
+        if not useful_reference(ref):
+            continue
+        metrics = []
+        for mask in masks:
+            active = mask[start:end]
+            shared = np.count_nonzero(active & ref)
+            metrics.append(_f1((shared / max(1, active.sum()), shared / max(1, ref.sum()))))
+        scores.append(metrics)
+    return np.asarray(scores, dtype=float).reshape(-1, 2)
+
+
+def _no_local_regression_f1(speech, before, after, tolerance=.02):
+    scores = _window_f1(speech, before, after)
+    return bool(np.all(scores[:, 1] + tolerance + 1e-9 >= scores[:, 0]))
+
+
 def plausible_candidate(speech, original, global_cues, candidate, cuts, embedded=False):
     """Require clear aggregate gains and no local sacrifice for aggregate gains."""
     original, global_cues, candidate = map(cue_array, (original, global_cues, candidate))
@@ -175,7 +204,7 @@ def plausible_candidate(speech, original, global_cues, candidate, cuts, embedded
             return False
     current, previous, proposed = [overlap(speech, c) for c in (global_cues, original, candidate)]
     if (np.any(proposed < _thresholds(embedded)) or np.any(proposed - current < MIN_GAIN)
-            or np.any(proposed + 1e-9 < previous)):
+            or np.any(proposed + 1e-9 < previous) or _f1(proposed) < _f1(previous)):
         return False
     if not all(_no_local_regression(speech, c, candidate) for c in (original, global_cues)):
         return False
@@ -216,9 +245,23 @@ def decide_alignment(speech, cues, offset=0., scale=1., score=0., global_success
     # A built-in track checked against the soundtrack: speech detection caps precision lower,
     # so accept a lower floor only with stronger coverage and a clearly larger gain.
     floor, gain = (np.array([.55, .5]), .10) if audio_check and not embedded else (_thresholds(embedded), .05)
-    accepted = (np.all(baseline >= floor) and np.all(baseline + 1e-9 >= before)
-                and (not meaningful or baseline[0] - before[0] >= gain)
-                and _no_local_regression(speech, cues, fitted))
+    existing = (np.all(baseline >= floor) and np.all(baseline + 1e-9 >= before)
+                and (not meaningful or baseline[0] - before[0] >= gain))
+    window_scores = _window_f1(speech, cues, fitted)
+    # A 24/23.976 correction is small in scale but can move later cues by seconds.
+    strong_meaningful = meaningful or np.max(np.abs(cues * (scale - 1) + offset * 1000)) > 1000
+    standard_model = (any(abs(scale / ratio - 1) <= .0015 for ratio in FPS_RATIOS)
+                      or (abs(offset) >= 1 and abs(scale - 1) <= .003))
+    strong = (not embedded and not audio_check and strong_meaningful and standard_model
+              and _f1(baseline) - _f1(before) >= .08 and baseline[0] - before[0] >= .03
+              and baseline[1] >= .50 and baseline[0] >= .30 and len(window_scores) > 0
+              and np.mean(window_scores[:, 1] > window_scores[:, 0] + 1e-9) >= .75)
+    safe = (np.all(fitted[:, 0] >= 0) and np.all(fitted[:, 1] > fitted[:, 0])
+            and np.all(np.diff(fitted[:, 0]) >= 0) and np.all(np.diff(fitted[:, 1]) >= 0)
+            and np.all(transform_cues(cues, scale, offset)[:, 0] >= 0)
+            and _f1(baseline) >= _f1(before)
+            and _no_local_regression_f1(speech, cues, fitted))
+    accepted = safe and (existing or strong)
     decision = {"accepted": bool(accepted), "offset": float(offset), "scale": float(scale),
                 "method": "global" if accepted else "none",
                 "segments": [{"start_s": 0., "offset_s": float(offset)}] if accepted else []}
@@ -230,7 +273,7 @@ def decide_alignment(speech, cues, offset=0., scale=1., score=0., global_success
     proposals = []
     # Known fps seeds recover large missed drift whose tail is beyond +/-15 s.
     # These are hypotheses only; all acceptance and scale gates still apply.
-    seeds = {scale, 1., 25 / 23.976, 23.976 / 25, 24 / 23.976, 23.976 / 24, 25 / 24, 24 / 25}
+    seeds = {scale, *FPS_RATIOS}
     for seed in sorted(seeds):
         local = windows if seed == scale else local_offsets(speech, cues, seed, offset, embedded)
         if len(local) < 4 or np.ptp(local[:, 0]) < 3 * WINDOW_S:

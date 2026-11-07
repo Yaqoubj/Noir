@@ -37,7 +37,7 @@ public sealed class SeasonDownloadConfirmation
 
 public sealed partial class PcDownloads
 {
-    readonly Dictionary<string,(DownloadPlan Plan,DateTimeOffset Expires,string Group,bool Unwatched)> seasonPlans=[];
+    readonly Dictionary<string,(DownloadPlan Plan,DateTimeOffset Expires,string Group,bool Unwatched,long MaxTotal)> seasonPlans=[];
     readonly Dictionary<string,HashSet<string>> plannerSearches=[];
     // Injectable disk reading keeps checks offline and makes capacity changes testable.
     readonly Func<string,long>? freeSpace;
@@ -63,14 +63,15 @@ public sealed partial class PcDownloads
         var group=Item(itemId).GroupKey;
         store.SetShowDownloadPreference(group,Copy(preference));Changed?.Invoke();
     }
-    List<VideoItem> ScopeEpisodes(VideoItem item,DownloadPlanRequest request)
+    public List<VideoItem> ScopeEpisodes(VideoItem item,DownloadPlanRequest request)
     {
         if(item.IsMovie)throw new IOException("Choose a show for a season plan.");
-        var all=store.EpisodesFor(item.GroupKey).Where(i=>i.Season>0&&i.Episode>0).DistinctBy(i=>(i.Season,i.Episode)).OrderBy(i=>i.Season).ThenBy(i=>i.Episode).ToList();
-        var seasons=request.Seasons.Count>0?request.Seasons.ToHashSet():request.Scope is "Several seasons / whole show" or "Next N episodes"?all.Select(i=>i.Season).ToHashSet():new HashSet<int>{item.Season};
+        var all=store.DownloadEpisodesFor(item.GroupKey,request.IncludeSpecials).Where(i=>(i.Season>0||request.IncludeSpecials&&i.Season==0)&&i.Episode>0).DistinctBy(i=>(i.Season,i.Episode)).OrderBy(i=>i.Season).ThenBy(i=>i.Episode).ToList();
+        var seasons=request.Seasons.Count>0?request.Seasons.ToHashSet():request.Scope is "Whole show" or "Several seasons / whole show" or "Next N episodes"?all.Select(i=>i.Season).ToHashSet():new HashSet<int>{item.Season};
         var selected=all.Where(i=>seasons.Contains(i.Season));
         switch(request.Scope){
-            case "Missing episodes":case "Several seasons / whole show":break;
+            case "Missing episodes":case "This season":case "Whole show":case "Several seasons / whole show":break;
+            case "This episode":selected=all.Where(i=>i.Season==item.Season&&i.Episode==item.Episode);break;
             case "Unwatched only":selected=selected.Where(i=>!store.EverWatched(i));break;
             case "From episode N":
                 if(request.FromEpisode<1)throw new IOException("Enter an episode number of 1 or more.");
@@ -78,13 +79,13 @@ public sealed partial class PcDownloads
             case "Next N episodes":
                 if(request.NextCount is <1 or >25)throw new IOException("Choose between 1 and 25 next episodes.");
                 var last=all.LastOrDefault(store.EverWatched);
-                selected=selected.Where(i=>last==null||i.Season>last.Season||i.Season==last.Season&&i.Episode>last.Episode).Take(request.NextCount);break;
+                selected=selected.Where(i=>last==null||i.Season>last.Season||i.Season==last.Season&&i.Episode>last.Episode).Where(i=>!OnPc(i)&&!IsQueued(i)&&!Future(i)&&(!request.SkipWatched||!store.EverWatched(i))).Take(request.NextCount);break;
             case "Specific episodes":
                 var explicitEpisodes=request.SpecificEpisodes.ToHashSet();
                 selected=all.Where(i=>explicitEpisodes.Contains(new(i.Season,i.Episode)));break;
             default:throw new IOException("Choose a season scope.");
         }
-        return selected.ToList();
+        return selected.Where(i=>!request.SkipWatched||!store.EverWatched(i)).ToList();
     }
     public async Task<DownloadPlan> PlanSeason(string itemId,DownloadPlanRequest request,IProgress<DownloadSourceStatus>? progress=null,CancellationToken ct=default,bool readyOnly=false)
     {
@@ -160,7 +161,7 @@ public sealed partial class PcDownloads
                 DirectDownloadSource? direct;lock(gate)direct=choices.GetValueOrDefault(f.Id).Direct;
                 var resolution=direct?.Resolution??"";if(resolution.Length==0)resolution=TorboxProvider.Resolution(f.Name);if(resolution.Length==0)resolution=release.Choice.Resolution;
                 var language=direct?.Language is {Length:>0} audio&&audio!="Unknown"?audio:release.Choice.Languages;
-                if(preference.MaxEpisodeBytes>0&&(f.Size<=0||f.Size>preference.MaxEpisodeBytes))continue;
+                if(preference.MaxEpisodeBytes>0&&(f.Size>preference.MaxEpisodeBytes))continue;
                 if(preference.Language is not ("All" or "Any" or "")&&!language.Contains(preference.Language,StringComparison.OrdinalIgnoreCase))continue;
                 options.Add(new(){ReleaseBytes=Math.Max(release.Choice.Size,files.Sum(file=>file.Size)),IsPack=release.Choice.SizeKind=="Pack"||files.Count(file=>DownloadNaming.Video(file.Name))>1,ReleaseId=id,Release=release.Choice.Name,Source=release.Choice.Sources.Count>0?string.Join(" / ",release.Choice.Sources):indexed.Service,Resolution=resolution.Length>0?resolution:"Unknown",Language=language,CacheState=release.Choice.CacheStatus=="On your server"?"On your server":ConfirmedReady(release.Choice)?"Ready":"Needs fetching",File=f});
             }
@@ -190,11 +191,17 @@ public sealed partial class PcDownloads
                 }
             }
         }
-        plan.Entries=plan.Episodes.Where(e=>e.Chosen!=null).Select(e=>new DownloadPlanEntry{ReleaseId=e.Chosen!.ReleaseId,Release=e.Chosen.Release,File=e.Chosen.File}).ToList();
+        long budget=0;bool over=false;
+        foreach(var episode in plan.Episodes.Where(e=>e.Chosen!=null).OrderBy(e=>e.Season).ThenBy(e=>e.Episode)){
+            var size=episode.Chosen!.File.Size>0?episode.Chosen.File.Size:preference.MaxEpisodeBytes;
+            if(request.MaxTotalBytes>0&&(over||size>request.MaxTotalBytes-budget)){over=true;episode.State="Over your total limit";episode.Reason=store.State.Language=="ar"?"يتجاوز حد المساحة الإجمالي":"Over your total limit";}
+            else budget+=Math.Max(0,size);
+        }
+        plan.Entries=plan.Episodes.Where(e=>e.Chosen!=null&&e.State!="Over your total limit").Select(e=>new DownloadPlanEntry{ReleaseId=e.Chosen!.ReleaseId,Release=e.Chosen.Release,File=e.Chosen.File}).ToList();
         plan.MissingEpisodes=plan.Episodes.Where(e=>e.State=="Not found").Select(e=>e.Episode).ToList();plan.SelectedBytes=plan.Entries.Sum(e=>e.File.Size);plan.HasUnknownSizes=plan.Entries.Any(e=>e.File.Size<=0);
         lock(gate){plan.FreeBytes=Math.Max(0,FreeSpace(plan.Folder)-Reserved(plan.Folder));plan.Fits=plan.SelectedBytes+DiskReserve<=plan.FreeBytes;}
         plan.Message=$"{plan.Entries.Count} episodes · {DownloadNaming.Size(plan.SelectedBytes)} · {plan.MissingEpisodes.Count} not found"+(!plan.ScheduleKnown?" · Schedule unavailable; known episodes only":"")+(plan.HasUnknownSizes?" · Some sizes unknown":"");
-        lock(gate){foreach(var key in seasonPlans.Where(p=>p.Value.Expires<DateTimeOffset.UtcNow).Select(p=>p.Key).ToList())seasonPlans.Remove(key);seasonPlans[plan.Id]=(Copy(plan),DateTimeOffset.UtcNow.AddMinutes(20),item.GroupKey,request.Scope=="Unwatched only");}
+        lock(gate){foreach(var key in seasonPlans.Where(p=>p.Value.Expires<DateTimeOffset.UtcNow).Select(p=>p.Key).ToList())seasonPlans.Remove(key);seasonPlans[plan.Id]=(Copy(plan),DateTimeOffset.UtcNow.AddMinutes(20),item.GroupKey,request.Scope=="Unwatched only"||request.SkipWatched,Math.Max(0,request.MaxTotalBytes));}
         return plan;
         }finally{lock(gate)plannerSearches.Remove(searchId);}
     }
@@ -271,6 +278,8 @@ public sealed partial class PcDownloads
                 if(session.Unwatched&&store.EverWatched(item))throw new IOException("An episode is now watched. Build the unwatched plan again.");
                 selected.Add(episode.Alternatives.First(o=>o.File.Id==id));
             }
+            var charged=selected.Sum(o=>o.File.Size>0?o.File.Size:Math.Max(0,session.Plan.Preferences.MaxEpisodeBytes));
+            if(session.MaxTotal>0&&charged>session.MaxTotal)throw new IOException(store.State.Language=="ar"?"الاختيارات تتجاوز الحد الإجمالي. قلل الحلقات أو غيّر الحد ثم ابحث مجددًا.":"These choices exceed your total limit. Exclude episodes or change the limit and find releases again.");
             return EnqueueCore(new(){RequestId=confirmation.RequestId,Selections=selected.GroupBy(o=>o.ReleaseId).Select(g=>new DownloadSelection{ReleaseId=g.Key,FileIds=g.Select(o=>o.File.Id).ToList()}).ToList()},null);
         }
     }

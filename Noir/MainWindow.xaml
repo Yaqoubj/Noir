@@ -2,11 +2,11 @@
  Title="Noir" Width="1320" Height="900" MinWidth="780" MinHeight="520" SizeChanged="Library_SizeChanged" UseLayoutRounding="True" TextOptions.TextFormattingMode="Ideal" FontFamily="Segoe UI Variable Text, Segoe UI" Background="{StaticResource Ink}" WindowStartupLocation="Manual" PreviewKeyDown="Window_KeyDown" Closing="Window_Closing">
  <Grid>
   <Grid x:Name="LibraryRoot" Background="{StaticResource Ink}">
-   <Grid.ColumnDefinitions><ColumnDefinition x:Name="RailColumn" Width="236"/><ColumnDefinition/></Grid.ColumnDefinitions>
+   <Grid.ColumnDefinitions><ColumnDefinition x:Name="RailColumn" Width="{DynamicResource Density.Sidebar}"/><ColumnDefinition/></Grid.ColumnDefinitions>
    <!-- Side rail: the page list with icons, the profile card and the language switch. Arabic mirrors it to the right. -->
    <Border x:Name="SideRail" Background="#0E0E10" BorderBrush="#14FFFFFF" BorderThickness="0,0,1,0">
     <DockPanel>
-     <Grid DockPanel.Dock="Top" Height="78" Margin="22,0,14,0">
+     <Grid DockPanel.Dock="Top" Height="{DynamicResource Density.TopBar}" Margin="22,0,14,0">
       <TextBlock x:Name="RailLogo" Text="N O I R" Foreground="{StaticResource Accent}" FontSize="21" FontWeight="Bold" FontFamily="Segoe UI Variable Display, Segoe UI" VerticalAlignment="Center" Cursor="Hand" MouseLeftButtonDown="Logo_Click" ToolTip="Home"/>
      </Grid>
      <StackPanel x:Name="RailFooter" DockPanel.Dock="Bottom" Margin="12,8,12,16"/>
@@ -36,24 +36,24 @@
      <StackPanel x:Name="PageBody">
       <StackPanel x:Name="LibraryHeader" Margin="56,108,56,10">
        <TextBlock x:Name="PageEyebrow" Text="LOCAL LIBRARY" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Accent}"/>
-       <TextBlock x:Name="PageTitle" Foreground="{StaticResource Text}" Text="Your evening, queued." FontSize="40" FontWeight="Bold" FontFamily="Segoe UI Variable Display, Segoe UI" Margin="0,6,0,0" TextTrimming="CharacterEllipsis"/>
+       <TextBlock x:Name="PageTitle" Foreground="{StaticResource Text}" Text="Your evening, queued." FontSize="{DynamicResource Density.PageTitle}" FontWeight="Bold" FontFamily="Segoe UI Variable Display, Segoe UI" Margin="0,6,0,0" TextTrimming="CharacterEllipsis"/>
       </StackPanel>
       <StackPanel x:Name="ContentPanel" Margin="56,0,56,56"/>
      </StackPanel>
     </ScrollViewer>
     <!-- Floating top bar: a centred search pill over the artwork, solid once the page scrolls. -->
-    <Grid x:Name="TopBar" VerticalAlignment="Top" Height="78">
+    <Grid x:Name="TopBar" VerticalAlignment="Top" Height="{DynamicResource Density.TopBar}">
      <Border IsHitTestVisible="False"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#B30B0B0D" Offset="0"/><GradientStop Color="#000B0B0D" Offset="1"/></LinearGradientBrush></Border.Background></Border>
      <Border x:Name="TopBarFill" Background="#F20D0D0F" Opacity="0" IsHitTestVisible="False" BorderBrush="#1FFFFFFF" BorderThickness="0,0,0,1"/>
      <Grid x:Name="TopBarContent" Margin="36,0,28,0">
       <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
       <Button x:Name="RailToggle" Style="{StaticResource TopIcon}" Click="RailToggle_Click" ToolTip="Show or hide labels" AutomationProperties.Name="Toggle side menu" Margin="0"/>
-      <Grid x:Name="SearchHost" Grid.Column="1" Width="420" Height="42" HorizontalAlignment="Center">
+      <Grid x:Name="SearchHost" Grid.Column="1" Width="420" Height="{DynamicResource Density.Search}" HorizontalAlignment="Center">
        <TextBox x:Name="SearchBox" Style="{StaticResource SearchPill}" ToolTip="Search your library" TextChanged="Search_Changed" AutomationProperties.Name="Search library"/>
        <Path x:Name="SearchGlyph" Data="M10,1 A9,9 0 1 1 9.99,1 M16.5,16.5 L23,23" Stroke="#B8B2AA" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Width="16" Height="16" Stretch="Uniform" HorizontalAlignment="Left" Margin="16,0,0,0" IsHitTestVisible="False"/>
        <TextBlock x:Name="SearchPlaceholder" Text="Search movies &amp; shows" Foreground="#8F8A83" FontSize="13.5" Margin="44,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Text,ElementName=SearchBox}" Value=""><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
       </Grid>
-      <StackPanel Grid.Column="2" Orientation="Horizontal"><Button x:Name="HelpNav" Style="{StaticResource TopIcon}" Click="Help_Click" ToolTip="Shortcuts &amp; tips (?)" AutomationProperties.Name="Shortcuts and tips"><TextBlock Text="?" FontSize="17" FontWeight="SemiBold" Foreground="#D9D4CC"/></Button><Button x:Name="ScanNav" Style="{StaticResource TopIcon}" Click="Scan_Click" ToolTip="Scan library for new files" AutomationProperties.Name="Scan library"/></StackPanel>
+      <StackPanel Grid.Column="2" Orientation="Horizontal"><Grid x:Name="DownloadsTopHost" Visibility="{Binding Visibility,ElementName=DownloadsNav}"><Button x:Name="DownloadsTop" Style="{StaticResource TopIcon}" Click="DownloadsTop_Click" Visibility="Collapsed" ToolTip="Downloads" AutomationProperties.Name="Downloads"/></Grid><Button x:Name="HelpNav" Style="{StaticResource TopIcon}" Click="Help_Click" ToolTip="Shortcuts &amp; tips (?)" AutomationProperties.Name="Shortcuts and tips"><TextBlock Text="?" FontSize="17" FontWeight="SemiBold" Foreground="#D9D4CC"/></Button><Button x:Name="ScanNav" Style="{StaticResource TopIcon}" Click="Scan_Click" ToolTip="Scan library for new files" AutomationProperties.Name="Scan library"/></StackPanel>
      </Grid>
     </Grid>
     <!-- Status messages float briefly at the bottom instead of occupying a line. -->

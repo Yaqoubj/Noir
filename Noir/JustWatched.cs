@@ -28,21 +28,24 @@ public partial class MainWindow
         var directory=store.DataDirectory;var root=new StackPanel{MaxWidth=420,FlowDirection=Loc.Arabic?FlowDirection.RightToLeft:FlowDirection.LeftToRight};
         var row=new WrapPanel{VerticalAlignment=VerticalAlignment.Center};
         var question=item.IsMovie?T("How was {0}?","كيف كان {0}؟",item.Title):T("How was S{0} E{1}?","كيف كانت الحلقة {1} من الموسم {0}؟",item.Season,item.Episode);
-        var prompt=Text(question,compact?11:19,"#F4F1EB",FontWeights.SemiBold);prompt.VerticalAlignment=VerticalAlignment.Center;prompt.Margin=new(0,0,compact?5:0,compact?0:8);if(compact){prompt.MaxWidth=112;prompt.TextWrapping=TextWrapping.NoWrap;prompt.TextTrimming=TextTrimming.CharacterEllipsis;prompt.ToolTip=question;}
-        if(compact)row.Children.Add(prompt);else{root.Children.Add(prompt);if(!item.IsMovie){var title=Text(item.Title,12,"#9F9A93");title.Margin=new(0,0,0,12);root.Children.Add(title);}}
+        var prompt=Text(question,compact?12:19,compact?"#C7C2BC":"#F4F1EB",FontWeights.SemiBold);prompt.VerticalAlignment=VerticalAlignment.Center;prompt.Margin=new(0,0,0,compact?7:8);if(compact){prompt.TextWrapping=TextWrapping.NoWrap;prompt.TextTrimming=TextTrimming.CharacterEllipsis;prompt.ToolTip=question;}
+        root.Children.Add(prompt);if(!compact&&!item.IsMovie){var title=Text(item.Title,12,"#9F9A93");title.Margin=new(0,0,0,12);root.Children.Add(title);}
         bool Active()=>directory==store.DataDirectory;
         Button Chip(string label,string name,Action action)
         {
-            var b=ActionButton(label,()=>{if(Active())action();});b.Focusable=true;b.Padding=compact?new(3,2,3,2):new(9,5,9,5);b.Margin=new(0,0,compact?1:4,0);b.ToolTip=name;AutomationProperties.SetName(b,name);return b;
+            var b=ActionButton(label,()=>{if(Active())action();});b.Focusable=true;b.Padding=compact?new(0):new(9,5,9,5);b.Margin=new(0,0,compact?6:4,0);b.ToolTip=name;AutomationProperties.SetName(b,name);
+            // Compact chips are round, evenly sized icons so a row of them reads as one calm control.
+            if(compact){b.Style=(Style)FindResource("Pill");b.MinWidth=b.Height=32;b.FontSize=15;b.HorizontalContentAlignment=HorizontalAlignment.Center;b.VerticalContentAlignment=VerticalAlignment.Center;b.Background=Brush("#222226");b.Foreground=Brush("#C7C2BC");if(b.Content is string glyph&&glyph.Length>0)b.Content=new TextBlock{Text=glyph,FontSize=20,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};}
+            return b;
         }
         var reactions=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};var reactionButtons=new List<(string Mood,Button Button)>();
         void RefreshReactions(){foreach(var (mood,button) in reactionButtons){var on=store.State.Reactions.GetValueOrDefault(item.Id)==mood;button.Background=Brush(on?"#45E4C084":"#222226");button.Foreground=Brush(on?"#E4C084":"#C7C2BC");AutomationProperties.SetHelpText(button,on?T("Selected","محدد"):"");}}
         foreach(var mood in new[]{("loved","♥",T("Loved","أحببته")),("funny","☺",T("Funny","مضحك")),("wow","✦",T("Wow","مذهل")),("sad","☂",T("Sad","حزين")),("meh","−",T("Meh","عادي"))})
         {
-            var b=Chip(mood.Item2,mood.Item3,()=>{store.SetReaction(item.Id,store.State.Reactions.GetValueOrDefault(item.Id)==mood.Item1?"":mood.Item1);JustWatchedInteraction(item);RefreshReactions();});if(compact)b.Width=22;reactionButtons.Add((mood.Item1,b));reactions.Children.Add(b);
+            var b=Chip(mood.Item2,mood.Item3,()=>{store.SetReaction(item.Id,store.State.Reactions.GetValueOrDefault(item.Id)==mood.Item1?"":mood.Item1);JustWatchedInteraction(item);RefreshReactions();});if(compact)b.Width=32;reactionButtons.Add((mood.Item1,b));reactions.Children.Add(b);
         }
         RefreshReactions();row.Children.Add(reactions);
-        var size=compact?13:20;var rating=Chip("",T("Your rating · optional","تقييمك · اختياري"),()=>{});rating.FlowDirection=FlowDirection.LeftToRight;rating.Margin=new(compact?3:8,0,0,0);
+        var size=compact?16:20;var rating=Chip("",T("Your rating · optional","تقييمك · اختياري"),()=>{});rating.FlowDirection=FlowDirection.LeftToRight;rating.Margin=new(compact?2:8,0,compact?6:0,0);if(compact)rating.Padding=new(10,0,10,0);
         int Rating()=>store.State.PersonalReviews.GetValueOrDefault(item.Id)?.Rating10??0;
         var menu=new ContextMenu{FlowDirection=root.FlowDirection};rating.ContextMenu=menu;if(!compact)justWatchedRatingMenu=menu;
         void RefreshRating(){rating.Content=HalfRating(Rating(),size);AutomationProperties.SetHelpText(rating,T("{0:0.#} stars","{0:0.#} نجمة",Rating()/2.0));foreach(var choice in menu.Items.OfType<MenuItem>())choice.IsChecked=Equals(choice.Tag,Rating());}
@@ -53,7 +56,7 @@ public partial class MainWindow
         var noteHost=new StackPanel();var editor=new TextBox{Text=store.State.PersonalReviews.GetValueOrDefault(item.Id)?.Note??"",Visibility=Visibility.Collapsed,MaxLength=10000,TextWrapping=TextWrapping.Wrap,MinHeight=38,MaxHeight=130,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,Padding=new(9),Margin=new(0,8,0,0),Background=Brush("#222226"),Foreground=Brush("#F4F1EB")};AutomationProperties.SetName(editor,T("Private note · optional","ملاحظة خاصة · اختيارية"));
         var snippet=Text("",12,"#C7C2BC");snippet.TextWrapping=TextWrapping.NoWrap;snippet.TextTrimming=TextTrimming.CharacterEllipsis;snippet.Margin=new(0,7,0,0);var editing=false;string saved=editor.Text;
         Button? note=null;
-        void RefreshNote(){saved=store.State.PersonalReviews.GetValueOrDefault(item.Id)?.Note??"";snippet.Text=saved.Replace('\r',' ').Replace('\n',' ');snippet.Visibility=saved.Length>0?Visibility.Visible:Visibility.Collapsed;if(note!=null){var name=saved.Length>0?T("Edit note","تعديل الملاحظة"):T("Add a note…","أضف ملاحظة…");note.Content=compact?"✎":name;note.ToolTip=name;AutomationProperties.SetName(note,name);}}
+        void RefreshNote(){saved=store.State.PersonalReviews.GetValueOrDefault(item.Id)?.Note??"";snippet.Text=saved.Replace('\r',' ').Replace('\n',' ');snippet.Visibility=saved.Length>0?Visibility.Visible:Visibility.Collapsed;if(note!=null){var name=saved.Length>0?T("Edit note","تعديل الملاحظة"):T("Add a note…","أضف ملاحظة…");if(!compact)note.Content=name;note.ToolTip=name;AutomationProperties.SetName(note,name);}}
         void FinishNote(bool save)
         {
             if(!editing)return;editing=false;if(save&&Active()){store.SetReview10(item,Rating(),editor.Text.Trim());JustWatchedInteraction(item);}editor.Visibility=Visibility.Collapsed;RefreshNote();
@@ -93,7 +96,7 @@ public partial class MainWindow
     }
     void MountJustWatched(FrameworkElement content,string id)
     {
-        justWatchedCard=new Border{Tag=id,Width=420,Padding=new(18),Margin=new(22),CornerRadius=new(14),Background=Brush("#161618"),BorderBrush=Brush("#60E4C084"),BorderThickness=new(1),HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Bottom,FlowDirection=Loc.Arabic?FlowDirection.RightToLeft:FlowDirection.LeftToRight,Child=content};
+        justWatchedCard=new Border{Tag=id,Width=420,Padding=new(18),Margin=new(22),CornerRadius=new(14),Background=Brush("#F7141416"),BorderBrush=Brush("#2EFFFFFF"),BorderThickness=new(1),HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Bottom,FlowDirection=Loc.Arabic?FlowDirection.RightToLeft:FlowDirection.LeftToRight,Child=content};
         // Grid mirrors its alignment with the library's FlowDirection; Arabic therefore lands bottom-left.
         AutomationProperties.SetName(justWatchedCard,T("Just watched","شاهدت للتو"));Grid.SetColumnSpan(justWatchedCard,2);Panel.SetZIndex(justWatchedCard,100);LibraryRoot.Children.Add(justWatchedCard);
         justWatchedEscape=(_,e)=>{if(e.Key!=Key.Escape||justWatchedCard==null||PlayerRoot.Visibility==Visibility.Visible||Keyboard.FocusedElement is TextBox box&&box.IsDescendantOf(justWatchedCard)||e.OriginalSource is TextBox source&&source.IsDescendantOf(justWatchedCard))return;DismissJustWatched(false);e.Handled=true;};AddHandler(Keyboard.PreviewKeyDownEvent,justWatchedEscape,true);

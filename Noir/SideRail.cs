@@ -27,7 +27,7 @@ public partial class MainWindow
         foreach(var (button,label,glyph) in NavPages)
         {
             var icon=new Border{Width=26,Height=24,Child=button==DownloadsNav?DownloadIcon(lastDownloadCount):Icon(glyph,19)};
-            var text=new TextBlock{Text=T(label),FontSize=14,Margin=new(14,0,0,0),VerticalAlignment=VerticalAlignment.Center,TextTrimming=TextTrimming.CharacterEllipsis};
+            var text=new TextBlock{Text=T(label),FontSize=Density.NavFont,Margin=new(14,0,0,0),VerticalAlignment=VerticalAlignment.Center,TextTrimming=TextTrimming.CharacterEllipsis};
             var row=new StackPanel{Orientation=Orientation.Horizontal};row.Children.Add(icon);row.Children.Add(text);
             button.Content=row;navItems[button]=(label,text,icon);System.Windows.Automation.AutomationProperties.SetName(button,T(label));
         }
@@ -51,7 +51,7 @@ public partial class MainWindow
     void ApplyRailWidth()
     {
         railCompact=railChoice??store.State.RailMode switch{"Labels"=>false,"Icons"=>true,_=>ActualWidth<1100};
-        RailColumn.Width=new GridLength(railCompact?76:236);RailLogo.Text=railCompact?"N":"N O I R";
+        RailColumn.Width=new GridLength(railCompact?76:Density.Sidebar);RailLogo.Text=railCompact?"N":"N O I R";
         foreach(var (button,item) in navItems)
         {
             item.Text.Visibility=railCompact?Visibility.Collapsed:Visibility.Visible;

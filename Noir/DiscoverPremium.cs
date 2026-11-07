@@ -105,13 +105,13 @@ public partial class MainWindow
         ContentPanel.Children.Add(DiscoverFilters());
         ContentPanel.Children.Add(Heading(query.Length>0?$"Searching for “{query}”…":"Finding popular movies & shows…"));
         var row=new WrapPanel();var sheen=new LinearGradientBrush{StartPoint=new(0,0),EndPoint=new(1,.25)};sheen.GradientStops.Add(new(Color.FromRgb(25,25,28),0));sheen.GradientStops.Add(new(Color.FromRgb(43,41,39),.5));sheen.GradientStops.Add(new(Color.FromRgb(25,25,28),1));
-        for(int i=0;i<12;i++){var card=new StackPanel{Width=176,Margin=new(0,0,18,22)};card.Children.Add(new Border{Height=264,CornerRadius=new(10),Background=sheen});card.Children.Add(new Border{Height=12,Width=120,CornerRadius=new(6),Background=Brush("#1C1C1F"),Margin=new(0,10,0,0),HorizontalAlignment=HorizontalAlignment.Left});row.Children.Add(card);}
+        for(int i=0;i<12;i++){var card=new StackPanel{Width=Density.PosterWidth,Margin=new(0,0,Density.CardGap,22)};card.Children.Add(new Border{Height=Density.PosterHeight,CornerRadius=new(10),Background=sheen});card.Children.Add(new Border{Height=12,Width=120,CornerRadius=new(6),Background=Brush("#1C1C1F"),Margin=new(0,10,0,0),HorizontalAlignment=HorizontalAlignment.Left});row.Children.Add(card);}
         Motion.Shimmer(row,sheen);ContentPanel.Children.Add(row);
     }
     FrameworkElement DiscoverCard(DiscoverTitle title,CancellationToken token,int revision,bool anywhere=false)
     {
-        var body=new StackPanel{Width=176,Margin=new(0,0,18,8)};
-        var picture=new Grid{Height=264,ClipToBounds=true};picture.Children.Add(Art(title.Poster,title.Name,264,true));
+        var body=new StackPanel{Width=Density.PosterWidth,Margin=new(0,0,Density.CardGap,8)};
+        var picture=new Grid{Height=Density.PosterHeight,ClipToBounds=true};picture.Children.Add(Art(title.Poster,title.Name,Density.PosterHeight,true));
         var status=StatusLabels.For(title.Episodes.Select(e=>new StatusEpisode(e.Season,e.Episode,e.AirsAt)),DateTimeOffset.UtcNow,topTen?.FindIndex(t=>t.Id==title.Id)+1??0);if(status.Length>0)picture.Children.Add(new Border{Background=Brush("#E4C084"),CornerRadius=new(5),Padding=new(7,3,7,3),Margin=new(8),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Bottom,IsHitTestVisible=false,Child=Text(StatusText(status),10,"#16120C",FontWeights.SemiBold)});
         if(title.Rating.Length>0)picture.Children.Add(new Border{IsHitTestVisible=false,Background=Brush("#E6101012"),CornerRadius=new(6),Padding=new(7,3,7,3),Margin=new(8),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Top,Child=Text("★ "+title.Rating,11,"#E4C084",FontWeights.SemiBold)});
         var existing=store.Archive.Where(i=>i.ImdbId==title.Id&&i.IsMovie==title.IsMovie).ToList();
@@ -132,14 +132,14 @@ public partial class MainWindow
         void Paint(){artwork.Children.Clear();HeroArtwork(artwork,File.Exists(title.Background)?title.Background:title.Poster,title.Id);}
         Paint();if(!File.Exists(title.Background))_=Fetch();
         async Task Fetch(){try{using var client=DiscoverClient();await client.Artwork(title,token,true);if(!token.IsCancellationRequested&&revision==discoverRevision&&!closing)Paint();}catch(OperationCanceledException)when(token.IsCancellationRequested){}catch(Exception e){store.Log(e);}}
-        var panel=new StackPanel{Margin=new(sidePad,0,sidePad,detail?42:56),MaxWidth=700,HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Bottom};
+        var panel=new StackPanel{Margin=new(Density.Compact?24:sidePad,0,Density.Compact?24:sidePad,Density.Compact?38:detail?42:56),MaxWidth=Density.Pick(620,700),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Bottom};
         panel.Children.Add(new Border{Background=Brush("#33E4C084"),BorderBrush=Brush("#66E4C084"),BorderThickness=new(1),CornerRadius=new(4),Padding=new(9,3,9,3),HorizontalAlignment=HorizontalAlignment.Left,Child=Text(detail?(title.IsMovie?"MOVIE":"SERIES"):"SPOTLIGHT · "+(title.IsMovie?"MOVIE":"SERIES"),11,"#F0D3A0",FontWeights.SemiBold)});
-        var name=Text(title.Name,title.Name.Length>24?50:66,weight:FontWeights.Bold);name.FontFamily=new FontFamily("Segoe UI Variable Display, Segoe UI");name.LineHeight=title.Name.Length>24?56:72;name.Margin=new(0,14,0,10);panel.Children.Add(name);
+        var name=Text(title.Name,Density.HeroTitle(title.Name.Length>24),weight:FontWeights.Bold);name.FontFamily=new FontFamily("Segoe UI Variable Display, Segoe UI");name.LineHeight=Density.HeroLine(title.Name.Length>24);name.Margin=new(0,14,0,10);panel.Children.Add(name);
         var facts=new TextBlock{FontSize=14,Foreground=Brush("#D9D4CC"),TextWrapping=TextWrapping.Wrap};
         if(title.Rating.Length>0)facts.Inlines.Add(new System.Windows.Documents.Run("★ "+title.Rating+"  IMDb      "){Foreground=Brush("#E4C084")});
         facts.Inlines.Add(new System.Windows.Documents.Run(string.Join("   ·   ",new[]{title.Years}.Concat(title.Genres.Take(3)).Where(x=>x.Length>0))));panel.Children.Add(facts);
-        if(title.Summary.Length>0){var summary=Text(title.Summary,15,"#C9C4BD");summary.MaxHeight=66;summary.LineHeight=22;summary.TextTrimming=TextTrimming.WordEllipsis;summary.Margin=new(0,12,0,0);summary.MaxWidth=520;summary.HorizontalAlignment=HorizontalAlignment.Left;panel.Children.Add(summary);}
-        var actions=new StackPanel{Orientation=Orientation.Horizontal,Margin=new(0,26,0,0)};
+        if(title.Summary.Length>0){var summary=Text(title.Summary,Density.HeroSummary,"#C9C4BD");summary.MaxHeight=Density.HeroSummaryMax;summary.LineHeight=Density.HeroSummaryLine;summary.TextTrimming=TextTrimming.WordEllipsis;summary.Margin=new(0,12,0,0);summary.MaxWidth=520;summary.HorizontalAlignment=HorizontalAlignment.Left;panel.Children.Add(summary);}
+        var actions=new WrapPanel{Orientation=Orientation.Horizontal,Margin=new(0,Density.Pick(16,26),0,0)};
         var existing=store.Archive.FirstOrDefault(i=>i.ImdbId==title.Id&&i.IsMovie==title.IsMovie);
         if(!detail)actions.Children.Add(BigButton("ⓘ   Explore",()=>_=OpenDiscover(title),true));
         else if(title.IsMovie&&!(existing!=null&&CanPlay(existing))&&StreamOffered){actions.Children.Add(BigButton("▶   Stream",()=>DiscoverStream(title,0,0),true));actions.Children.Add(BigButton("↓   Download",()=>DiscoverDownload(title,0,0,false),false));}
@@ -154,7 +154,7 @@ public partial class MainWindow
         if(detail&&title.IsMovie){var seen=existing!=null&&store.EverWatched(existing);actions.Children.Add(RoundAction(seen?"👁":"👁",seen?"Watched · open in History":"I've seen it · log it in History",()=>{if(seen)OpenLog(title);else LogTitleItems(title,[(0,0)],title.Name+" logged as watched");},seen));}
         if(detail&&!title.IsMovie)actions.Children.Add(RoundAction("✓","Track episodes you've seen",()=>OpenLog(title)));
         panel.Children.Add(actions);grid.Children.Add(panel);FitHero(grid,panel,detail);
-        return Bleed(grid,detail?6:0);
+        return Density.Compact?ContainedHero(grid,detail?6:0):Bleed(grid,detail?6:0);
     }
     void ToggleDiscoveredWatchlist(DiscoverTitle title)
     {

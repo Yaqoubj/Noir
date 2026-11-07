@@ -17,10 +17,10 @@ public partial class MainWindow
     {
         var invoker=smartInvoker??Keyboard.FocusedElement as FrameworkElement;if(smartPopup!=null)smartPopup.IsOpen=false;smartInvoker=invoker;
         var focusIndex=invoker==null?-1:ViewElements(ContentPanel).Where(e=>e.Focusable&&e.IsEnabled).ToList().IndexOf(invoker);
-        var body=new StackPanel{Margin=new(18,16,18,16),MaxWidth=420};var chosen=false;
+        var body=new StackPanel{Margin=new(16,14,16,12),MaxWidth=420};var chosen=false;
         KeyboardNavigation.SetTabNavigation(body,KeyboardNavigationMode.Cycle);KeyboardNavigation.SetControlTabNavigation(body,KeyboardNavigationMode.Cycle);
         var popup=new Popup{Placement=keyboard&&invoker!=null?PlacementMode.Bottom:PlacementMode.MousePoint,PlacementTarget=keyboard?invoker:null,StaysOpen=false,AllowsTransparency=true,PopupAnimation=PopupAnimation.Fade,
-            Child=new Border{Background=Brush("#F51A1A1D"),BorderBrush=Brush("#55E4C084"),BorderThickness=new(1),CornerRadius=new(14),Child=body}};
+            Child=new Border{Background=Brush("#F7141416"),BorderBrush=Brush("#2EFFFFFF"),BorderThickness=new(1),CornerRadius=new(14),Child=body}};
         popup.Tag=(Action)(()=>chosen=true);
         body.PreviewKeyDown+=(_,e)=>{if(e.Key==Key.Escape){e.Handled=true;popup.IsOpen=false;}};
         popup.Closed+=(_,_)=>
@@ -34,7 +34,7 @@ public partial class MainWindow
     void CloseSmart(){if(smartPopup is {} p){((Action)p.Tag)();p.IsOpen=false;}}
     Button SmartButton(Panel host,string label,Action act,bool primary=false)
     {
-        var b=ActionButton(label,()=>{},primary);b.Padding=new(14,8,14,8);b.Margin=new(0,0,8,8);if(!primary)b.Background=Brush("#26FFFFFF");
+        var b=ActionButton(label,()=>{},primary);b.Padding=Density.ButtonPadding;b.Margin=new(0,0,8,8);if(!primary)b.Background=Brush("#1FFFFFFF");
         b.Click+=(_,_)=>act();host.Children.Add(b);return b;
     }
     static string Short(VideoItem i)=>i.IsMovie?i.Title:$"S{i.Season:00}E{i.Episode:00}";

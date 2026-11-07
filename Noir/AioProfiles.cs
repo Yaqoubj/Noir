@@ -15,7 +15,7 @@ public static class AioProfiles
         foreach(var entry in presets.Where(p=>p?["type"]?.ToString()=="torbox-search").ToList())presets.Remove(entry);
         config["formatter"]=new JsonObject{["id"]="custom",["definitions"]=new JsonObject{["custom"]=new JsonObject{
             ["name"]="{stream.resolution} {stream.quality}",
-            ["description"]="{stream.filename}\n[NOIR_HASH:{stream.infoHash}]\n[NOIR_SOURCE:{stream.indexer}]\n[NOIR_AUDIO:{stream.languages::join(' / ')}]"}}};
+            ["description"]="{stream.filename}\n[NOIR_HASH:{stream.infoHash}]\n[NOIR_SEEDERS:{stream.seeders}]\n[NOIR_SOURCE:{stream.indexer}]\n[NOIR_AUDIO:{stream.languages::join(' / ')}]"}}};
         return config;
     }
     public static async Task<string> Create(string manifestUrl,string export,CancellationToken ct)

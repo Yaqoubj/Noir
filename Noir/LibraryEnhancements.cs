@@ -29,7 +29,7 @@ public partial class MainWindow
     };
     Button CardMenu(VideoItem item)
     {
-        var button=new Button {Content="⋯",Width=34,Height=30,FontSize=22,Padding=new(0),Background=Brush("#D9101012"),HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Top,Margin=new(8),ToolTip="Options for "+item.Label};
+        var button=new Button {Content="⋯",Width=Density.MoreWidth,Height=Density.MoreHeight,FontSize=Density.MoreFont,Padding=new(0),Background=Brush("#D9101012"),HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Top,Margin=new(8),ToolTip="Options for "+item.Label};
         System.Windows.Automation.AutomationProperties.SetName(button,"Options for "+item.Label);
         button.Click+=(_,e)=>{e.Handled=true;var menu=ItemMenu(item);menu.PlacementTarget=button;menu.Placement=PlacementMode.Bottom;menu.IsOpen=true;};
         // Shown only while the pointer is over the card (or it has focus), so rows stay clean.
@@ -44,7 +44,7 @@ public partial class MainWindow
     }
     FrameworkElement HomeContinueCard(UpNext entry,bool wide)
     {
-        var item=entry.Item;var group=store.EpisodesFor(item.GroupKey);var height=wide?176:264;var panel=new StackPanel{Width=wide?312:176,Margin=new(0,0,18,12),Tag=wide?"HomeWideContinue":"HomePosterContinue"};
+        var item=entry.Item;var group=store.EpisodesFor(item.GroupKey);var height=wide?Density.ContinueHeight:Density.PosterHeight;var panel=new StackPanel{Width=wide?Density.ContinueWidth:Density.PosterWidth,Margin=new(0,0,Density.CardGap,12),Tag=wide?"HomeWideContinue":"HomePosterContinue"};
         var progress=store.GetProgress(item);var picture=new Grid{Height=height,ClipToBounds=true};var job=ActiveDownload(item);
         void Open(){if(entry.Kind==UpNextKind.Upcoming)OpenDetails(group);else if(CanPlay(item))_=PlayVideo(item);else if(job!=null)Navigate("Downloads");else if(CanStream)StreamItem(item);else FindDownloads(item);}
         var image=wide&&File.Exists(item.EpisodeImage)&&(!store.State.HideSpoilers||entry.Kind==UpNextKind.Resume||store.EverWatched(item))?item.EpisodeImage:wide&&File.Exists(item.Backdrop)?item.Backdrop:item.Poster;
@@ -63,29 +63,29 @@ public partial class MainWindow
         if(upcoming!=null) ContentPanel.Children.Add(Body($"Next airing · S{upcoming.Season:00} E{upcoming.Episode:00} · {upcoming.AirsAt!.Value.ToLocalTime():ddd, d MMM yyyy}",13));
         RenderMissingRail(item);
     }
-    Window DiaryWindow(VideoItem item)
+    NoirSheet DiaryWindow(VideoItem item)
     {
-        var dialog=new Window {Title="Viewing diary · "+item.Title,Width=700,Height=680,MinWidth=550,MinHeight=430,Owner=this,ShowActivated=!validationMode,WindowStartupLocation=WindowStartupLocation.CenterOwner,Background=Brush("#0D0D0F"),Foreground=Brush("#F4F1EB")};
-        var panel=new StackPanel{Margin=new(28)};panel.Children.Add(Text("Your viewing diary",24,weight:FontWeights.SemiBold));panel.Children.Add(Body(item.Label));
+        var dialog=OpenSheet(T("Viewing diary · ","يوميات المشاهدة · ")+item.Title,item.Label,SheetKind.Side,620);
+        var panel=new StackPanel();dialog.Add(panel);
         var personal=store.State.PersonalReviews.GetValueOrDefault(item.Id)??new();
-        panel.Children.Add(Heading("My rating & note","Private, saved on this PC."));
+        panel.Children.Add(SheetSection(T("My rating & note","تقييمي وملاحظتي"),T("Private, saved on this PC.","خاص، محفوظ على هذا الكمبيوتر.")));
         var rating=personal.Rating10;var stars=new WrapPanel();var picker=new Button{Background=Brush("Transparent"),Padding=new(3,0,3,0),ToolTip=T("Rate with half stars · optional","قيّم بنصف نجمة · اختياري")};
         System.Windows.Automation.AutomationProperties.SetName(picker,T("Your rating · optional","تقييمك · اختياري"));
         void DrawStars()=>picker.Content=HalfRating(rating,24);
         picker.PreviewMouseLeftButtonUp+=(_,e)=>{var score=Math.Clamp((int)Math.Ceiling((e.GetPosition(picker).X-3)/26*2),1,10);rating=rating==score?0:score;DrawStars();e.Handled=true;};
         picker.Click+=(_,_)=>{var menu=new ContextMenu();for(int n=0;n<=10;n++){var score=n;var choice=new MenuItem{Header=n==0?T("Clear rating","مسح التقييم"):T("{0:0.#} stars","{0:0.#} نجمة",n/2.0),IsCheckable=true,IsChecked=rating==n};choice.Click+=(_,_)=>{rating=score;DrawStars();};menu.Items.Add(choice);}menu.PlacementTarget=picker;menu.IsOpen=true;};
         DrawStars();stars.Children.Add(picker);stars.Children.Add(ActionButton(T("Clear rating","مسح التقييم"),()=>{rating=0;DrawStars();}));panel.Children.Add(stars);
-        var note=new TextBox{Text=personal.Note,AcceptsReturn=true,TextWrapping=TextWrapping.Wrap,MinHeight=84,MaxHeight=160,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,Margin=new(0,14,0,12),MaxLength=4000};System.Windows.Automation.AutomationProperties.SetName(note,"My private note");panel.Children.Add(note);
-        var saved=Body("",12);panel.Children.Add(ActionButton("Save rating & note",()=>{store.State.PersonalReviews[item.Id]=new(){Rating10=rating,Note=note.Text};store.TouchMobileField("review:"+item.Id);store.Save();saved.Text="Saved on this PC.";},true));panel.Children.Add(saved);
-        panel.Children.Add(Heading("Viewing dates","Earlier dates stay here when you replay or remove the file."));
+        var note=new TextBox{Text=personal.Note,AcceptsReturn=true,TextWrapping=TextWrapping.Wrap,MinHeight=84,MaxHeight=160,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,Margin=new(0,10,0,6),MaxLength=4000};System.Windows.Automation.AutomationProperties.SetName(note,"My private note");panel.Children.Add(note);
+        var saved=Body("",12);saved.Margin=new(0);panel.Children.Add(saved);dialog.Action(T("Close","إغلاق"),()=>dialog.Close(false));dialog.Action(T("Save rating & note","حفظ التقييم والملاحظة"),()=>{store.State.PersonalReviews[item.Id]=new(){Rating10=rating,Note=note.Text};store.TouchMobileField("review:"+item.Id);store.Save();saved.Text=T("Saved on this PC.","حُفظ على هذا الكمبيوتر.");},true);
+        panel.Children.Add(SheetSection(T("Viewing dates","تواريخ المشاهدة"),T("Earlier dates stay here when you replay or remove the file.","تبقى التواريخ السابقة هنا عند إعادة المشاهدة أو حذف الملف.")));
         var records=store.Archive.Where(x=>x.GroupKey==item.GroupKey).SelectMany(x=>store.ViewingHistory(x).Select(v=>(Item:x,View:v))).OrderByDescending(x=>x.View.WatchedAt).ToList();
         if(records.Count==0) panel.Children.Add(Body("No completed viewings yet. Your saved position is kept separately."));
         foreach(var record in records)
         {
             var label=(record.Item.IsMovie?record.Item.Title:record.Item.EpisodeLabel)+" · "+record.View.WatchedAt.ToLocalTime().ToString("d MMM yyyy, HH:mm")+" · "+record.View.Source;
-            var row=ActionButton(label,()=>{dialog.Close();OpenEpisodeInfo(record.Item);});row.Background=Brush("#171719");row.Margin=new(0,0,0,8);row.HorizontalAlignment=HorizontalAlignment.Stretch;panel.Children.Add(row);
+            var row=ActionButton(label,()=>{dialog.Close(true);OpenEpisodeInfo(record.Item);});row.Background=Brush("#171719");row.Margin=new(0,0,0,6);row.HorizontalAlignment=HorizontalAlignment.Stretch;panel.Children.Add(row);
         }
-        dialog.Content=new ScrollViewer{Content=panel};return dialog;
+        return dialog;
     }
-    void OpenDiary(VideoItem item) => DiaryWindow(item).Show();
+    void OpenDiary(VideoItem item) => DiaryWindow(item);
 }

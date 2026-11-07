@@ -14,7 +14,7 @@ public partial class MainWindow
         var row=new StackPanel{Orientation=Orientation.Horizontal};bar.Children.Add(row);
         foreach(var tab in tabs)
         {
-            var b=new Button{Content=T(tab),Style=(Style)FindResource("TopNav"),FontSize=18,Padding=new(4,10,4,12),Margin=new(0,0,30,0),Tag=tab==selected?"Selected":null};
+            var b=new Button{Content=T(tab),Style=(Style)FindResource("TopNav"),FontSize=Density.Pick(15,18),Padding=Density.Compact?new(4,8,4,10):new(4,10,4,12),Margin=new(0,0,30,0),Tag=tab==selected?"Selected":null};
             var value=tab;b.Click+=(_,_)=>choose(value);row.Children.Add(b);
         }
         return bar;
@@ -25,7 +25,7 @@ public partial class MainWindow
         var row=new WrapPanel{Margin=new(0,0,0,4)};
         Button Tile(string glyph,string label,Action action,string? tip=null)
         {
-            var stack=new StackPanel{Orientation=Orientation.Horizontal};stack.Children.Add(new TextBlock{Text=glyph,FontSize=16,Margin=new(0,0,9,0),VerticalAlignment=VerticalAlignment.Center,Foreground=Brush("#E4C084")});stack.Children.Add(Text(label,13.5,"#E9E4DC"));
+            var stack=new StackPanel{Orientation=Orientation.Horizontal};stack.Children.Add(new TextBlock{Text=glyph,FontSize=16,Margin=new(0,0,9,0),VerticalAlignment=VerticalAlignment.Center,Foreground=Brush("#E4C084")});stack.Children.Add(Text(label.StartsWith(glyph)?label[glyph.Length..].TrimStart():label,13.5,"#E9E4DC"));
             var b=new Button{Content=stack,Background=Brush("#1A1A1D"),Padding=new(16,10,18,10),Margin=new(0,0,10,10),ToolTip=tip??label};b.Click+=(_,_)=>action();
             System.Windows.Automation.AutomationProperties.SetName(b,label);row.Children.Add(b);return b;
         }
@@ -40,7 +40,7 @@ public partial class MainWindow
             // Streams the season's next aired episode that isn't on this PC, the first unwatched one if possible.
             var toStream=season.Where(e=>e.Season>0&&!CanPlay(e)&&store.Aired(e,DateTimeOffset.UtcNow)).OrderBy(e=>store.EverWatched(e)).ThenBy(e=>e.Episode).FirstOrDefault();
             if(StreamOffered&&toStream!=null)Tile("▶","Stream "+toStream.EpisodeLabel.Replace(" · "," "),()=>StreamItem(toStream),"Stream it now through AIOStreams");
-            Tile("↓","Download season",()=>FindDownloads(season.FirstOrDefault()??item,true),"Find this season's episodes for TorBox");
+            Tile("↓",T("Download…","تنزيل…"),()=>FindDownloads(season.FirstOrDefault()??item,true),T("Choose episodes to download on this PC","اختر الحلقات لتنزيلها على هذا الكمبيوتر"));
             var keeping=downloads!=null&&NoirReadyPolicy.Enabled(downloads.SeasonPreferences(item.Id));Tile("⟳",keeping?T("Keeping ready · change","جاهزة · تغيير"):T("Keep ready","إبقاء الحلقات جاهزة"),()=>{if(downloads==null)Status.Text="Downloads are starting. Try again shortly.";else ShowKeepReady(season.FirstOrDefault()??item);},T("Keep the next episodes downloaded on this PC","إبقاء الحلقات التالية منزّلة على هذا الكمبيوتر"));
             var released=season.Where(e=>e.Season>0&&store.Aired(e,DateTimeOffset.UtcNow)).ToList();var allSeen=released.Count>0&&released.All(store.EverWatched);
             if(released.Count>0)Tile(allSeen?"✓":"○",allSeen?"Season watched":"Mark season watched",()=>{if(allSeen)UncheckAll(released,$"Season {released[0].Season} unmarked");else BulkCheckOff(released,$"{item.Title} season {released[0].Season} marked watched");},"Every released episode in this season");
@@ -66,10 +66,10 @@ public partial class MainWindow
     // A calendar-style card for an announced episode: big date block, artwork and a countdown.
     FrameworkElement CalendarCard(List<VideoItem> group,KnownEpisode ep)
     {
-        var show=group[0];var at=ep.AirsAt!.Value.ToLocalTime();var panel=new StackPanel{Width=300,Margin=new(0,0,18,8)};
-        var picture=new Grid{Height=168,ClipToBounds=true};
+        var show=group[0];var at=ep.AirsAt!.Value.ToLocalTime();var panel=new StackPanel{Width=Density.LatestWidth,Margin=new(0,0,18,8)};
+        var picture=new Grid{Height=Density.LatestHeight,ClipToBounds=true};
         var spoilerFree=!store.State.HideSpoilers&&System.IO.File.Exists(ep.Image);
-        picture.Children.Add(Art(spoilerFree?ep.Image:System.IO.File.Exists(show.Backdrop)?show.Backdrop:show.Poster,show.Title,168));
+        picture.Children.Add(Art(spoilerFree?ep.Image:System.IO.File.Exists(show.Backdrop)?show.Backdrop:show.Poster,show.Title,Density.LatestHeight));
         var shade=new LinearGradientBrush{StartPoint=new(0,0),EndPoint=new(0,1)};shade.GradientStops.Add(new(Color.FromArgb(40,0,0,0),0));shade.GradientStops.Add(new(Color.FromArgb(235,10,10,12),1));
         picture.Children.Add(new Border{Background=shade,IsHitTestVisible=false});
         var date=new StackPanel{HorizontalAlignment=HorizontalAlignment.Center};
@@ -112,6 +112,6 @@ public partial class MainWindow
             if(ep.AirsAt is {} aired)panel.Children.Add(Text("Aired "+aired.ToLocalTime().ToString("d MMM yyyy"),11,"#9F9A93"));
             cards.Add(panel);
         }
-        ContentPanel.Children.Add(Rail($"{missing.Count} released episode{(missing.Count==1?"":"s")} not on this PC","Dates and numbering from TVmaze. Specials are excluded.",cards,missing.Count>1?()=>FindDownloads(all.First(i=>i.Season==missing[0].Season),true):null,"↓  Download season"));
+        ContentPanel.Children.Add(Rail($"{missing.Count} released episode{(missing.Count==1?"":"s")} not on this PC","Dates and numbering from TVmaze. Specials are excluded.",cards,missing.Count>1?()=>FindDownloads(all.First(i=>i.Season==missing[0].Season),true):null,T("↓  Download…","↓  تنزيل…")));
     }
 }

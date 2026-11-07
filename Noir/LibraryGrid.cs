@@ -19,7 +19,7 @@ public partial class MainWindow
     void SaveLibraryView(string view,string size){LibraryPreference();libraryViews![page]=[view,size];try{var path=System.IO.Path.Combine(store.DataDirectory,"library-views.json");var temp=path+".tmp";System.IO.File.WriteAllText(temp,System.Text.Json.JsonSerializer.Serialize(libraryViews),new System.Text.UTF8Encoding(false));System.IO.File.Move(temp,path,true);}catch(Exception e){store.Log(e);}}
     FrameworkElement LibraryListRow(List<VideoItem> group)
     {
-        var item=group[0];var (watched,total)=Progress(group);var height=LibrarySize=="S"?72:LibrarySize=="L"?120:94;var line=new DockPanel{Margin=new(12)};var picture=new Grid{Width=height*1.5,Height=height,ClipToBounds=true};picture.Children.Add(Art(System.IO.File.Exists(item.Backdrop)?item.Backdrop:item.Poster,item.Title,height));AddStatusPill(picture,item);DockPanel.SetDock(picture,Dock.Left);line.Children.Add(picture);
+        var item=group[0];var (watched,total)=Progress(group);var height=Density.LibraryListHeight(LibrarySize);var line=new DockPanel{Margin=new(12)};var picture=new Grid{Width=height*1.5,Height=height,ClipToBounds=true};picture.Children.Add(Art(System.IO.File.Exists(item.Backdrop)?item.Backdrop:item.Poster,item.Title,height));AddStatusPill(picture,item);DockPanel.SetDock(picture,Dock.Left);line.Children.Add(picture);
         var buttons=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center,Margin=new(12,0,0,0)};DockPanel.SetDock(buttons,Dock.Right);line.Children.Add(buttons);var open=ActionButton(T("Details"),()=>OpenDetails(group));open.Padding=new(12,8,12,8);System.Windows.Automation.AutomationProperties.SetName(open,item.Title+" details");buttons.Children.Add(open);var listed=store.State.Watchlist.Contains(item.GroupKey);var list=ActionButton(listed?"✓":"＋",()=>ToggleWatchlist(item));list.ToolTip=T("My List");list.Margin=new(6,0,0,0);buttons.Children.Add(list);var more=MoreButton(item);more.Margin=new(6,0,0,0);buttons.Children.Add(more);
         var info=new StackPanel{Margin=new(16,0,8,0),VerticalAlignment=VerticalAlignment.Center};line.Children.Add(info);var title=Text(item.Title,16,weight:FontWeights.SemiBold);title.TextWrapping=TextWrapping.NoWrap;title.TextTrimming=TextTrimming.CharacterEllipsis;info.Children.Add(title);info.Children.Add(Text(string.Join(" · ",new[]{item.Year>0?item.Year.ToString():"",item.Duration>0?Loc.Runtime(item.Duration):"",item.Genres}.Where(x=>x.Length>0)),12,"#AAA6A0"));info.Children.Add(Text(item.IsMovie?T(watched>0?"Watched":"Not started"):$"{watched} / {total} {T("watched")}",11,"#E4C084"));info.Children.Add(new ProgressBar{Height=3,Value=watched,Maximum=Math.Max(1,total),Margin=new(0,8,0,0),Background=Brush("#2A2A30"),Foreground=Brush("#E4C084"),BorderThickness=new(0)});
         var border=new Border{Width=Math.Max(440,ContentScroll.ViewportWidth-sidePad*2-10),CornerRadius=new(12),Margin=new(0,0,0,10),Background=Brush("#141416"),Child=line,BorderBrush=Brush("#1AFFFFFF"),BorderThickness=new(1)};LazyMenu(border,item);return HoverCard(border,group);
@@ -86,7 +86,7 @@ public partial class MainWindow
     static string Letter(string title){var c=SortTitle(title).FirstOrDefault();return char.IsLetter(c)?char.ToUpperInvariant(c).ToString():"#";}
     FrameworkElement LibraryToolbar(List<string> genres,int shown,int total)
     {
-        var bar=new Border{Background=Brush("#111113"),BorderBrush=Brush("#1AFFFFFF"),BorderThickness=new(1),CornerRadius=new(14),Padding=new(14,10,14,10),Margin=new(0,10,0,10)};
+        var bar=new Border{Background=Brush("#111113"),BorderBrush=Brush("#1AFFFFFF"),BorderThickness=new(1),CornerRadius=new(14),Padding=Density.Compact?new(12,8,12,8):new(14,10,14,10),Margin=new(0,10,0,10)};
         var dock=new StackPanel();bar.Child=dock;
         var right=new WrapPanel{VerticalAlignment=VerticalAlignment.Center,Margin=new(0,8,0,0)};DockPanel.SetDock(right,Dock.Right);dock.Children.Add(right);
         right.Children.Add(Select(["Poster","Landscape","List"],LibraryView,v=>{SaveLibraryView(v,LibrarySize);Render();},T("View","طريقة العرض")));
@@ -141,8 +141,8 @@ public partial class MainWindow
     FrameworkElement LibraryPoster(List<VideoItem> group)
     {
         if(LibraryView=="List")return LibraryListRow(group);
-        var item=group[0];var (watched,total)=Progress(group);var onPc=group.Any(CanPlay);var landscape=LibraryView=="Landscape";var width=LibrarySize=="S"?140:LibrarySize=="L"?224:180;var height=landscape?width*.5625:width*1.5;if(landscape)width=(int)(width*1.5);if(landscape)height=width*.5625;
-        var panel=new StackPanel{Width=width,Margin=new(0,0,18,22),Focusable=false};
+        var item=group[0];var (watched,total)=Progress(group);var onPc=group.Any(CanPlay);var landscape=LibraryView=="Landscape";var width=Density.LibraryWidth(LibrarySize);var height=landscape?width*.5625:width*1.5;if(landscape)width=width*1.5;if(landscape)height=width*.5625;
+        var panel=new StackPanel{Width=width,Margin=new(0,0,Density.CardGap,Density.Pick(18,22)),Focusable=false};
         var picture=new Grid{Height=height,ClipToBounds=true,Background=Brush("#151517")};
         picture.Children.Add(Art(landscape&&System.IO.File.Exists(item.Backdrop)?item.Backdrop:item.Poster,item.Title,height,!landscape));AddStatusPill(picture,item);
         if(!item.IsMovie&&watched>0&&watched<total)picture.Children.Add(new ProgressBar{Value=watched,Maximum=total,Height=4,VerticalAlignment=VerticalAlignment.Bottom,IsHitTestVisible=false,Background=Brush("#99000000"),Foreground=Brush("#E4C084"),BorderThickness=new(0)});
@@ -152,7 +152,7 @@ public partial class MainWindow
         var shade=new LinearGradientBrush{StartPoint=new(0,0),EndPoint=new(0,1)};shade.GradientStops.Add(new(Color.FromArgb(40,8,8,10),0));shade.GradientStops.Add(new(Color.FromArgb(235,8,8,10),.62));
         overlay.Children.Add(new Border{Background=shade});
         var info=new StackPanel{VerticalAlignment=VerticalAlignment.Bottom,Margin=new(12,0,12,12)};overlay.Children.Add(info);
-        var title=Text(item.Title,14,weight:FontWeights.SemiBold);title.MaxHeight=40;title.TextTrimming=TextTrimming.CharacterEllipsis;info.Children.Add(title);
+        var title=Text(item.Title,Density.CardTitle,weight:FontWeights.SemiBold);title.MaxHeight=40;title.TextTrimming=TextTrimming.CharacterEllipsis;info.Children.Add(title);
         var facts=new List<string>();if(item.Year>0)facts.Add(item.Year.ToString());var genre=item.Genres.Split('·',StringSplitOptions.TrimEntries|StringSplitOptions.RemoveEmptyEntries).Take(2).Select(T);facts.AddRange(genre);
         info.Children.Add(Text(string.Join(" · ",facts),11,"#C9C4BD"));
         info.Children.Add(Text(item.IsMovie?(watched>0?T("✓ Watched"):item.Duration>0?Loc.Runtime(item.Duration):T("Movie")):$"{watched} / {total} {T("watched")}",11,"#E4C084"));
@@ -167,7 +167,7 @@ public partial class MainWindow
         var edge=new Border{CornerRadius=new(10),ClipToBounds=true,Child=open,BorderThickness=new(1.5),BorderBrush=Brush("#00000000")};panel.Children.Add(edge);
         void Fade(bool on)=>Motion.Opacity(overlay,on?1:0,on?160:120);
         edge.MouseEnter+=(_,_)=>Fade(true);edge.MouseLeave+=(_,_)=>Fade(edge.IsKeyboardFocusWithin);edge.IsKeyboardFocusWithinChanged+=(_,_)=>Fade(edge.IsMouseOver||edge.IsKeyboardFocusWithin);
-        var name=Text(item.Title,14,weight:FontWeights.SemiBold);name.Margin=new(0,9,0,2);name.TextTrimming=TextTrimming.CharacterEllipsis;name.TextWrapping=TextWrapping.NoWrap;panel.Children.Add(Bidi(name));
+        var name=Text(item.Title,Density.CardTitle,weight:FontWeights.SemiBold);name.Margin=new(0,9,0,2);name.TextTrimming=TextTrimming.CharacterEllipsis;name.TextWrapping=TextWrapping.NoWrap;panel.Children.Add(Bidi(name));
         var meta=item.IsMovie?(item.Year>0?item.Year.ToString():T("Movie")):(watched>0?$"{watched} / {total} {T("watched")}":$"{total} {T("episodes")}");
         if(!onPc)meta+=" · "+T("Not on this PC");
         var line=Text(meta,11.5,"#9F9A93");line.TextTrimming=TextTrimming.CharacterEllipsis;line.TextWrapping=TextWrapping.NoWrap;panel.Children.Add(line);

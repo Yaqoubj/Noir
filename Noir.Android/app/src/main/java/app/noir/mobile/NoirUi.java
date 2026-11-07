@@ -59,37 +59,37 @@ final class NoirUi {
  static String sha(String text){try{byte[] d=MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8));StringBuilder b=new StringBuilder();for(byte x:d)b.append(String.format(Locale.ROOT,"%02X",x));return b.toString();}catch(Exception e){return "";}}
  boolean isNew(JSONObject i){if(i.optBoolean("movie")||DataStore.watched(i))return false;JSONObject schedules=a.browsingSettings().optJSONObject("schedules");for(JSONObject ep:DataStore.objects(schedules==null?null:schedules.optJSONArray(i.optString("group"))))if(ep.optInt("season")==i.optInt("season")&&ep.optInt("episode")==i.optInt("episode")){long at=DataStore.date(ep.optString("airsAt"));return at>0&&at<=System.currentTimeMillis()&&at>System.currentTimeMillis()-14L*86400000;}return false;}
  List<Next> continuing(){List<Next> list=new ArrayList<>();long recent=System.currentTimeMillis()-120L*86400000;for(List<JSONObject> g:a.groups()){if(g.get(0).optString("status").equals("Dropped"))continue;Next n=next(g);if(n==null)continue;if((n.kind.equals(MISSING)||n.kind.equals(UPCOMING))&&n.activity<recent)continue;list.add(n);}list.sort((x,y)->{boolean wx=x.kind.equals(UPCOMING),wy=y.kind.equals(UPCOMING);if(wx!=wy)return wx?1:-1;return Long.compare(y.activity,x.activity);});return list;}
- void act(Next n){switch(n.kind){case UPCOMING:a.open(n.item);break;case MISSING:PhoneStream.start(a,n.item,false);break;default:a.play(n.item,false);}}
- String action(Next n){switch(n.kind){case RESUME:return MainActivity.position(n.item)>=1?"Resume "+DataStore.time(MainActivity.position(n.item)):"Play "+MainActivity.episode(n.item);case MISSING:return PhoneStream.available(a)?"Stream":"Set up streaming";case UPCOMING:return "Airs "+date(n.airsAt);default:return "Play "+MainActivity.episode(n.item);}}
+ void act(Next n){switch(n.kind){case UPCOMING:a.open(n.item);break;case MISSING:WatchChoice.open(a,n.item,false);break;default:a.play(n.item,false);}}
+ String action(Next n){switch(n.kind){case RESUME:return MainActivity.position(n.item)>=1?"Resume "+DataStore.time(MainActivity.position(n.item)):"Play "+MainActivity.episode(n.item);case MISSING:return "Play "+MainActivity.episode(n.item);case UPCOMING:return "Airs "+date(n.airsAt);default:return "Play "+MainActivity.episode(n.item);}}
  static String date(long at){return Instant.ofEpochMilli(at).atZone(ZoneId.systemDefault()).toLocalDate().format(java.time.format.DateTimeFormatter.ofPattern("EEE d MMM"));}
  static String ago(long at){long m=(System.currentTimeMillis()-at)/60000;if(m<2)return "just now";if(m<60)return m+" min ago";if(m<1440)return (m/60)+" h ago";if(m<2880)return "yesterday";if(m<10080)return Instant.ofEpochMilli(at).atZone(ZoneId.systemDefault()).getDayOfWeek().getDisplayName(java.time.format.TextStyle.FULL,Locale.getDefault());return date(at);}
 
  // ---- building blocks ----
  GradientDrawable fade(int top,int bottom){return new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,new int[]{top,bottom});}
  TextView pill(String s,int fg,int bgColor){TextView t=a.text(s,11,fg);t.setTypeface(null,Typeface.BOLD);t.setPadding(a.dp(9),a.dp(3),a.dp(9),a.dp(3));t.setBackground(MainActivity.bg(bgColor,a.dp(8)));return t;}
- TextView chip(String s,Runnable action,boolean primary){TextView t=a.text(s,14,primary?MainActivity.BLACK:MainActivity.WHITE);t.setTypeface(null,primary?Typeface.BOLD:Typeface.NORMAL);t.setGravity(Gravity.CENTER);t.setSingleLine();t.setPadding(a.dp(18),a.dp(11),a.dp(18),a.dp(11));t.setBackground(MainActivity.bg(primary?MainActivity.GOLD:Color.argb(70,255,255,255),a.dp(24)));t.setOnClickListener(v->action.run());Motion.card(t);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-2,-2);p.setMargins(0,0,a.dp(8),a.dp(8));t.setLayoutParams(p);return t;}
- HorizontalScrollView row(LinearLayout content){HorizontalScrollView scroll=new HorizontalScrollView(a);scroll.setHorizontalScrollBarEnabled(false);scroll.setClipToPadding(false);content.setPadding(0,0,a.dp(22),0);scroll.addView(content);return scroll;}
+ TextView chip(String s,Runnable action,boolean primary){TextView t=a.text(s,PhoneDensity.chip(),primary?MainActivity.BLACK:MainActivity.WHITE);t.setTypeface(null,primary?Typeface.BOLD:Typeface.NORMAL);t.setGravity(Gravity.CENTER);t.setSingleLine();t.setPadding(a.dp(PhoneDensity.chipPadH()),a.dp(PhoneDensity.chipPadV()),a.dp(PhoneDensity.chipPadH()),a.dp(PhoneDensity.chipPadV()));t.setBackground(MainActivity.bg(primary?MainActivity.GOLD:Color.argb(70,255,255,255),a.dp(24)));t.setOnClickListener(v->action.run());Motion.card(t);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-2,-2);p.setMargins(0,0,a.dp(8),a.dp(PhoneDensity.pick(6,8)));t.setLayoutParams(p);return t;}
+ HorizontalScrollView row(LinearLayout content){HorizontalScrollView scroll=new HorizontalScrollView(a);scroll.setHorizontalScrollBarEnabled(false);scroll.setClipToPadding(false);content.setPadding(0,0,a.dp(PhoneDensity.pageSide()),0);scroll.addView(content);return scroll;}
  void rail(LinearLayout host,String title,String subtitle,List<View> cards,Runnable seeAll){
   if(cards.isEmpty())return;
-  LinearLayout header=new LinearLayout(a);header.setGravity(Gravity.BOTTOM);header.setPadding(0,a.dp(26),0,a.dp(12));
-  LinearLayout titles=a.column();TextView t=a.text(title,20,MainActivity.WHITE);t.setTypeface(null,Typeface.BOLD);titles.addView(t);if(!subtitle.isEmpty())titles.addView(a.text(subtitle,12,MainActivity.MUTED));header.addView(titles,new LinearLayout.LayoutParams(0,-2,1));
-  if(seeAll!=null){TextView all=a.text("See all ›",13,MainActivity.GOLD);all.setMinWidth(a.dp(48));all.setMinHeight(a.dp(48));all.setGravity(Gravity.CENTER);all.setPadding(a.dp(10),a.dp(6),0,a.dp(6));all.setOnClickListener(v->seeAll.run());header.addView(all);}
+  LinearLayout header=new LinearLayout(a);header.setGravity(Gravity.BOTTOM);header.setPadding(0,a.dp(PhoneDensity.railTop()),0,a.dp(PhoneDensity.railBottom()));
+  LinearLayout titles=a.column();TextView t=a.text(title,PhoneDensity.railTitle(),MainActivity.WHITE);t.setTypeface(null,Typeface.BOLD);titles.addView(t);if(!subtitle.isEmpty())titles.addView(a.text(subtitle,PhoneDensity.railSubtitle(),MainActivity.MUTED));header.addView(titles,new LinearLayout.LayoutParams(0,-2,1));
+  if(seeAll!=null){TextView all=a.text("See all ›",PhoneDensity.pick(12.5f,13),MainActivity.GOLD);all.setMinWidth(a.dp(48));all.setMinHeight(a.dp(PhoneDensity.smallMin()));all.setGravity(Gravity.CENTER);all.setPadding(a.dp(10),a.dp(6),0,a.dp(6));all.setOnClickListener(v->seeAll.run());header.addView(all);}
   host.addView(header);LinearLayout strip=new LinearLayout(a);for(View c:cards)strip.addView(c);host.addView(row(strip));
  }
  FrameLayout art(JSONObject i,boolean portrait,int w,int h){FrameLayout f=new FrameLayout(a);f.setClipToOutline(true);f.setBackground(MainActivity.bg(MainActivity.PANEL,a.dp(14)));f.addView(a.poster(i,portrait),new FrameLayout.LayoutParams(-1,-1));f.setLayoutParams(new LinearLayout.LayoutParams(w,h));return f;}
  View continueCard(Next n){
-  JSONObject i=n.item;LinearLayout card=a.column();LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(a.dp(264),-2);cp.setMargins(0,0,a.dp(14),0);card.setLayoutParams(cp);
-  FrameLayout art=art(i,false,-1,a.dp(148));StatusLabels.pill(a,art,i);
+  JSONObject i=n.item;LinearLayout card=a.column();LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(a.dp(PhoneDensity.continueWidth()),-2);cp.setMargins(0,0,a.dp(PhoneDensity.cardGap()),0);card.setLayoutParams(cp);
+  FrameLayout art=art(i,false,-1,a.dp(PhoneDensity.continueArt()));StatusLabels.pill(a,art,i);
   View shade=new View(a);shade.setBackground(fade(Color.TRANSPARENT,Color.argb(n.kind.equals(MISSING)||n.kind.equals(UPCOMING)?200:150,0,0,0)));art.addView(shade,new FrameLayout.LayoutParams(-1,-1));
   String center=n.kind.equals(MISSING)?(PhoneStream.available(a)?"▶  STREAM":"▶  SET UP STREAMING"):n.kind.equals(UPCOMING)?"NEW EPISODE SOON":"▶";
-  TextView mark=a.text(center,center.equals("▶")?24:12,MainActivity.GOLD);mark.setTypeface(null,Typeface.BOLD);mark.setGravity(Gravity.CENTER);mark.setBackground(MainActivity.bg(Color.argb(200,12,12,14),a.dp(center.equals("▶")?28:16)));mark.setPadding(a.dp(14),a.dp(6),a.dp(14),a.dp(6));
-  art.addView(mark,center.equals("▶")?new FrameLayout.LayoutParams(a.dp(56),a.dp(56),Gravity.CENTER):new FrameLayout.LayoutParams(-2,-2,Gravity.CENTER));
+  TextView mark=a.text(center,center.equals("▶")?PhoneDensity.pick(21,24):12,MainActivity.GOLD);mark.setTypeface(null,Typeface.BOLD);mark.setGravity(Gravity.CENTER);mark.setBackground(MainActivity.bg(Color.argb(200,12,12,14),a.dp(center.equals("▶")?28:16)));mark.setPadding(a.dp(14),a.dp(6),a.dp(14),a.dp(6));
+  art.addView(mark,center.equals("▶")?new FrameLayout.LayoutParams(a.dp(PhoneDensity.pick(48,56)),a.dp(PhoneDensity.pick(48,56)),Gravity.CENTER):new FrameLayout.LayoutParams(-2,-2,Gravity.CENTER));
   if(isNew(i)&&!n.kind.equals(UPCOMING)){TextView badge=pill("NEW EPISODE",MainActivity.BLACK,MainActivity.GOLD);FrameLayout.LayoutParams bp=new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.START);bp.setMargins(a.dp(10),a.dp(10),0,0);art.addView(badge,bp);}
   JSONObject p=i.optJSONObject("progress");double d=p==null?i.optDouble("duration",0):p.optDouble("duration",i.optDouble("duration",0));
   if(n.kind.equals(RESUME)&&d>0&&d-MainActivity.position(i)>=60){TextView left=pill(Loc.minutesLeft((int)((d-MainActivity.position(i))/60)),MainActivity.WHITE,Color.argb(200,12,12,14));FrameLayout.LayoutParams lp=new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.END);lp.setMargins(0,a.dp(10),a.dp(10),0);art.addView(left,lp);}
   if(n.kind.equals(RESUME)&&d>0){ProgressBar bar=new ProgressBar(a,null,android.R.attr.progressBarStyleHorizontal);bar.setMax(1000);bar.setProgress((int)(1000*MainActivity.position(i)/d));bar.setProgressTintList(android.content.res.ColorStateList.valueOf(MainActivity.GOLD));art.addView(bar,new FrameLayout.LayoutParams(-1,a.dp(6),Gravity.BOTTOM));}
   art.setContentDescription(action(n)+" · "+i.optString("title")+" "+MainActivity.episode(i));art.setOnClickListener(v->act(n));card.addView(art);
-  TextView title=a.text(i.optString("title"),15,MainActivity.WHITE);title.setTypeface(null,Typeface.BOLD);title.setSingleLine();title.setEllipsize(TextUtils.TruncateAt.END);title.setPadding(0,a.dp(9),0,a.dp(2));title.setOnClickListener(v->a.open(i));
+  TextView title=a.text(i.optString("title"),PhoneDensity.cardTitle(),MainActivity.WHITE);title.setTypeface(null,Typeface.BOLD);title.setSingleLine();title.setEllipsize(TextUtils.TruncateAt.END);title.setPadding(0,a.dp(9),0,a.dp(2));title.setOnClickListener(v->a.open(i));
   // Long-press still works; the ⋯ makes the same actions visible.
   if(i.optBoolean("placeholder"))card.addView(title);else{LinearLayout line=new LinearLayout(a);line.setGravity(Gravity.CENTER_VERTICAL);line.addView(title,new LinearLayout.LayoutParams(0,-2,1));line.addView(more(i.optString("title")+" "+MainActivity.episode(i),()->a.options(i)));card.addView(line);}
   TextView sub=a.text(MainActivity.episode(i)+" · "+action(n),12,n.kind.equals(MISSING)?MainActivity.GOLD:MainActivity.MUTED);sub.setSingleLine();sub.setEllipsize(TextUtils.TruncateAt.END);card.addView(sub);
@@ -97,11 +97,11 @@ final class NoirUi {
   card.setOnLongClickListener(v->{if(!i.optBoolean("placeholder"))a.options(i);return true;});return card;
  }
  View posterCard(List<JSONObject> g){
-  JSONObject i=g.get(0);LinearLayout card=a.column();LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(a.dp(128),-2);cp.setMargins(0,0,a.dp(12),0);card.setLayoutParams(cp);
-  FrameLayout art=art(i,true,-1,a.dp(190));StatusLabels.pill(a,art,i);long watched=g.stream().filter(DataStore::watched).count();
+  JSONObject i=g.get(0);LinearLayout card=a.column();LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(a.dp(PhoneDensity.posterWidth()),-2);cp.setMargins(0,0,a.dp(PhoneDensity.pick(10,12)),0);card.setLayoutParams(cp);
+  FrameLayout art=art(i,true,-1,a.dp(PhoneDensity.posterArt()-2));StatusLabels.pill(a,art,i);long watched=g.stream().filter(DataStore::watched).count();
   if(watched>0&&!i.optBoolean("movie")){ProgressBar bar=new ProgressBar(a,null,android.R.attr.progressBarStyleHorizontal);bar.setMax(g.size());bar.setProgress((int)watched);bar.setProgressTintList(android.content.res.ColorStateList.valueOf(MainActivity.GOLD));art.addView(bar,new FrameLayout.LayoutParams(-1,a.dp(6),Gravity.BOTTOM));}
   if(i.optBoolean("movie")&&watched>0){TextView w=pill("✓ Watched",MainActivity.GOLD,Color.argb(220,12,12,14));FrameLayout.LayoutParams wp=new FrameLayout.LayoutParams(-2,-2,Gravity.BOTTOM|Gravity.START);wp.setMargins(a.dp(8),0,0,a.dp(8));art.addView(w,wp);}
-  card.addView(art);TextView title=a.text(i.optString("title"),13,MainActivity.WHITE);title.setTypeface(null,Typeface.BOLD);title.setSingleLine();title.setEllipsize(TextUtils.TruncateAt.END);title.setPadding(0,a.dp(8),0,0);card.addView(title);
+  card.addView(art);TextView title=a.text(i.optString("title"),PhoneDensity.pick(12.5f,13),MainActivity.WHITE);title.setTypeface(null,Typeface.BOLD);title.setSingleLine();title.setEllipsize(TextUtils.TruncateAt.END);title.setPadding(0,a.dp(8),0,0);card.addView(title);
   TextView meta=a.text(i.optBoolean("movie")?(i.optInt("year")>0?""+i.optInt("year"):"Movie"):watched+" / "+g.size()+" watched",11,MainActivity.MUTED);meta.setSingleLine();card.addView(meta);
   card.setOnClickListener(v->a.open(i,card));Motion.card(card);return card;
  }
@@ -111,21 +111,21 @@ final class NoirUi {
   ImageView backdrop=a.poster(i,false);hero.addView(backdrop,new FrameLayout.LayoutParams(-1,-1));if(onDetail)PhonePreview.attach(hero,i);if(!onDetail)Motion.drift(backdrop);View shade=new View(a);shade.setBackground(fade(Color.argb(30,12,12,14),Color.argb(250,12,12,14)));hero.addView(shade,new FrameLayout.LayoutParams(-1,-1));
   LinearLayout info=a.column();info.setPadding(a.dp(18),0,a.dp(18),a.dp(16));FrameLayout.LayoutParams ip=new FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM);
   if(!eyebrow.isEmpty()){TextView e=a.text(eyebrow,11,MainActivity.GOLD);e.setTypeface(null,Typeface.BOLD);e.setLetterSpacing(.08f);info.addView(e);}
-  TextView name=a.text(i.optString("title"),onDetail?28:30,MainActivity.WHITE);name.setTypeface(null,Typeface.BOLD);name.setPadding(0,a.dp(4),0,a.dp(6));info.addView(name);
+  TextView name=a.text(i.optString("title"),PhoneDensity.heroTitle(!onDetail),MainActivity.WHITE);name.setTypeface(null,Typeface.BOLD);name.setPadding(0,a.dp(4),0,a.dp(6));info.addView(name);
   String genres=i.optString("genres");if(!genres.isEmpty()){LinearLayout pills=new LinearLayout(a);int n=0;for(String gn:genres.split("·")){if(n++>=3)break;TextView pl=pill(gn.trim(),MainActivity.WHITE,Color.argb(60,255,255,255));pl.setTypeface(null,Typeface.NORMAL);LinearLayout.LayoutParams pp=new LinearLayout.LayoutParams(-2,-2);pp.setMargins(0,0,a.dp(6),a.dp(8));pills.addView(pl,pp);}info.addView(pills);}
   info.addView(a.text(a.count(g),12,Color.rgb(205,200,192)));
   LinearLayout actions=new LinearLayout(a);actions.setPadding(0,a.dp(12),0,0);actions.addView(chip(primary,act,true));
   if(!onDetail)actions.addView(chip(i.optBoolean("movie")?"Details":"Episodes",()->a.open(i),false));
   TextView list=chip(i.optBoolean("listed")?"✓ My List":"+ My List",()->{},false);list.setTag("my-list:"+i.optString("group"));list.setOnClickListener(v->{JSONObject fresh=a.data.item(i.optString("id"));boolean listed=fresh!=null&&fresh.optBoolean("listed");JSONObject op=a.data.operation(i.optString("id"),"list");DataStore.put(op,"value",!listed);a.data.queue(op);a.data.syncSoon();a.listBadges(i.optString("group"),!listed);Motion.pop(list);Motion.haptic(list);a.updateStatus();});actions.addView(list);
   HorizontalScrollView actionRow=row(actions);info.addView(actionRow);hero.addView(info,ip);
-  LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(-1,a.dp(onDetail?360:420));hp.setMargins(0,a.dp(4),0,a.dp(4));host.addView(hero,hp);if(!onDetail){View recap=PhoneCatchUp.card(a,g,true);if(recap!=null)host.addView(recap);}
+  LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(-1,a.dp(PhoneDensity.hero(!onDetail)));hp.setMargins(0,a.dp(4),0,a.dp(4));host.addView(hero,hp);if(!onDetail){View recap=PhoneCatchUp.card(a,g,true);if(recap!=null)host.addView(recap);}
  }
 
  // ---- Calendar cards for announced episodes ----
  View calendarCard(JSONObject show,JSONObject ep){
   long at=DataStore.date(ep.optString("airsAt"));ZonedDateTime when=Instant.ofEpochMilli(at).atZone(ZoneId.systemDefault());
-  LinearLayout card=a.column();LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(a.dp(264),-2);cp.setMargins(0,0,a.dp(14),0);card.setLayoutParams(cp);
-  FrameLayout art=art(show,false,-1,a.dp(148));View shade=new View(a);shade.setBackground(fade(Color.argb(40,0,0,0),Color.argb(235,10,10,12)));art.addView(shade,new FrameLayout.LayoutParams(-1,-1));
+  LinearLayout card=a.column();LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(a.dp(PhoneDensity.continueWidth()),-2);cp.setMargins(0,0,a.dp(PhoneDensity.cardGap()),0);card.setLayoutParams(cp);
+  FrameLayout art=art(show,false,-1,a.dp(PhoneDensity.continueArt()));View shade=new View(a);shade.setBackground(fade(Color.argb(40,0,0,0),Color.argb(235,10,10,12)));art.addView(shade,new FrameLayout.LayoutParams(-1,-1));
   LinearLayout date=a.column();date.setGravity(Gravity.CENTER);date.setPadding(a.dp(12),a.dp(6),a.dp(12),a.dp(6));GradientDrawable db=MainActivity.bg(Color.argb(230,16,16,18),a.dp(12));db.setStroke(a.dp(1),Color.argb(90,228,192,132));date.setBackground(db);
   TextView mo=a.text(when.getMonth().getDisplayName(java.time.format.TextStyle.SHORT,Locale.getDefault()).toUpperCase(Locale.ROOT),10,MainActivity.GOLD);mo.setTypeface(null,Typeface.BOLD);date.addView(mo);TextView day=a.text(""+when.getDayOfMonth(),24,MainActivity.WHITE);day.setTypeface(null,Typeface.BOLD);day.setLineSpacing(0,1);date.addView(day);
   date.addView(a.text(when.getDayOfWeek().getDisplayName(java.time.format.TextStyle.SHORT,Locale.getDefault()).toUpperCase(Locale.ROOT),10,MainActivity.MUTED));
@@ -148,12 +148,12 @@ final class NoirUi {
  }
  View latestCard(List<JSONObject> g){
   JSONObject last=g.stream().max(Comparator.comparingLong(DataStore::recent)).orElse(g.get(0));
-  LinearLayout card=a.column();LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(a.dp(270),-2);cp.setMargins(0,0,a.dp(14),0);card.setLayoutParams(cp);card.setPadding(0,0,0,a.dp(4));
-  FrameLayout art=art(last,false,-1,a.dp(150));View shade=new View(a);shade.setBackground(fade(Color.TRANSPARENT,Color.argb(235,10,10,12)));art.addView(shade,new FrameLayout.LayoutParams(-1,-1));
+  LinearLayout card=a.column();LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(a.dp(PhoneDensity.latestWidth()),-2);cp.setMargins(0,0,a.dp(PhoneDensity.cardGap()),0);card.setLayoutParams(cp);card.setPadding(0,0,0,a.dp(4));
+  FrameLayout art=art(last,false,-1,a.dp(PhoneDensity.latestArt()));View shade=new View(a);shade.setBackground(fade(Color.TRANSPARENT,Color.argb(235,10,10,12)));art.addView(shade,new FrameLayout.LayoutParams(-1,-1));
   boolean finished=MainActivity.completed(last)||DataStore.watched(last)&&MainActivity.position(last)<=0;
   TextView when=pill((finished?"✓ Watched · ":MainActivity.position(last)>=1?"Stopped at "+DataStore.time(MainActivity.position(last))+" · ":"Started · ")+ago(DataStore.recent(last)),MainActivity.GOLD,Color.argb(220,12,12,14));
   FrameLayout.LayoutParams wp=new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.START);wp.setMargins(a.dp(10),a.dp(10),0,0);art.addView(when,wp);
-  LinearLayout caption=a.column();caption.setPadding(a.dp(12),0,a.dp(12),a.dp(10));TextView t=a.text(last.optString("title"),16,MainActivity.WHITE);t.setTypeface(null,Typeface.BOLD);t.setSingleLine();t.setEllipsize(TextUtils.TruncateAt.END);caption.addView(t);
+  LinearLayout caption=a.column();caption.setPadding(a.dp(12),0,a.dp(12),a.dp(10));TextView t=a.text(last.optString("title"),PhoneDensity.pick(15,16),MainActivity.WHITE);t.setTypeface(null,Typeface.BOLD);t.setSingleLine();t.setEllipsize(TextUtils.TruncateAt.END);caption.addView(t);
   boolean spoilerFree=!a.browsingSettings().optBoolean("hideSpoilers",true)||DataStore.watched(last);
   TextView s=a.text(MainActivity.episode(last)+(spoilerFree&&!last.optString("episodeTitle").isEmpty()?" · "+last.optString("episodeTitle"):""),11,Color.rgb(217,212,204));s.setSingleLine();s.setEllipsize(TextUtils.TruncateAt.END);caption.addView(s);art.addView(caption,new FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM));
   art.setOnClickListener(v->a.open(last));card.addView(art);
@@ -168,7 +168,7 @@ final class NoirUi {
  static String compact(JSONObject i){return String.format(Locale.ROOT,"S%02dE%02d",i.optInt("season"),i.optInt("episode"));}
  // A quiet ⋯ with a full touch target that opens the episode action sheet.
  TextView more(String what,Runnable action){TextView t=a.text("⋯",20,MainActivity.MUTED);t.setGravity(Gravity.CENTER);t.setMinWidth(a.dp(44));t.setMinHeight(a.dp(44));t.setContentDescription(Loc.f("More options for %s",what));t.setTooltipText(Loc.t("More options"));t.setOnClickListener(v->{Motion.haptic(t);action.run();});return t;}
- TextView small(String s,Runnable action,boolean primary){TextView t=a.text(s,12,primary?MainActivity.BLACK:MainActivity.WHITE);t.setMinWidth(a.dp(48));t.setMinHeight(a.dp(48));t.setGravity(Gravity.CENTER);t.setTypeface(null,primary?Typeface.BOLD:Typeface.NORMAL);t.setSingleLine();t.setPadding(a.dp(12),a.dp(7),a.dp(12),a.dp(7));t.setBackground(MainActivity.bg(primary?MainActivity.GOLD:MainActivity.PANEL,a.dp(16)));t.setOnClickListener(v->action.run());Motion.card(t);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-2,-2);p.setMargins(0,0,a.dp(6),0);t.setLayoutParams(p);return t;}
+ TextView small(String s,Runnable action,boolean primary){TextView t=a.text(s,PhoneDensity.small(),primary?MainActivity.BLACK:MainActivity.WHITE);t.setMinWidth(a.dp(PhoneDensity.smallMin()));t.setMinHeight(a.dp(PhoneDensity.smallMin()));t.setGravity(Gravity.CENTER);t.setTypeface(null,primary?Typeface.BOLD:Typeface.NORMAL);t.setSingleLine();t.setPadding(a.dp(PhoneDensity.pick(11,12)),a.dp(PhoneDensity.pick(6,7)),a.dp(PhoneDensity.pick(11,12)),a.dp(PhoneDensity.pick(6,7)));t.setBackground(MainActivity.bg(primary?MainActivity.GOLD:MainActivity.PANEL,a.dp(16)));t.setOnClickListener(v->action.run());Motion.card(t);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-2,-2);p.setMargins(0,0,a.dp(6),0);t.setLayoutParams(p);return t;}
 
  double runtime(JSONObject i){JSONObject p=i.optJSONObject("progress");double d=p==null?0:p.optDouble("duration",0);if(d<60)d=i.optDouble("duration",0);return d>=60?d:i.optBoolean("movie")?6600:2580;}
  static String span(double seconds){long m=(long)(seconds/60),d=m/1440,h=(m%1440)/60,min=m%60;StringBuilder b=new StringBuilder();if(d>0)b.append(d).append(d==1?" day ":" days ");if(h>0)b.append(h).append(h==1?" hour ":" hours ");if(d==0&&min>0)b.append(min).append(" min");String r=b.toString().trim();return r.isEmpty()?"0 min":r;}

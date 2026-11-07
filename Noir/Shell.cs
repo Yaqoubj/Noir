@@ -10,14 +10,14 @@ namespace Noir;
 // status notice that appears briefly at the bottom.
 public partial class MainWindow
 {
-    double sidePad=56;
+    double sidePad=Density.PageSide(1320);
     bool cinematic;
     // Pages with a hero start under the top bar; the others leave room for it and show a title.
     void ApplyPageLayout()
     {
         LibraryHeader.Visibility=cinematic?Visibility.Collapsed:Visibility.Visible;
-        LibraryHeader.Margin=new Thickness(sidePad,TopBar.Height+30,sidePad,10);
-        ContentPanel.Margin=new Thickness(sidePad,cinematic?0:6,sidePad,64);
+        LibraryHeader.Margin=new Thickness(sidePad,TopBar.Height+Density.Pick(22,30),sidePad,10);
+        ContentPanel.Margin=new Thickness(sidePad,cinematic?0:6,sidePad,Density.Pick(48,64));
         if(!cinematic)PageAmbient.Background=null;UpdateTopBar();
     }
     // Lets an element span the full window width from inside the padded content column.
@@ -48,6 +48,8 @@ public partial class MainWindow
     void ShowToast()
     {
         if(string.IsNullOrWhiteSpace(Status.Text)){Motion.Opacity(StatusToast,0,200);return;}
+        // Same chrome as the sheets: elevated surface, 1 px edge, 14 px radius.
+        StatusToast.CornerRadius=new(14);StatusToast.Padding=new(16,9,16,9);StatusToast.Background=Brush("#F7141416");StatusToast.BorderBrush=Brush("#2EFFFFFF");
         Motion.Opacity(StatusToast,1,180);Motion.Pop(StatusToast);
         toastTimer??=new DispatcherTimer();toastTimer.Stop();toastTimer.Interval=TimeSpan.FromSeconds(Math.Clamp(Status.Text.Length/14.0,3,9));
         toastTimer.Tick-=HideToast;toastTimer.Tick+=HideToast;toastTimer.Start();

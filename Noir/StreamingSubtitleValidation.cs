@@ -47,8 +47,8 @@ public partial class MainWindow
             Check(player!.Spu<0,"Subtitles Off survives reopening a cached stream");
             Check(player.SpuDelay==500000,"Streaming subtitle timing survives reopening");
             DownloadSubtitleFiles(item);await Task.Delay(200);
-            var dialog=OwnedWindows.OfType<Window>().Single(w=>w.Title=="Subtitles");
-            Check(ViewElements(dialog).OfType<TextBlock>().Any(t=>t.Text.Contains("while you stream")),"Subtitle download dialog explains streaming support");dialog.Close();
+            var dialog=FindSheet("Subtitles")!;
+            Check(ViewElements(dialog.Body).OfType<TextBlock>().Any(t=>t.Text.Contains("while you stream")),"Subtitle download dialog explains streaming support");dialog.Close(false);
             Check(!File.Exists(item.Path)&&!File.Exists(target.Path),"Playback never downloads a video to the subtitle cache");
             // A timing-corrected copy of a built-in track wins over the plain track of its language.
             await File.WriteAllTextAsync(SubtitleDownloads.SyncedCopy(target.Path,"en",".srt"),"1\n00:00:00,000 --> 00:01:50,000\nSYNCED ENGLISH\n");

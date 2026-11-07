@@ -15,4 +15,4 @@ android {
     buildTypes { release { minifyEnabled false; if (hasReleaseKey) { signingConfig signingConfigs.noir } } }
     packaging { jniLibs { useLegacyPackaging true } }
 }
-dependencies { implementation 'org.videolan.android:libvlc-all:3.7.7'; androidTestImplementation 'androidx.test:runner:1.6.2'; androidTestImplementation 'junit:junit:4.13.2' }
+dependencies { implementation 'org.videolan.android:libvlc-all:3.7.7'; implementation 'org.libtorrent4j:libtorrent4j:2.1.0-39'; implementation 'org.libtorrent4j:libtorrent4j-android-arm64:2.1.0-39'; implementation 'org.libtorrent4j:libtorrent4j-android-arm:2.1.0-39'; implementation 'org.libtorrent4j:libtorrent4j-android-x86_64:2.1.0-39'; androidTestImplementation 'androidx.test:runner:1.6.2'; androidTestImplementation 'junit:junit:4.13.2' }

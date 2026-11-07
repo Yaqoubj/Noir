@@ -75,14 +75,14 @@ public partial class MainWindow
     FrameworkElement? TitleLogo(VideoItem item,double maxHeight,double maxWidth)
     {
         if(ExtraFor(item) is not {Logo.Length:>0} extra)return null;
-        var host=new Grid{MaxHeight=maxHeight,MaxWidth=maxWidth,HorizontalAlignment=HorizontalAlignment.Left};var fallback=Text(item.Title,item.Title.Length>24?50:66,weight:FontWeights.Bold);fallback.FontFamily=new FontFamily("Segoe UI Variable Display, Segoe UI");host.Children.Add(fallback);
+        var host=new Grid{MaxHeight=maxHeight,MaxWidth=maxWidth,HorizontalAlignment=HorizontalAlignment.Left};var fallback=Text(item.Title,Density.HeroTitle(item.Title.Length>24),weight:FontWeights.Bold);fallback.FontFamily=new FontFamily("Segoe UI Variable Display, Segoe UI");host.Children.Add(fallback);
         var image=new Image{Stretch=Stretch.Uniform,MaxHeight=maxHeight,MaxWidth=maxWidth,HorizontalAlignment=HorizontalAlignment.Left,ToolTip=item.Title};host.Children.Add(image);_=Load();return host;
         async Task Load(){await SetArtwork(image,extra.Logo,900);if(image.Source!=null)fallback.Visibility=Visibility.Collapsed;}
     }
     // "Year 2015 · [IMDb] 8.5 · Runtime 25 min · Drama": labels muted, values bright, as one wrapping line.
     TextBlock HeroFacts(VideoItem item,List<VideoItem> group,int rating)
     {
-        var line=new TextBlock{FontSize=14,Foreground=Brush("#F4F1EB"),TextWrapping=TextWrapping.Wrap};
+        var line=new TextBlock{FontSize=Density.Pick(13,14),Foreground=Brush("#F4F1EB"),TextWrapping=TextWrapping.Wrap};
         void Gap(){if(line.Inlines.Count>0)line.Inlines.Add(new Run("     "));}
         void Fact(string label,string value){Gap();if(label.Length>0)line.Inlines.Add(new Run(T(label)+(Loc.Arabic?": ":"  ")){Foreground=Brush("#9F9A93")});line.Inlines.Add(new Run(value){FontWeight=FontWeights.SemiBold});}
         if(rating>0){line.Inlines.Add(new Run(new string('★',rating)){Foreground=Brush("#E4C084")});}
@@ -109,13 +109,13 @@ public partial class MainWindow
     static string LocalRuntime(string cinemeta)=>Loc.Arabic?Regex.Replace(cinemeta,@"(\d+)\s*min",m=>m.Groups[1].Value+" د"):cinemeta;
     Button HeroButton(string text,Action action,bool primary)
     {
-        var b=new Button{Content=T(text),Style=(Style)FindResource(primary?"HeroPill":"HeroLink"),Margin=new(0,0,10,0)};Motion.ButtonFeedback(b);b.Click+=(_,_)=>action();return b;
+        var b=new Button{Content=T(text),Style=(Style)FindResource(primary?"HeroPill":"HeroLink"),Margin=new(0,0,10,0)};System.Windows.Automation.AutomationProperties.SetName(b,T(text));Motion.ButtonFeedback(b);b.Click+=(_,_)=>action();return b;
     }
     // Large outlined numerals behind each poster; digits never mirror in Arabic.
     static FrameworkElement Numeral(int n)
     {
         var text=new FormattedText(n.ToString(CultureInfo.InvariantCulture),CultureInfo.InvariantCulture,FlowDirection.LeftToRight,new Typeface(new FontFamily("Segoe UI Variable Display, Segoe UI"),FontStyles.Normal,FontWeights.Black,FontStretches.Condensed),200,Brushes.White,1);
-        return new System.Windows.Shapes.Path{Data=text.BuildGeometry(new Point()),Stroke=Brush("#73FFFFFF"),StrokeThickness=2.4,Fill=Brush("#0B0B0D"),Stretch=Stretch.Uniform,Height=168,FlowDirection=FlowDirection.LeftToRight,IsHitTestVisible=false,VerticalAlignment=VerticalAlignment.Bottom,HorizontalAlignment=HorizontalAlignment.Left,Margin=new(0,0,0,30)};
+        return new System.Windows.Shapes.Path{Data=text.BuildGeometry(new Point()),Stroke=Brush("#73FFFFFF"),StrokeThickness=2.4,Fill=Brush("#0B0B0D"),Stretch=Stretch.Uniform,Height=Density.Pick(145,168),FlowDirection=FlowDirection.LeftToRight,IsHitTestVisible=false,VerticalAlignment=VerticalAlignment.Bottom,HorizontalAlignment=HorizontalAlignment.Left,Margin=new(0,0,0,30)};
     }
     List<DiscoverTitle>? topTen;DateTimeOffset topTenAt;bool topTenLoading;
     void RenderTopTen()
@@ -142,11 +142,11 @@ public partial class MainWindow
     }
     FrameworkElement TopTenCard(DiscoverTitle title,int rank)
     {
-        var card=new Grid{Width=rank==10?262:212,Height=250,Margin=new(0,0,10,0),Background=Brush("Transparent")};
+        var card=new Grid{Width=rank==10?Density.Pick(232,262):Density.Pick(188,212),Height=Density.Pick(224,250),Margin=new(0,0,10,0),Background=Brush("Transparent")};
         card.Children.Add(Numeral(rank));
-        var column=new StackPanel{Width=130,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Top};
-        FrameworkElement picture=Art(title.Poster,title.Name,195,true);
-        var framed=new Grid{Height=195};framed.Children.Add(picture);framed.Children.Add(new Border{Background=Brush("#E4C084"),CornerRadius=new(5),Padding=new(5,3,5,3),Margin=new(5),HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Top,Child=Text(StatusText("#"+rank+" this week"),9,"#16120C",FontWeights.SemiBold)});
+        var column=new StackPanel{Width=Density.Pick(116,130),HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Top};
+        FrameworkElement picture=Art(title.Poster,title.Name,Density.Pick(174,195),true);
+        var framed=new Grid{Height=Density.Pick(174,195)};framed.Children.Add(picture);framed.Children.Add(new Border{Background=Brush("#E4C084"),CornerRadius=new(5),Padding=new(5,3,5,3),Margin=new(5),HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Top,Child=Text(StatusText("#"+rank+" this week"),9,"#16120C",FontWeights.SemiBold)});
         var open=new Button{Content=framed,Padding=new(0),Background=Brush("#151517"),HorizontalContentAlignment=HorizontalAlignment.Stretch,ToolTip=title.Name+(title.Rating.Length>0?" · IMDb "+title.Rating:"")};
         System.Windows.Automation.AutomationProperties.SetName(open,$"Top 10 number {rank}: {title.Name}");
         open.Click+=(_,_)=>_=OpenDiscover(title);
@@ -173,8 +173,8 @@ public partial class MainWindow
         if(tiles.Count==0)return;
         var cards=tiles.Select(t=>
         {
-            var tile=new Button{Width=196,Height=76,Margin=new(0,0,14,0),Padding=new(0),Background=Brush("#16FFFFFF"),ToolTip=t.Name,HorizontalContentAlignment=HorizontalAlignment.Center};
-            tile.Content=new TextBlock{Text=t.Name,FontSize=20,FontWeight=FontWeights.Black,Foreground=Brush(t.Color),FontFamily=new FontFamily("Segoe UI Variable Display, Segoe UI"),FlowDirection=FlowDirection.LeftToRight};
+            var tile=new Button{Width=Density.Pick(172,196),Height=Density.Pick(66,76),Margin=new(0,0,14,0),Padding=new(0),Background=Brush("#16FFFFFF"),ToolTip=t.Name,HorizontalContentAlignment=HorizontalAlignment.Center};
+            tile.Content=new TextBlock{Text=t.Name,FontSize=Density.Pick(18,20),FontWeight=FontWeights.Black,Foreground=Brush(t.Color),FontFamily=new FontFamily("Segoe UI Variable Display, Segoe UI"),FlowDirection=FlowDirection.LeftToRight};
             tile.Template=TileTemplate();System.Windows.Automation.AutomationProperties.SetName(tile,t.Name);var open=t.Open;tile.Click+=(_,_)=>open();
             return (FrameworkElement)Lift(tile);
         }).ToList();

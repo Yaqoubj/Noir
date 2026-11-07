@@ -18,7 +18,7 @@ public partial class MainWindow
             if(mobileSync!=null){await mobileSync.DisposeAsync();mobileSync=null;}
             // Read fresh from profiles.json: snapshots are built on the server's threads.
             store.ProfileTitle=()=>{try{return Profiles.ForDirectory(Profiles.Load(),store.DataDirectory)?.Name??"";}catch(IOException){return "";}};
-            mobileSync=new(store,store.MobileSnapshot,ops=>Dispatcher.Invoke(()=>{var ack=store.MergeMobile(ops);if(ops.Count>0&&current==null&&!closing&&page!="Settings") Render();return ack;}),port,downloads,ConfirmPhoneSettingsShare);
+            mobileSync=new(store,store.MobileSnapshot,ops=>Dispatcher.Invoke(()=>{var ack=store.MergeMobile(ops);if(ops.Count>0&&current==null&&!closing&&page!="Settings") Render();return ack;}),port,downloads,ConfirmPhoneSettingsShare,confirmDownloadDelete:ConfirmPhoneDownloadDelete);
             mobileSync.PreviewFrame=PhonePreviewFrame;
             mobileSync.Discovered+=()=>Dispatcher.BeginInvoke(()=>{if(current==null&&!closing&&page is not ("Settings" or "Downloads" or "Discover"))Render();});
             await mobileSync.SetEnabled(mobileSync.Config.Enabled);
@@ -52,17 +52,16 @@ public partial class MainWindow
         if(mobileSync==null||!mobileSync.Running) return;
         var addresses=MobileSyncServer.Addresses();
         if(addresses.Count==0) {Status.Text="Connect this PC to Wi-Fi or Ethernet first.";return;}
-        var dialog=new Window {Title=PL("Pair Noir for Android","إقران Noir على Android"),Owner=this,Width=510,Height=820,Background=Brush("#101012"),Foreground=Brush("#F4F1EB"),WindowStartupLocation=WindowStartupLocation.CenterOwner,FlowDirection=Loc.Arabic?FlowDirection.RightToLeft:FlowDirection.LeftToRight};
-        var panel=new StackPanel {Margin=new(26)};dialog.Content=new ScrollViewer {Content=panel,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
-        panel.Children.Add(Text(PL("Take Noir with you","خذ Noir معك"),24,weight:FontWeights.SemiBold));
+        var dialog=OpenSheet(PL("Pair Noir for Android","إقران Noir على Android"),PL("Take Noir with you","خذ Noir معك"),SheetKind.Side,500);
+        var panel=new StackPanel();dialog.Add(panel);
         panel.Children.Add(Body(PL("Install the Noir APK on your Android phone. On the same Wi-Fi, scan this code with your camera and choose Noir, or copy this pairing link into the app.","ثبّت ملف Noir APK على هاتف Android. على شبكة Wi-Fi نفسها، امسح هذا الرمز بالكاميرا واختر Noir، أو انسخ رابط الاقتران هذا إلى التطبيق."),14));
         panel.Children.Add(Body(PL("New pairings use HTTPS port 443. Pair this PC again to switch an existing phone to that port; your saved history stays intact.","تستخدم عمليات الاقتران الجديدة منفذ HTTPS 443. أقرن هذا الكمبيوتر مجددًا لنقل هاتف مقترن إلى هذا المنفذ؛ ويبقى سجلك المحفوظ كما هو."),12));
         var chooser=new ComboBox {ItemsSource=addresses,SelectedIndex=0,Margin=new(0,8,0,12)};panel.Children.Add(chooser);
-        var picture=new Image {Width=240,Height=240,Margin=new(0,8,0,18)};panel.Children.Add(picture);
+        var picture=new Image {Width=220,Height=220,Margin=new(0,8,0,14),HorizontalAlignment=HorizontalAlignment.Center};panel.Children.Add(picture);
         var linkBox=new TextBox {IsReadOnly=true,TextWrapping=TextWrapping.Wrap,MinHeight=72,Margin=new(0,8,0,12),FlowDirection=FlowDirection.LeftToRight};panel.Children.Add(linkBox);
-        panel.Children.Add(Text(PL("On a TV","على التلفزيون"),18,weight:FontWeights.SemiBold));
+        panel.Children.Add(SheetSection(PL("On a TV","على التلفزيون")));
         panel.Children.Add(Body(PL("In Noir on the TV, choose Pair with your PC and type this address and code. Continue on the TV only if it shows the same check code.","في Noir على التلفزيون، اختر «الاقتران بالكمبيوتر» واكتب هذا العنوان والرمز. تابع على التلفزيون فقط إذا ظهر رمز التحقق نفسه."),12));
-        var tvAddress=Text("",16);var tvCode=Text("",16);var tvCheck=Text("",26,weight:FontWeights.SemiBold);tvCheck.Foreground=Brush("#E4C084");tvCheck.Margin=new(0,4,0,14);
+        var tvAddress=Text("",14);var tvCode=Text("",14);var tvCheck=Text("",22,weight:FontWeights.SemiBold);tvCheck.Foreground=Brush("#E4C084");tvCheck.Margin=new(0,4,0,10);
         panel.Children.Add(tvAddress);panel.Children.Add(tvCode);panel.Children.Add(tvCheck);
         void Update()
         {
@@ -72,9 +71,10 @@ public partial class MainWindow
             using var data=QRCodeGenerator.GenerateQrCode(linkBox.Text,QRCodeGenerator.ECCLevel.Q);
             using var qr=new PngByteQRCode(data);var image=new BitmapImage();image.BeginInit();image.StreamSource=new MemoryStream(qr.GetGraphic(6));image.CacheOption=BitmapCacheOption.OnLoad;image.EndInit();picture.Source=image;
         }
-        var validity=Text("",14);panel.Children.Add(validity);
-        var copy=ActionButton(PL("Copy pairing link","نسخ رابط الاقتران"),()=>Clipboard.SetText(linkBox.Text),true);panel.Children.Add(copy);
-        var renew=ActionButton(PL("New code","رمز جديد"),()=>{});renew.Click+=(_,_)=>{Update();RefreshValidity();};panel.Children.Add(renew);
+        var validity=Text("",13,"#C7C2BC");validity.Margin=new(0,0,0,4);panel.Children.Add(validity);
+        dialog.Action(PL("Close","إغلاق"),()=>dialog.Close(false));
+        var renew=dialog.Action(PL("New code","رمز جديد"),()=>{});
+        var copy=dialog.Action(PL("Copy pairing link","نسخ رابط الاقتران"),()=>Clipboard.SetText(linkBox.Text),true);renew.Click+=(_,_)=>{Update();RefreshValidity();};
         void RefreshValidity()
         {
             var state=mobileSync.PairingState;var active=state.Active;
@@ -85,6 +85,6 @@ public partial class MainWindow
         chooser.SelectionChanged+=(_,_)=>{Update();RefreshValidity();};Update();RefreshValidity();
         var validityTimer=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromSeconds(1)};validityTimer.Tick+=(_,_)=>RefreshValidity();validityTimer.Start();
         panel.Children.Add(Body("After connecting once, syncing is automatic while Noir is open on both devices. Phone history and posters remain available offline.",12));
-        dialog.Closed+=(_,_)=>{validityTimer.Stop();mobileSync.EndPairing();if(!closing&&page=="Settings") Render();};dialog.Show();
+        dialog.Closed+=_=>{validityTimer.Stop();mobileSync.EndPairing();if(!closing&&page=="Settings") Render();};
     }
 }

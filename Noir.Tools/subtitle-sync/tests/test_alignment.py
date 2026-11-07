@@ -48,8 +48,9 @@ class AlignmentTests(unittest.TestCase):
         # Speech detection finds only ~60% of dialogue, as on real soundtracks.
         speech = self.speech & (np.random.default_rng(7).random(len(self.speech)) < .6)
         source = self.reference - 3000
-        strict, _ = decide(speech, source, offset=3.)
-        self.assertFalse(strict["accepted"], strict)
+        # Ordinary audio now has a separate strong-evidence global path.
+        normal, _ = decide(speech, source, offset=3.)
+        self.assertTrue(normal["accepted"], normal)
         decision, result = decide(speech, source, offset=3., audio_check=True)
         self.assertTrue(decision["accepted"], decision)
         np.testing.assert_array_equal(result, self.reference)

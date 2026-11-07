@@ -79,6 +79,7 @@ public sealed class MobileItem
 }
 public sealed class MobileSnapshot
 {
+    public string Revision {get;set;}="";
     public List<string> Favorites {get;set;}=[];
     public List<string> Likes {get;set;}=[];
     public Dictionary<string,int> SeasonRatings {get;set;}=new();
@@ -109,12 +110,17 @@ public sealed class MobileSnapshot
 }
 public sealed partial class LibraryStore
 {
+    readonly string mobileRevisionSession=Guid.NewGuid().ToString("N");
+    public string MobileRevision()
+    {
+        lock(gate){var profile=MobileProfiles.Active(DataDirectory).Id;var profiles=Path.Combine(MobileProfiles.Root(DataDirectory),"profiles.json");return profile+":"+State.MobileInstanceId+":"+mobileRevisionSession+":"+saveRevision+":"+File.GetLastWriteTimeUtc(profiles).Ticks;}
+    }
     // Set by the window: the PC profile name sent to the phone.
     public Func<string>? ProfileTitle { get; set; }
     // This is a projection, never the library file: roots, paths, cookies and account data stay on PC.
     public MobileSnapshot MobileSnapshot()
     {
-        LibraryStore projection;lock(gate)projection=new(this,LibrarySnapshot.Copy(State));return projection.BuildMobileSnapshot();
+        LibraryStore projection;string revision;lock(gate){revision=MobileRevision();projection=new(this,LibrarySnapshot.Copy(State));}var result=projection.BuildMobileSnapshot();result.Revision=revision;return result;
     }
     MobileSnapshot BuildMobileSnapshot()
     {

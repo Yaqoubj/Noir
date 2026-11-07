@@ -11,11 +11,11 @@ final class PhoneStream {
  interface StreamFetch {byte[] fetch(String url,int max)throws Exception;}
  static volatile StreamFetch fetchOverride;
  static final java.util.concurrent.ThreadPoolExecutor interactive=new java.util.concurrent.ThreadPoolExecutor(2,2,30,java.util.concurrent.TimeUnit.SECONDS,new java.util.concurrent.ArrayBlockingQueue<>(8));
- static final class Search {final DataStore data;final DataStore.WorkCancel cancel=new DataStore.WorkCancel();java.util.concurrent.Future<?> future;AlertDialog dialog;Search(DataStore data){this.data=data;}void stop(){cancel.cancel();if(future!=null)future.cancel(true);if(dialog!=null)dialog.dismiss();}}
+ static final class Search {final DataStore data;final DataStore.WorkCancel cancel=new DataStore.WorkCancel();java.util.concurrent.Future<?> future;Dialog dialog;NoirSheet sheet;Search(DataStore data){this.data=data;}void stop(){cancel.cancel();if(future!=null)future.cancel(true);if(dialog!=null)dialog.dismiss();}}
  static final Map<Activity,Search> searches=new WeakHashMap<>();
  static void cancel(Activity a){requests.put(a,requests.getOrDefault(a,0)+1);Search search=searches.remove(a);if(search!=null){search.stop();if(a instanceof PlayerActivity){PlayerActivity player=(PlayerActivity)a;if(player.message!=null&&player.message.getText().toString().equals(Loc.t("Finding a stream…")))player.message.setText("");}}interactive.purge();if(search!=null&&a instanceof TvDetailActivity)((TvDetailActivity)a).streamSearchFinished();}
  static void finished(Activity a,Search search){if(searches.get(a)==search)searches.remove(a);search.stop();if(a instanceof TvDetailActivity)((TvDetailActivity)a).streamSearchFinished();}
- static {Loc.AR.put("Finding a stream…","جارٍ البحث عن بث…");Loc.AR.put("Stream search is busy. Please try again.","البحث عن البث مشغول. حاول مجددًا.");}
+ static {Loc.AR.put("Finding a stream…","جارٍ البحث عن بث…");Loc.AR.put("Looking for the best release…","جارٍ البحث عن أفضل إصدار…");Loc.AR.put("Stream %d","بث %d");Loc.AR.put("Ready to play","جاهز للتشغيل");Loc.AR.put("Needs to be prepared first","يحتاج إلى تجهيز أولًا");Loc.AR.put("Choose a stream","اختر بثًا");Loc.AR.put("Stream search is busy. Please try again.","البحث عن البث مشغول. حاول مجددًا.");}
  static final Map<Activity,Integer> requests=new WeakHashMap<>();
  static String cacheProfile="";
  static final Map<Activity,android.os.Bundle> transitions=new WeakHashMap<>();
@@ -40,7 +40,7 @@ final class PhoneStream {
   JSONObject s=settings(a);if(s.optString("manifest").isEmpty()){if(a instanceof TvDetailActivity)((TvDetailActivity)a).streamSearchFinished();if(TvUi.isTv(a))TvSetupActivity.stream(a,()->start(a,item,choose,count,speed));else{Toast(a,"Add your AIOStreams link in phone Download settings to stream.");a.startActivity(new Intent(a,PhoneDownloadSettingsActivity.class));}return;}
   if(!item.optString("imdb").matches("tt[0-9]+")){if(a instanceof TvDetailActivity)((TvDetailActivity)a).streamSearchFinished();Toast(a,"This title needs a verified match before it can stream.");return;}
   cancel(a);int request=requests.getOrDefault(a,0)+1;requests.put(a,request);
-  Search search=new Search(NoirApp.data);searches.put(a,search);search.dialog=new AlertDialog.Builder(a).setTitle(Loc.t("Finding a stream…")).setMessage(item.optString("title")).setNegativeButton(Loc.t("Cancel"),(d,w)->cancel(a)).create();search.dialog.setOnCancelListener(d->cancel(a));search.dialog.show();
+  Search search=new Search(NoirApp.data);searches.put(a,search);if(TvUi.isTv(a)){AlertDialog finding=new AlertDialog.Builder(a).setTitle(Loc.t("Finding a stream…")).setMessage(item.optString("title")).setNegativeButton(Loc.t("Cancel"),(d,w)->cancel(a)).create();search.dialog=finding;finding.setOnCancelListener(d->cancel(a));finding.show();}else{NoirSheet finding=new NoirSheet(a,"Finding a stream…",item.optString("title"));finding.busy("Looking for the best release…");finding.footer(null,null,"Cancel",()->cancel(a));finding.dialog.setOnCancelListener(d->cancel(a));search.sheet=finding;search.dialog=finding.dialog;finding.show();}
   try{search.future=interactive.submit(()->{DataStore.workCancel.set(search.cancel);try{
    List<JSONObject> found=new PhoneDownloadProvider(s,(url,key,form,torbox)->{StreamFetch fetch=fetchOverride;return new JSONObject(new String(fetch==null?DiscoveryClient.fetch(url,8*1024*1024):fetch.fetch(url,8*1024*1024),java.nio.charset.StandardCharsets.UTF_8));}).search(item);List<JSONObject> options=TvUi.isTv(a)?TvStreamPick.rank(found,tvProfile(a),tvRuntime(item)):rank(found,s.optString("preferredResolution","1080p"),item.optBoolean("movie"));
    DataStore.checkWork();SmartLists.rememberStream(search.data.profileId,item.optString("id"),options.stream().anyMatch(o->o.optBoolean("cached")));
@@ -50,13 +50,13 @@ final class PhoneStream {
  }
  static void pick(Activity a,JSONObject item,List<JSONObject> options){
   if(TvUi.isTv(a)){TvStreamPick.Profile profile=tvProfile(a);double seconds=tvRuntime(item);List<JSONObject> shown=options.subList(0,Math.min(15,options.size()));String[] labels=new String[shown.size()];for(int n=0;n<labels.length;n++)labels[n]=TvStreamPick.label(shown.get(n),profile,seconds);String reason=TvStreamPick.pickerReason(options,profile,seconds);new AlertDialog.Builder(a).setTitle(Loc.t("Choose a stream")+(reason.isEmpty()?"":" · "+Loc.t(reason))).setItems(labels,(d,n)->playTv(a,item,options,n)).setNegativeButton(Loc.t("Cancel"),null).show();return;}
-  List<JSONObject> shown=options.subList(0,Math.min(15,options.size()));String[] labels=new String[shown.size()];
-  for(int n=0;n<shown.size();n++){JSONObject o=shown.get(n);long size=o.optLong("size");labels[n]=(o.optBoolean("cached")?"⚡ ":"⏳ ")+(o.optString("resolution").isEmpty()?"":o.optString("resolution")+" · ")+(size>0?String.format(Locale.ROOT,"%.1f GB · ",size/1073741824d):"")+o.optString("name");}
-  new AlertDialog.Builder(a).setTitle(Loc.t("Choose a stream")).setItems(labels,(d,n)->play(a,item,shown.get(n))).setNegativeButton(Loc.t("Cancel"),null).show();
+  List<JSONObject> shown=options.subList(0,Math.min(15,options.size()));
+  NoirSheet sheet=new NoirSheet(a,"Choose a stream",item.optString("title"));for(int n=0;n<shown.size();n++){JSONObject o=shown.get(n);long size=o.optLong("size");String quality=(o.optString("resolution").isEmpty()?"":o.optString("resolution"))+(size>0?(o.optString("resolution").isEmpty()?"":" · ")+String.format(Locale.ROOT,"%.1f GB",size/1073741824d):"");String release=o.optString("name");if(release.length()>80)release=release.substring(0,80)+"…";final JSONObject choice=o;sheet.action(o.optBoolean("cached")?"⚡":"⏳",quality.isEmpty()?Loc.f("Stream %d",n+1):quality,Loc.t(o.optBoolean("cached")?"Ready to play":"Needs to be prepared first")+(release.isEmpty()?"":" · "+release),()->play(a,item,choice));}sheet.footer(null,null,"Cancel",null);sheet.show();
  }
  static void play(Activity a,JSONObject item,JSONObject option){
+  boolean restart=item.optBoolean("noirRestart");if(restart){item=DataStore.copy(item);item.remove("noirRestart");}
   DataStore data=NoirApp.data;JSONObject saved=data.item(item.optString("id"));if(saved==null)saved=data.rememberPhoneItem(item);
-  Intent i=streamIntent(a,saved.optString("id"),option);
+  Intent i=streamIntent(a,saved.optString("id"),option);if(restart)i.putExtra("restart",true);
   a.startActivity(i);if(a instanceof PlayerActivity)a.finish();
  }
  static Intent streamIntent(Activity a,String id,JSONObject option){

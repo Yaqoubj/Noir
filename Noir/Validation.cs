@@ -10,6 +10,7 @@ public partial class MainWindow
 {
     async Task ValidatePlayback()
     {
+        if(Environment.GetCommandLineArgs().Contains("--polish-only")){await ValidatePolish();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--stream-subtitles-only")){await ValidateStreamingSubtitles();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--history-tracker-only")){await ValidateHistoryTracker();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--tracker-mode-only")){await ValidateTrackerMode();Close();return;}

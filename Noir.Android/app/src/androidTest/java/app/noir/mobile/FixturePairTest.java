@@ -7,6 +7,6 @@ import static org.junit.Assert.*;
 public final class FixturePairTest {
     @Test public void pairsAndSyncsTheFixtureLibrary()throws Exception{
         DataStore data=NoirApp.data;if(!data.paired())data.pair(TestRunner.arguments.getString("pairUri"));else data.sync();
-        assertTrue("Paired",data.paired());assertTrue("Fixture library received",data.items().length()>0);
+        assertTrue("Paired",data.paired());assertTrue("Fixture library received",data.items().length()>0);data.flush();
     }
 }

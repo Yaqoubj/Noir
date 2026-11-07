@@ -34,15 +34,13 @@ public partial class MainWindow
     // The TV-style link: show a code and QR, poll until it's approved at nuvio.tv/link.
     void ConnectNuvio()
     {
-        var body=new StackPanel{Margin=new(28,24,28,24)};
-        var window=new Window{Title="Connect Nuvio · Noir",Owner=this,Width=460,SizeToContent=SizeToContent.Height,WindowStartupLocation=WindowStartupLocation.CenterOwner,Background=Brush("#141416"),Content=body,ResizeMode=ResizeMode.NoResize};
-        body.Children.Add(Text("Connect Nuvio",22,weight:FontWeights.Bold));
+        var window=OpenSheet("Connect Nuvio",null,SheetKind.Dialog,440);var body=new StackPanel();window.Add(body);
         var note=Body("Starting…",13);body.Children.Add(note);
-        var code=Text("",40,"#E4C084",FontWeights.Bold);code.HorizontalAlignment=HorizontalAlignment.Center;code.Margin=new(0,16,0,8);body.Children.Add(code);
-        var picture=new Image{Width=200,Height=200,Margin=new(0,0,0,12)};body.Children.Add(picture);
-        var open=ActionButton("Open nuvio.tv/link",()=>{},true);open.HorizontalAlignment=HorizontalAlignment.Center;open.Visibility=Visibility.Collapsed;body.Children.Add(open);
-        var cancel=new CancellationTokenSource();window.Closed+=(_,_)=>cancel.Cancel();
-        window.Loaded+=async(_,_)=>
+        var code=Text("",34,"#E4C084",FontWeights.Bold);code.HorizontalAlignment=HorizontalAlignment.Center;code.Margin=new(0,12,0,8);code.FlowDirection=FlowDirection.LeftToRight;body.Children.Add(code);
+        var picture=new Image{Width=180,Height=180,Margin=new(0,0,0,6),HorizontalAlignment=HorizontalAlignment.Center};body.Children.Add(picture);
+        var cancel=new CancellationTokenSource();window.Closed+=_=>cancel.Cancel();
+        window.Action("Cancel",()=>window.Close(false));var open=window.Action("Open nuvio.tv/link",()=>{},true);open.Visibility=Visibility.Collapsed;
+        async Task Link()
         {
             using var http=new HttpClient{Timeout=TimeSpan.FromSeconds(20)};
             NuvioSession? session=null;var client=new NuvioClient(http,null,s=>session=s);
@@ -62,13 +60,13 @@ public partial class MainWindow
                     note.Text="Approved. Signing in…";await client.Exchange(link,cancel.Token);break;
                 }
                 if(session==null)throw new IOException("The code expired. Close this window and try again.");
-                NuvioStorage.Save(store.DataDirectory,session);window.Close();
+                NuvioStorage.Save(store.DataDirectory,session);window.Close(true);
                 await PickNuvioProfile(session);
             }
             catch(OperationCanceledException){}
             catch(Exception e){store.Log(e);note.Text=e is IOException?e.Message:"Nuvio couldn't be reached. Check your connection and try again.";code.Text="";picture.Source=null;}
-        };
-        window.Show();
+        }
+        _=Link();
     }
     async Task PickNuvioProfile(NuvioSession session)
     {

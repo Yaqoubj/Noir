@@ -41,20 +41,20 @@ public partial class MainWindow
         var actions=new WrapPanel();info.Children.Add(actions);void Add(string text,string name,Action action,bool primary=false){var b=ActionButton(text,()=>{CloseHoverCard();action();},primary);b.Padding=new(10,7,10,7);b.FontSize=12;b.Margin=new(0,0,6,6);System.Windows.Automation.AutomationProperties.SetName(b,name);actions.Children.Add(b);}
         Add("▶ "+T(store.GetProgress(next) is {Completed:false,Position:>0}?"Resume":"Play"),T("Play")+" "+item.Title,()=>{if(CanPlay(next))_=PlayVideo(next);else OpenDetails(group);},true);var listed=store.State.Watchlist.Contains(item.GroupKey);Add((listed?"✓ ":"＋ ")+T("My List"),T("My List")+" "+item.Title,()=>ToggleWatchlist(item));var seen=store.EverWatched(next);Add(T("✓ Watched","✓ تمت المشاهدة"),T("Watched")+" "+next.Title,()=>{if(seen)SmartWatchedClick(next);else SmartCheckOff(next,next.Label+" watched");});Add("ⓘ "+T("Details"),T("Details")+" "+item.Title,()=>OpenDetails(group));
         var progress=store.GetProgress(next);var total=progress?.Duration??next.Duration;var watched=group.Count(store.EverWatched);var bar=new ProgressBar{Height=4,Maximum=total>0?total:Math.Max(1,group.Count),Value=total>0?progress?.Position??0:watched,Foreground=Brush("#E4C084"),Background=Brush("#2A2A30"),BorderThickness=new(0),Margin=new(0,8,0,0)};info.Children.Add(bar);
-        var border=new Border{Width=width,Background=Brush("#18181B"),BorderBrush=Brush("#88E4C084"),BorderThickness=new(1),CornerRadius=new(12),ClipToBounds=true,Child=body,Focusable=true};System.Windows.Automation.AutomationProperties.SetName(border,T("Title preview","معاينة العنوان")+" "+item.Title);
+        var border=new Border{Width=width,Background=Brush("#141416"),BorderBrush=Brush("#33FFFFFF"),BorderThickness=new(1),CornerRadius=new(14),ClipToBounds=true,Child=body,Focusable=true};System.Windows.Automation.AutomationProperties.SetName(border,T("Title preview","معاينة العنوان")+" "+item.Title);
         hoverOwner=owner;hoverCard=new Popup{Child=border,PlacementTarget=anchor,Placement=PlacementMode.Center,AllowsTransparency=true,StaysOpen=false,IsOpen=true};var active=hoverCard;border.MouseLeave+=(_,_)=>{if(!owner.IsMouseOver&&!border.IsKeyboardFocusWithin&&hoverCard==active)CloseHoverCard();};border.IsKeyboardFocusWithinChanged+=(_,_)=>{if(!border.IsKeyboardFocusWithin&&!border.IsMouseOver&&!owner.IsMouseOver&&hoverCard==active)CloseHoverCard();};active.Closed+=(_,_)=>{if(hoverCard==active){hoverCard=null;hoverOwner=null;}};Motion.FadeIn(border);Motion.Pop(border);if(owner.IsKeyboardFocusWithin&&!owner.IsMouseOver)actions.Children.OfType<Button>().FirstOrDefault()?.Focus();
     }
     // A titled horizontal row with arrow buttons, Shift+wheel scrolling and an optional "See all".
     FrameworkElement Rail(string title,string subtitle,IEnumerable<FrameworkElement> cards,Action? seeAll=null,string seeAllLabel="See all")
     {
-        var container=new StackPanel{Margin=new(0,8,0,4)};var header=new DockPanel{Margin=new(0,22,0,14)};
+        var container=new StackPanel{Margin=new(0,8,0,4)};var header=new DockPanel{Margin=Density.RailHeadingMargin};
         var arrows=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Bottom};DockPanel.SetDock(arrows,Dock.Right);header.Children.Add(arrows);
-        var heading=new StackPanel();heading.Children.Add(Text(T(title),21,weight:FontWeights.SemiBold));if(subtitle.Length>0){var s=Body(subtitle,12);s.Margin=new(0,3,0,0);heading.Children.Add(s);}header.Children.Add(heading);
+        var heading=new StackPanel();heading.Children.Add(Text(T(title),Density.SectionTitle,weight:FontWeights.SemiBold));if(subtitle.Length>0){var s=Body(subtitle,Density.SectionSubtitle);s.Margin=new(0,3,0,0);heading.Children.Add(s);}header.Children.Add(heading);
         var row=new StackPanel{Orientation=Orientation.Horizontal};foreach(var card in cards){row.Children.Add(card);if(page=="Home"&&detailKey==null)WireHomeRailCard(card);}
         if(row.Children.Count==0) return container;
         if(seeAll!=null)
         {
-            var tile=ActionButton(T("See all ›","عرض الكل ›"),seeAll);tile.Tag="HomeSeeAllTile";tile.Width=156;tile.MinHeight=76;tile.VerticalAlignment=VerticalAlignment.Stretch;tile.Margin=new(0,0,18,8);tile.Background=Brush("#161618");tile.Foreground=Brush("#E4C084");tile.Template=TileTemplate();System.Windows.Automation.AutomationProperties.SetName(tile,T("See all {0}","عرض كل {0}",T(title)));row.Children.Add(tile);
+            var tile=ActionButton(T("See all ›","عرض الكل ›"),seeAll);tile.Tag="HomeSeeAllTile";tile.Width=Density.Pick(132,156);tile.MinHeight=76;tile.VerticalAlignment=VerticalAlignment.Stretch;tile.Margin=new(0,0,Density.CardGap,8);tile.Background=Brush("#161618");tile.Foreground=Brush("#E4C084");tile.Template=TileTemplate();System.Windows.Automation.AutomationProperties.SetName(tile,T("See all {0}","عرض كل {0}",T(title)));row.Children.Add(tile);
             row.Loaded+=(_,_)=>{tile.Height=Math.Max(76,row.Children.OfType<FrameworkElement>().Where(c=>c!=tile).Max(c=>c.ActualHeight));};
         }
         var scroll=new ScrollViewer{Content=row,HorizontalScrollBarVisibility=ScrollBarVisibility.Hidden,VerticalScrollBarVisibility=ScrollBarVisibility.Disabled,PanningMode=PanningMode.HorizontalOnly,Padding=new(0,6,0,6),Margin=new(-6,-6,-6,0)};
@@ -62,7 +62,7 @@ public partial class MainWindow
         Button Arrow(string glyph,string tip,int direction)
         {
             var b=ActionButton(glyph,()=>scroll.ScrollToHorizontalOffset(Math.Clamp(scroll.HorizontalOffset+direction*Math.Max(300,scroll.ViewportWidth*.8),0,scroll.ScrollableWidth)));
-            b.ToolTip=T(tip);System.Windows.Automation.AutomationProperties.SetName(b,T(tip)+" "+T(title));b.FontSize=20;b.Width=38;b.Height=34;b.Padding=new(0);b.Margin=new(8,0,0,0);b.Background=Brush("#1C1C1F");return b;
+            b.ToolTip=T(tip);System.Windows.Automation.AutomationProperties.SetName(b,T(tip)+" "+T(title));b.FontSize=20;b.Width=Density.Pick(32,38);b.Height=Density.Pick(30,34);b.Padding=new(0);b.Margin=new(8,0,0,0);b.Background=Brush("#1C1C1F");return b;
         }
         if(seeAll!=null){var all=ActionButton(seeAllLabel,seeAll);System.Windows.Automation.AutomationProperties.SetName(all,T("See all {0}","عرض كل {0}",T(title)));all.Padding=new(14,7,14,7);all.Background=Brush("Transparent");all.Foreground=Brush("#E4C084");arrows.Children.Add(all);}
         var previous=Arrow("‹","Previous",-1);var next=Arrow("›","More",1);arrows.Children.Add(previous);arrows.Children.Add(next);
@@ -114,16 +114,16 @@ public partial class MainWindow
     }
     FrameworkElement PosterCard(List<VideoItem> group)
     {
-        var item=group[0];var panel=new StackPanel{Width=176,Margin=new(0,0,18,8)};
-        var picture=new Grid{Height=264,ClipToBounds=true};
-        var poster=ActionButton("",()=>OpenDetails(group));poster.Content=Art(item.Poster,item.Title,264,true);poster.Padding=new(0);poster.HorizontalAlignment=HorizontalAlignment.Stretch;
+        var item=group[0];var panel=new StackPanel{Width=Density.PosterWidth,Margin=new(0,0,Density.CardGap,8)};
+        var picture=new Grid{Height=Density.PosterHeight,ClipToBounds=true};
+        var poster=ActionButton("",()=>OpenDetails(group));poster.Content=Art(item.Poster,item.Title,Density.PosterHeight,true);poster.Padding=new(0);poster.HorizontalAlignment=HorizontalAlignment.Stretch;
         poster.ToolTip=item.Title+" · Details & episodes";System.Windows.Automation.AutomationProperties.SetName(poster,item.Title+" details");picture.Children.Add(poster);
         var watched=group.Count(i=>(item.IsMovie||i.Season>0)&&store.EverWatched(i));var total=group.Count(i=>item.IsMovie||i.Season>0);
         if(watched>0&&!item.IsMovie)picture.Children.Add(new ProgressBar{Value=watched,Maximum=Math.Max(1,total),Height=4,VerticalAlignment=VerticalAlignment.Bottom,IsHitTestVisible=false,Background=Brush("#99000000")});
         if(item.IsMovie&&store.EverWatched(item))picture.Children.Add(new Border{IsHitTestVisible=false,Background=Brush("#E6101012"),CornerRadius=new(6),Padding=new(7,3,7,3),Margin=new(8),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Bottom,Child=Text("✓ Watched",10,"#E4C084",FontWeights.SemiBold)});
         var quick=PosterQuickActions(group);picture.Children.Add(quick);RevealOnFocus(panel,quick);picture.Children.Add(CardMenu(item));AddStatusPill(picture,item);
         var edge=new Border{CornerRadius=new(10),ClipToBounds=true,Child=picture,BorderThickness=new(1.5),BorderBrush=Brush("#00000000")};panel.Children.Add(edge);
-        var name=Text(item.Title,14,weight:FontWeights.SemiBold);name.Margin=new(0,9,0,2);name.TextTrimming=TextTrimming.CharacterEllipsis;name.TextWrapping=TextWrapping.NoWrap;panel.Children.Add(name);
+        var name=Text(item.Title,Density.CardTitle,weight:FontWeights.SemiBold);name.Margin=new(0,9,0,2);name.TextTrimming=TextTrimming.CharacterEllipsis;name.TextWrapping=TextWrapping.NoWrap;panel.Children.Add(name);
         var meta=item.IsMovie?(item.Year>0?item.Year.ToString():"Movie"):(watched>0?$"{watched} / {total} watched":$"{total} episodes");
         if(!group.Any(CanPlay))meta+=" · Not on PC";
         var line=Text(meta,11,"#9F9A93");line.TextTrimming=TextTrimming.CharacterEllipsis;line.TextWrapping=TextWrapping.NoWrap;panel.Children.Add(line);
@@ -156,10 +156,10 @@ public partial class MainWindow
     }
     FrameworkElement LatestCard(VideoItem item,DateTimeOffset at)
     {
-        var panel=new StackPanel{Width=300,Margin=new(0,0,18,8)};
-        var picture=new Grid{Height=168,ClipToBounds=true};
+        var panel=new StackPanel{Width=Density.LatestWidth,Margin=new(0,0,Density.CardGap,8)};
+        var picture=new Grid{Height=Density.LatestHeight,ClipToBounds=true};
         var spoilerFree=!store.State.HideSpoilers||store.EverWatched(item);
-        picture.Children.Add(Art(spoilerFree&&System.IO.File.Exists(item.EpisodeImage)?item.EpisodeImage:System.IO.File.Exists(item.Backdrop)?item.Backdrop:item.Poster,item.Title,168));
+        picture.Children.Add(Art(spoilerFree&&System.IO.File.Exists(item.EpisodeImage)?item.EpisodeImage:System.IO.File.Exists(item.Backdrop)?item.Backdrop:item.Poster,item.Title,Density.LatestHeight));
         var shade=new LinearGradientBrush{StartPoint=new(0,0),EndPoint=new(0,1)};shade.GradientStops.Add(new(Color.FromArgb(0,0,0,0),.35));shade.GradientStops.Add(new(Color.FromArgb(235,10,10,12),1));
         picture.Children.Add(new Border{Background=shade,IsHitTestVisible=false});
         var caption=new StackPanel{VerticalAlignment=VerticalAlignment.Bottom,Margin=new(14,0,14,12),IsHitTestVisible=false};

@@ -391,6 +391,7 @@ public partial class MainWindow
         var native=player;current=null;pendingTarget=null;ended=false;HidePlayerHint(null,EventArgs.Empty);CloseShortcutSheet();
         if(fullscreen) ToggleFullscreen();
         hideTimer?.Stop();if(trackMenu!=null) trackMenu.IsOpen=false;
+        foreach(var s in OpenSheets.Where(s=>s.Overlay.Parent==PlayerOverlay).ToList())s.Close(false);
         PlayerOverlay.Visibility=Visibility.Collapsed;
         PlayerHeader.Visibility=PlayerFooter.Visibility=PlayerMessage.Visibility=SkipIntro.Visibility=Visibility.Collapsed;
         Cursor=Cursors.Arrow;PlayerOverlay.Cursor=Cursors.Arrow;
@@ -562,6 +563,8 @@ public partial class MainWindow
     }
     void Window_KeyDown(object sender,KeyEventArgs e)
     {
+        // An open sheet owns the keyboard: Esc closes it (running its cancel/cleanup), other keys go to its controls, never to shortcuts.
+        if(OpenSheets.Count>0&&e.Key is not (Key.F1 or Key.OemQuestion)){if(e.Key==Key.Escape){OpenSheets[^1].Close(false);e.Handled=true;}return;}
         if(PlayerRoot.Visibility!=Visibility.Visible){LibraryKeyDown(e);return;}
         stillWatching.UserInput();
         ShowControls();

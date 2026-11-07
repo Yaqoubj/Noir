@@ -44,10 +44,10 @@ final class PhoneSmart {
  void updateCompletion(JSONObject focus){if(focus.optBoolean("movie"))return;List<JSONObject> released=released(focus);boolean all=!released.isEmpty(),season=true;for(JSONObject i:released){boolean watched=DataStore.watched(i);if(!watched)all=false;if(i.optInt("season")==focus.optInt("season")&&!watched)season=false;}if(season)a.toast(Loc.t("Season complete"));JSONObject states=a.browsingSettings().optJSONObject("showStates");if(all&&states!=null&&"Ended".equals(states.optString(focus.optString("group")))){JSONObject op=a.data.operation(focus.optString("id"),"status");DataStore.put(op,"status","Finished");a.data.queue(op);a.data.syncSoon();}}
 
  void askWhen(List<JSONObject> items,String question,java.util.function.BiConsumer<String,Long> chosen){
-  new AlertDialog.Builder(a).setTitle(question).setItems(WHEN,(d,n)->{
+  NoirSheet s=new NoirSheet(a,question,null);String[] icons={"◷","📺","▦","~","↔","?"};for(int k=0;k<WHEN.length;k++){final int n=k;s.action(icons[k],WHEN[k],null,()->{
    if(n==3){year("Around which year?",1950,y->chosen.accept("Around a year",LocalDate.of(y,7,1).toEpochDay()));return;}
    if(n==4){year("From which year?",1950,from->year("Until which year?",from,to->chosen.accept("Over a period:"+from+"-"+to,0L)));return;}
-   if(n==2){LocalDate today=LocalDate.now();DatePickerDialog p=new DatePickerDialog(a,(v,y,m,day)->chosen.accept("Pick a date",LocalDate.of(y,m+1,day).toEpochDay()),today.getYear(),today.getMonthValue()-1,today.getDayOfMonth());p.getDatePicker().setMaxDate(System.currentTimeMillis());p.show();}else chosen.accept(WHEN[n],0L);}).setNegativeButton("Cancel",(d,w)->a.renderKeep()).setOnCancelListener(d->a.renderKeep()).show();
+   if(n==2){LocalDate today=LocalDate.now();DatePickerDialog p=new DatePickerDialog(a,(v,y,m,day)->chosen.accept("Pick a date",LocalDate.of(y,m+1,day).toEpochDay()),today.getYear(),today.getMonthValue()-1,today.getDayOfMonth());p.getDatePicker().setMaxDate(System.currentTimeMillis());p.show();}else chosen.accept(WHEN[n],0L);});}s.footer(null,null,"Cancel",a::renderKeep);s.dialog.setOnCancelListener(d->a.renderKeep());s.show();
  }
  void year(String title,int earliest,java.util.function.IntConsumer chosen){int now=LocalDate.now().getYear();String[] years=new String[now-Math.max(1950,earliest)+1];for(int n=0;n<years.length;n++)years[n]=String.valueOf(now-n);new AlertDialog.Builder(a).setTitle(title).setItems(years,(d,n)->chosen.accept(now-n)).show();}
  // One episode tapped: ask about unwatched earlier episodes, like TV Time.

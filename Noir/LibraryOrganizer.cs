@@ -95,6 +95,7 @@ public sealed partial class LibraryStore
     }
     public int Organize(OrganizationPlan plan,bool undo=false)
     {
+        var moved=new List<(string From,string To)>();try{
         lock(gate)
         {
             if(!undo&&File.Exists(OrganizerJournal))
@@ -113,10 +114,10 @@ public sealed partial class LibraryStore
                 Directory.CreateDirectory(Path.GetDirectoryName(to)!);
                 File.Move(from,to);
                 move.Done=!undo;WriteJournal(plan);
-                if(move.Video) {Relocate(move.ItemId,from,to);Save();count++;}
+                if(move.Video) {Relocate(move.ItemId,from,to);Save();moved.Add((from,to));count++;}
             }
             return count;
-        }
+        }}finally{foreach(var move in moved)DownloadFileMoved?.Invoke(move.From,move.To);}
     }
     public OrganizationPlan? LastOrganization() => File.Exists(OrganizerJournal)?JsonSerializer.Deserialize<OrganizationPlan>(File.ReadAllText(OrganizerJournal),JsonOptions):null;
     void RecoverOrganization()
