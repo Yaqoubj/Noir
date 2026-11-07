@@ -6,7 +6,7 @@ Settle into a film, pick up a series, or remember something you watched somewher
 Noir brings your player, movie and TV library, and watch diary together on Windows
 and Android phones, with a Google TV / Android TV app for the sofa.
 
-[**Download Noir**](https://github.com/Yaqoubj/Noir/releases/latest) · Windows 0.17.0 · Android 0.9.0 · free and open source
+[**Download Noir**](https://github.com/Yaqoubj/Noir/releases/latest) · Windows 0.17.0 · Android 0.10.0 · free and open source
 
 ![Noir Home, with cinematic artwork and Continue Watching](docs/screenshots/home.jpg)
 
