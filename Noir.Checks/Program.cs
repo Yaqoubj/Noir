@@ -12,6 +12,10 @@ var special=new VideoItem { Path="special.mkv",Title="Test",Season=0,Episode=1,D
 var all=episodes.Append(special).ToList();
 var results=new List<string>();
 void Check(bool condition,string label) { if(!condition) throw new Exception("FAIL: "+label);results.Add("PASS: "+label);Console.WriteLine(results[^1]); }
+if(Environment.GetEnvironmentVariable("NOIR_PLAYING_SYNC_VIDEO") is {Length:>0} playingVideo){await EmbeddedSubtitleChecks.RunPlaying(Check,playingVideo,Environment.GetEnvironmentVariable("NOIR_PLAYING_SYNC_SUB")??"",Environment.GetEnvironmentVariable("NOIR_SUBTITLE_TOOLS")??"");return;}
+if(args.Contains("--subtitle-providers")){await SubtitleAddonChecks.Run(Path.Combine(Directory.GetCurrentDirectory(),"work","subtitle-round","bpc"),Check);await SubtitleProviderChecks.Run(root,Check);Console.WriteLine("SUBTITLE CHECKS PASSED");return;}
+if(Environment.GetEnvironmentVariable("NOIR_STREAM_SYNC_VIDEO") is {Length:>0} realVideo){await StreamSamplingChecks.RunReal(Check,realVideo,Environment.GetEnvironmentVariable("NOIR_STREAM_SYNC_SUB")??"",double.Parse(Environment.GetEnvironmentVariable("NOIR_STREAM_SYNC_DURATION")??"0",System.Globalization.CultureInfo.InvariantCulture),Environment.GetEnvironmentVariable("NOIR_SUBTITLE_TOOLS")??"");return;}
+if(args.Contains("--stream-sampling")){await StreamSamplingChecks.Run(root,Check);Console.WriteLine("STREAM SAMPLING CHECKS PASSED");return;}
 await BackendAuditChecks.Run(root,Check);
 TasteCodeChecks.Run(Check);
 Check(MobileSyncServer.CheckCode("ab12cd34ef567890"+new string('0',48))=="AB12 CD34 EF56","TV pairing check code is the first 12 fingerprint digits in groups of four");
@@ -26,7 +30,9 @@ EmbeddedSubtitleChecks.Run(Check);
 if(Environment.GetEnvironmentVariable("NOIR_EMBEDDED_SYNC_CLIPS") is {Length:>0} clips)await EmbeddedSubtitleChecks.RunMedia(Check,clips,Environment.GetEnvironmentVariable("NOIR_SUBTITLE_TOOLS")??"");
 StreamChecks.Run(Check);
 await StreamingSubtitleChecks.Run(root,Check);
+await StreamSamplingChecks.Run(root,Check);
 await SubtitleAddonChecks.Run(root,Check);
+await SubtitleProviderChecks.Run(root,Check);
 await DetailChecks.Run(root,Check);
 SmartHistoryChecks.Run(root,Check);
 HistoryRewardsChecks.Run(Check);

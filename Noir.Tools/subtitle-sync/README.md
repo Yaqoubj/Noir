@@ -135,3 +135,56 @@ All requirements were already installed. The build script now writes its generat
 spec to `work/subtitle-pyinstaller` alongside the other build intermediates.
 The final binary is `work/subtitle-runtime/NoirSubtitleSync.exe`.
 
+## Sampled alignment (for streams)
+
+`sampled.py` aligns subtitles from a handful of short audio samples instead of
+the whole film. `plan_windows(duration)` places 8 windows for films (>=60 min)
+and 6 otherwise, skipping `max(90 s, 5%)` at each end, each
+`clamp(12% of duration / count, 60, 150)` s long, within `max(15%, 360 s)` in
+total. Under 12 minutes it abstains. When the first samples find too little
+speech or poor coverage, `plan_extra_windows(duration)` adds the midpoints.
+
+`speech_masks(pcm_chunks)` runs WebRTC VAD (aggressiveness 3, 16 kHz, 10 ms
+frames) with one detector across all samples: two adaptation passes, then a
+deciding pass. WebRTC adapts over minutes, so a cold start on a short sample
+marks most of it as speech. Adapting on the samples themselves costs no data.
+
+`align_samples(samples, cues)` takes `(start_s, 100 Hz mask)` pairs. Unheard
+time has no value at all; it is never treated as silence. For each standard
+FPS seed it computes, per sample, the phi correlation between heard speech and
+clipped cue activity at every shift in +/-30 s (10 ms steps), and pools them
+over the samples. Pooling is the point: real samples are often too noisy to
+have a peak of their own, yet still vote for the true offset.
+
+Acceptance, each with its own `reason`:
+
+- Pooled peak z-score >= 4.5, and rivals more than 1 s away <= 85% of the peak.
+- At least `max(4, 75%)` of the usable samples agree (positive score at the
+  model and ranked in the top 20% of that sample's own shifts), spanning >= 70%
+  of the cue timeline.
+- A clean local peak that is inside the agreement yet off by > .35 s rejects
+  the model (`unstable`); a clear disagreeing sample means a different cut
+  (`conflicting-sample`). Leaving out any sample may not move the peak > .35 s.
+- Only one global offset and scale. No piecewise repair.
+- Heard-audio F1 gain >= .08, precision gain >= .03, final precision >= .30,
+  recall >= .50, no usable sample losing > .02 F1.
+- Finite, non-negative, ordered cues, never clipped. Identity models report
+  `already-aligned`.
+
+Worker modes: `NoirSubtitleSync.exe --plan <duration_s>` prints the windows and extra windows as JSON.
+`NoirSubtitleSync.exe --sampled <job.json> <subtitle> <output>` reads samples listed as `{"samples":[{"start":s,"pcm":"path"}],"duration":d}` (16 kHz mono s16le) and prints the same one-line JSON result as the normal form, plus `reason`. Noir supplies the audio; no link reaches the tool.
+
+Android runs the same logic on the device: `SampledAlignment.java`, `WebRtcVad.java` (bit-exact against the Python package on full films). LibVLC starts a sample at the keyframe before the requested time, so the extra audio is trimmed off the front.
+
+Rejections return an unchanged cue copy, offset 0, scale 1, method `none` and a
+reason. Sparse sampling can't see a cut that falls entirely between samples.
+
+From this directory:
+
+```powershell
+& ..\..\work\subtitle-build\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"
+& ..\..\work\subtitle-build\Scripts\python.exe tests/make_sampled_vectors.py
+& ..\..\work\subtitle-build\Scripts\python.exe sampled_eval.py "<video>" "<subtitle>" --perturb "7.5,1" --out ../../work/subtitle-round/a1/example
+```
+
+`tests/fixtures/sampled_vectors.json` is the shared vector set for the Java port.

@@ -36,7 +36,7 @@ public sealed partial class PcDownloads : IDisposable
         if(File.Exists(jobsPath))jobs=JsonSerializer.Deserialize<List<PcDownloadJob>>(File.ReadAllText(jobsPath),Json)??[];
         foreach(var j in jobs.Where(j=>j.Status=="Downloading"||j.Service=="Torrents"&&j.Status is "Preparing" or "Subtitles")){j.Status="Paused";j.Message="Interrupted · resume to continue";}
         this.provider=provider??new DownloadProviders(()=>Config,torrentRuntime:()=>TorrentRuntime);this.transfer=transfer??DownloadSecurity.Client(Timeout.InfiniteTimeSpan);
-        this.subtitles=subtitles??new SubtitleDownloads(store.DataDirectory,source:()=>{var c=Config;return(c.SubtitleAddonUrl,c.SubtitleAddonOnly);});
+        this.subtitles=subtitles??new SubtitleDownloads(store.DataDirectory,source:()=>SubtitleSelection.From(Config));
         Changed+=CaptureTorrentJobs;
         if(start){_=Task.Run(Worker);torrentWorker=Task.Run(TorrentWorker);}
     }
@@ -80,7 +80,16 @@ public sealed partial class PcDownloads : IDisposable
     }
     public void ConfigureSubtitleSource(string link,bool only)
     {
-        var normalized=SubtitleAddon.Normalize(link);lock(gate){credentials.SubtitleAddonUrl=normalized;credentials.SubtitleAddonOnly=only;SaveCredentials();}Changed?.Invoke();
+        ConfigureSubtitleSource(new(link.Trim().Length>0?"addon":"",AddonUrl:link,Only:only));
+    }
+    public void ConfigureSubtitleSource(SubtitleSelection selection,Dictionary<string,string>? keys=null)
+    {
+        var s=selection.Validate();lock(gate){
+            if(credentials.SubtitleSource is "opensubtitles" or "subdl" or "subsource" or "wyzie")credentials.SubtitleSiteKeys[credentials.SubtitleSource]=credentials.SubtitleApiKey;
+            if(keys!=null)foreach(var pair in keys.Where(p=>p.Key is "opensubtitles" or "subdl" or "subsource" or "wyzie"))credentials.SubtitleSiteKeys[pair.Key]=pair.Value;
+            if(s.Source is "opensubtitles" or "subdl" or "subsource" or "wyzie")credentials.SubtitleSiteKeys[s.Source]=s.ApiKey;
+            credentials.SubtitleSource=s.Source;credentials.SubtitleApiKey=s.ApiKey;credentials.SubtitleUsername=s.Username;credentials.SubtitlePassword=s.Password;credentials.SubtitleAddonUrl=s.AddonUrl;credentials.SubtitleAddonAuth=s.AddonAuth;credentials.SubtitleAddonOnly=s.Only;SaveCredentials();
+        }Changed?.Invoke();
     }
     public List<object> PublicJobs() {lock(gate)return jobs.Select(j=>(object)new{id=j.Id,name=j.Name,status=j.Status,message=j.Message,size=j.Size,bytes=j.Bytes,createdAt=j.CreatedAt,subtitleMessage=j.SubtitleMessage,peers=j.Peers,seeds=j.Seeds,health=j.Health,uploaded=j.Uploaded,seedUntil=j.SeedUntil}).ToList();}
     public List<PcDownloadJob> Jobs() {lock(gate){var copy=JsonSerializer.Deserialize<List<PcDownloadJob>>(JsonSerializer.Serialize(jobs))!;for(var i=0;i<copy.Count;i++){copy[i].Speed=jobs[i].Speed;copy[i].EtaSeconds=jobs[i].EtaSeconds;}return copy;}}

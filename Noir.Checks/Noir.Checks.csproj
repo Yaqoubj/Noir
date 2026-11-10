@@ -1,4 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
+ <ItemGroup><Compile Include="../Noir/SubtitleProviders.cs"/><Compile Include="../Noir/SubtitleSelection.cs"/><Compile Include="../Noir/SubtitleTransport.cs"/><Compile Include="../Noir/SubtitleArchive.cs"/><Compile Include="../Noir/StreamSampling.cs"/></ItemGroup>
  <ItemGroup><Compile Include="../Noir/Credits.cs"/><Compile Include="../Noir/Trailers.cs"/><Compile Include="../Noir/PreviewHost.cs"/></ItemGroup>
  <ItemGroup><Compile Include="../Noir/PlaybackPrefs.cs"/></ItemGroup>
  <ItemGroup><Compile Include="../Noir/SeasonPlanner.cs"/><Compile Include="../Noir/EmbeddedSubtitles.cs"/><Compile Include="../Noir/StreamSources.cs"/></ItemGroup>

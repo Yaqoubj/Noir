@@ -32,6 +32,8 @@ public partial class MainWindow
             Activate();
             var dialog=OpenSheet("Share phone download settings",$"Send download settings to {phone}?",SheetKind.Dialog,460);
             dialog.Add(Body("This sends your AIOStreams manifest and download API keys once over the paired encrypted connection. The phone encrypts them locally and can download while this PC is off. This request expires after 2 minutes.",13));
+            var subtitle=SubtitleSelection.From(downloads?.Config??new());
+            if(subtitle.Chosen)dialog.Add(Body(subtitle.Source=="addon"?T("This also shares your subtitle addon link and its authorization."):subtitle.Name+" · "+T("This also shares this subtitle site's API key and optional login."),13));
             dialog.Action("Cancel",()=>dialog.Close(false));
             dialog.Action("Send download settings",()=>{if(!cancellation.IsCancellationRequested)answer.TrySetResult(true);dialog.Close(true);},true);
             dialog.Closed+=_=>answer.TrySetResult(false);

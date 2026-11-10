@@ -26,6 +26,13 @@ public sealed class DownloadCredentials
     public bool AutoSyncSubtitles {get;set;}=true;
     public string SubtitleAddonUrl {get;set;}="";
     public bool SubtitleAddonOnly {get;set;}=true;
+    string subtitleSource="";
+    public string SubtitleSource {get=>subtitleSource.Length==0&&SubtitleAddonUrl.Length>0?"addon":subtitleSource;set=>subtitleSource=value??"";}
+    public string SubtitleApiKey {get;set;}="";
+    public string SubtitleUsername {get;set;}="";
+    public string SubtitlePassword {get;set;}="";
+    public string SubtitleAddonAuth {get;set;}="";
+    public Dictionary<string,string> SubtitleSiteKeys {get;set;}=[];
     public string BrowseQuality {get;set;}="All";
     public string BrowseLanguage {get;set;}="All";
     public bool BrowseReadyOnly {get;set;}

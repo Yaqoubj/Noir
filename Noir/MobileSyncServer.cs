@@ -302,7 +302,8 @@ public sealed class MobileSyncServer : IAsyncDisposable
             if(!approved||timeout.IsCancellationRequested)return(403,null);
             if(!Authorized(token))return(401,null);
             var c=downloads.Config;
-            return(200,new(){SubtitleAddonUrl=c.SubtitleAddonUrl,SubtitleAddonOnly=c.SubtitleAddonOnly,Manifest=c.Manifest,TorBoxKey=c.TorBoxKey.Length>0?c.TorBoxKey:c.Service=="TorBox"?c.Key:"",RealDebridKey=c.RealDebridKey.Length>0?c.RealDebridKey:c.Service=="Real-Debrid"?c.Key:"",PreferredResolution=c.PreferredResolution,Language=c.BrowseLanguage=="All"?"Any":c.BrowseLanguage,MaxEpisodeBytes=c.MaxEpisodeBytes});
+            var subtitles=SubtitleSelection.From(c);
+            return(200,new(){SubtitleSource=subtitles.Source,SubtitleApiKey=subtitles.ApiKey,SubtitleUsername=subtitles.Username,SubtitlePassword=subtitles.Password,SubtitleAddonAuth=subtitles.AddonAuth,SubtitleAddonUrl=c.SubtitleAddonUrl,SubtitleAddonOnly=c.SubtitleAddonOnly,Manifest=c.Manifest,TorBoxKey=c.TorBoxKey.Length>0?c.TorBoxKey:c.Service=="TorBox"?c.Key:"",RealDebridKey=c.RealDebridKey.Length>0?c.RealDebridKey:c.Service=="Real-Debrid"?c.Key:"",PreferredResolution=c.PreferredResolution,Language=c.BrowseLanguage=="All"?"Any":c.BrowseLanguage,MaxEpisodeBytes=c.MaxEpisodeBytes});
         }catch(Exception){return(403,null);}finally{settingsShare.Release();}
     }
     public object DownloadQueue()=>new{configured=downloads?.Configured??false,capabilities=new{deleteFinished=downloads!=null&&confirmDownloadDelete!=null},jobs=downloads?.PublicJobs()??[]};
@@ -390,6 +391,12 @@ public sealed class PhoneDownloadSettingsPayload
 {
     public string SubtitleAddonUrl {get;set;}="";
     public bool SubtitleAddonOnly {get;set;}=true;
+    string subtitleSource="";
+    public string SubtitleSource {get=>subtitleSource.Length==0&&SubtitleAddonUrl.Length>0?"addon":subtitleSource;set=>subtitleSource=value??"";}
+    public string SubtitleApiKey {get;set;}="";
+    public string SubtitleUsername {get;set;}="";
+    public string SubtitlePassword {get;set;}="";
+    public string SubtitleAddonAuth {get;set;}="";
     public string Manifest {get;set;}="";
     public string TorBoxKey {get;set;}="";
     public string RealDebridKey {get;set;}="";

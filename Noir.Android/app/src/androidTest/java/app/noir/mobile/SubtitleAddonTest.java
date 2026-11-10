@@ -32,7 +32,8 @@ public final class SubtitleAddonTest {
   List<String> requests=new ArrayList<>();org.json.JSONObject item=new org.json.JSONObject().put("id","addon-test").put("imdb","tt123").put("movie",true);
   SubtitleClient client=new SubtitleClient(data,item,(url,limit)->{requests.add(url);boolean custom=url.startsWith(base);return ("{\"subtitles\":[{\"id\":\""+(custom?"custom":"default")+"\",\"lang\":\"English\",\"url\":\"https://subs.example/shared\"},{\"id\":\"unique\",\"lang\":\"en\",\"url\":\"https://subs.example/"+(custom?"custom":"default")+"\"}]}").getBytes(StandardCharsets.UTF_8);});client.identityRead=true;
   List<org.json.JSONObject> found=client.search("en");assertEquals(1,requests.size());assertTrue(requests.get(0).startsWith(base+"/"));assertEquals("custom",found.get(0).optString("id"));
-  config.put("subtitleAddonOnly",false);storage.save(config);requests.clear();found=client.search("en");assertEquals(2,requests.size());assertTrue(requests.get(0).startsWith(base+"/"));assertTrue(requests.get(1).startsWith(SubtitleClient.DEFAULT_SOURCE+"/"));assertEquals(3,found.size());assertEquals("custom",found.get(0).optString("id"));
+  config.put("subtitleAddonOnly",false);storage.save(config);requests.clear();found=client.search("en");assertEquals("The default is only asked for what the chosen source lacks",1,requests.size());assertTrue(requests.get(0).startsWith(base+"/"));assertEquals(2,found.size());assertEquals("custom",found.get(0).optString("id"));
+  requests.clear();try{client.search("ar");fail("Neither source has Arabic");}catch(IOException expected){assertEquals(2,requests.size());assertTrue(requests.get(0).startsWith(base+"/"));assertTrue(requests.get(1).startsWith(SubtitleClient.DEFAULT_SOURCE+"/"));}
   storage.save(new org.json.JSONObject());requests.clear();client.search("en");assertEquals(1,requests.size());assertTrue(requests.get(0).startsWith(SubtitleClient.DEFAULT_SOURCE+"/"));
  }
 

@@ -40,6 +40,15 @@ public partial class MainWindow
             await Wait(()=>attachedStreamSubtitles.Count==2&&player!.Spu>=0,"Cached streaming subtitles attach and select a track");
             var menu=BuildSubtitleMenu();Check(menu.Items.OfType<MenuItem>().Any(m=>m.Header?.ToString()=="Use saved Arabic subtitles"),"Saved language choices appear in the streaming subtitle menu");
             Check(!menu.Items.OfType<MenuItem>().Any(m=>m.Header?.ToString()=="Auto-sync subtitle timing…"),"Streaming menu excludes unavailable local timing analysis");
+            static IEnumerable<MenuItem> AllItems(ItemsControl parent)=>parent.Items.OfType<MenuItem>().SelectMany(m=>AllItems(m).Prepend(m));
+            Check(!AllItems(menu).Any(m=>m.Header?.ToString()=="Auto-sync needs a downloaded video"),"Streaming Timing menu no longer says auto-sync needs a downloaded video");
+            var sync=AllItems(menu).FirstOrDefault(m=>m.Header?.ToString()=="Auto-sync to the audio…");
+            Check(sync!=null&&sync.IsEnabled,"Streaming Timing menu offers Auto-sync to the audio, the same item as downloaded videos");
+            sync!.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));await Task.Delay(300);
+            var syncSheet=FindSheet("Auto-sync to the audio");
+            Check(syncSheet!=null&&syncSheet.FooterButtons.Children.OfType<Button>().Select(b=>b.Content?.ToString()).SequenceEqual(["Cancel","Start"]),"Stream Auto-sync opens a sheet with Cancel and Start, without reading any media yet");
+            syncSheet!.FooterButtons.Children.OfType<Button>().First().RaiseEvent(new RoutedEventArgs(Button.ClickEvent));await Task.Delay(300);
+            Check(FindSheet("Auto-sync to the audio")==null&&attachedStreamSubtitles.Count==2,"Cancel closes the stream Auto-sync sheet and leaves the subtitles as they were");
             var arabic=menu.Items.OfType<MenuItem>().Single(m=>m.Header?.ToString()=="Use saved Arabic subtitles");arabic.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));await Task.Delay(500);
             Check(Preference(item).SubtitleTrack=="Arabic"&&player!.Spu>=0,"Selecting saved Arabic updates playback and preference");
             AdjustSubtitleDelay(.5);Check(player!.SpuDelay==500000,"Timing adjustment applies during HTTP streaming");

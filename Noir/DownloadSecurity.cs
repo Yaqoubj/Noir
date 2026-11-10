@@ -45,7 +45,8 @@ public static class DownloadSecurity
     public static string SafeText(string value,DownloadCredentials config,IEnumerable<string>? secrets=null)
     {
         value=Regex.Replace(value,@"(?i)https?://[^\s\]<>""']+","[link]");
-        foreach(var secret in new[]{config.Key,config.TorBoxKey,config.RealDebridKey,config.Manifest,config.OriginalManifest,config.SubtitleAddonUrl}.Concat(config.Servers.Select(s=>s.Token)).Concat(secrets??[]).Where(s=>s.Length>0).OrderByDescending(s=>s.Length))value=value.Replace(secret,"[private]",StringComparison.Ordinal);
+        var auth=config.SubtitleAddonAuth;var subtitleSecrets=new[]{config.SubtitleApiKey,config.SubtitlePassword,auth,auth.Contains(' ')?auth[(auth.IndexOf(' ')+1)..]:""}.Concat(config.SubtitleSiteKeys.Values).SelectMany(s=>new[]{s,Uri.EscapeDataString(s)});
+        foreach(var secret in new[]{config.Key,config.TorBoxKey,config.RealDebridKey,config.Manifest,config.OriginalManifest,config.SubtitleAddonUrl}.Concat(subtitleSecrets).Concat(config.Servers.Select(s=>s.Token)).Concat(secrets??[]).Where(s=>s.Length>0).OrderByDescending(s=>s.Length))value=value.Replace(secret,"[private]",StringComparison.Ordinal);
         return value[..Math.Min(1500,value.Length)];
     }
     public static HttpClient Client(TimeSpan timeout)=>new(new HttpClientHandler{AllowAutoRedirect=false}){Timeout=timeout};

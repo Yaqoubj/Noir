@@ -19,6 +19,34 @@ static class EmbeddedSubtitleChecks
         check(tracks.SequenceEqual([(2,"en",".srt"),(3,"ar",".ass")]),"Built-in timing checks pick the first full text track per language and count only subtitle streams");
         check(SubtitleDownloads.SyncedCopy(@"C:\TV\Show S01E01.mkv","en",".srt")==@"C:\TV\Show S01E01.synced.en.srt"&&SubtitleDownloads.SidecarLanguage("Show S01E01.synced.ar.ass")=="ar","Corrected built-in copies sit beside the video with their language");
         check(SubtitleDownloads.IsSyncedCopy("Show.synced.en")&&!SubtitleDownloads.IsSyncedCopy("Show.en")&&!SubtitleDownloads.IsSyncedCopy("Synced.Show.en"),"Only corrected copies count as synced");
+        var folder=Path.Combine(Path.GetTempPath(),"noir-replace-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(folder);
+        try{
+            var subtitle=Path.Combine(folder,"a.en.srt");var corrected=Path.Combine(folder,"a.fixed.srt");File.WriteAllText(subtitle,"a much longer original subtitle body");File.WriteAllText(corrected,"corrected");
+            using(new FileStream(subtitle,FileMode.Open,FileAccess.Read,FileShare.ReadWrite))SubtitleDownloads.ReplaceSubtitle(corrected,subtitle);
+            check(File.ReadAllText(subtitle)=="corrected"&&!File.Exists(corrected),"A corrected subtitle replaces one the player has open, leaving no temp file or old tail");
+            File.WriteAllText(corrected,"second");SubtitleDownloads.ReplaceSubtitle(corrected,subtitle);check(File.ReadAllText(subtitle)=="second"&&!File.Exists(corrected),"A corrected subtitle replaces a closed file");
+            File.WriteAllText(corrected,"third");File.SetAttributes(subtitle,FileAttributes.ReadOnly);var refused=false;try{SubtitleDownloads.ReplaceSubtitle(corrected,subtitle);}catch(UnauthorizedAccessException){refused=true;}File.SetAttributes(subtitle,FileAttributes.Normal);check(refused&&File.ReadAllText(subtitle)=="second","A read-only subtitle stays intact and reports the refusal");
+        }finally{Directory.Delete(folder,true);}
+    }
+    // Real-media check, run on demand: Auto-sync while VLC is playing the video with that subtitle loaded. Only a copy of the subtitle is ever written.
+    public static async Task RunPlaying(Action<bool,string> check,string video,string subtitle,string tools)
+    {
+        var previous=SubtitleDownloads.ToolRoot;SubtitleDownloads.ToolRoot=tools;
+        var folder=Path.Combine(Directory.GetCurrentDirectory(),"work","downloads-round","sync-repro",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(folder);
+        try{
+            var copy=Path.Combine(folder,Path.GetFileName(subtitle));File.Copy(subtitle,copy);var before=File.ReadAllBytes(copy);
+            LibVLCSharp.Shared.Core.Initialize();using var vlc=new LibVLCSharp.Shared.LibVLC("--quiet","--vout=dummy","--aout=dummy","--avcodec-hw=none");using var player=new LibVLCSharp.Shared.MediaPlayer(vlc);
+            using var media=new LibVLCSharp.Shared.Media(vlc,new Uri(video));player.Play(media);
+            for(var n=0;n<100&&!player.IsPlaying;n++)await Task.Delay(100);
+            player.AddSlave(LibVLCSharp.Shared.MediaSlaveType.Subtitle,new Uri(copy).AbsoluteUri,true);
+            for(var n=0;n<100&&player.SpuDescription.Count(t=>t.Id>=0)<1;n++)await Task.Delay(100);
+            check(player.SpuDescription.Any(t=>t.Id>=0),"VLC has the subtitle loaded while the video plays");
+            var engine=new SubtitleDownloads(Path.Combine(folder,"profile"));string outcome;
+            try{outcome=await engine.Sync(video,copy,CancellationToken.None);}catch(Exception e){outcome="THREW "+e.GetType().Name+": "+e.Message;}
+            Console.WriteLine("OUTCOME: "+outcome);
+            var after=File.ReadAllBytes(copy);player.Stop();
+            check(outcome.StartsWith("auto-synced",StringComparison.Ordinal)&&!after.SequenceEqual(before)&&SubtitleDownloads.ValidText(System.Text.Encoding.UTF8.GetString(after),".srt"),"Auto-sync corrects a subtitle that VLC has open during playback · "+outcome);
+        }finally{SubtitleDownloads.ToolRoot=previous;try{Directory.Delete(folder,true);}catch(IOException){}catch(UnauthorizedAccessException){}}
     }
     // Real-media check, run on demand: NOIR_EMBEDDED_SYNC_CLIPS=<folder with good.mkv and late.mkv (English track 3 s late)>, NOIR_SUBTITLE_TOOLS=<work/subtitle-runtime>.
     public static async Task RunMedia(Action<bool,string> check,string clips,string tools)

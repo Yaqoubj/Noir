@@ -100,12 +100,49 @@ def _synchronize(video, subtitle, output, capture, audio_only=False):
         return decision
 
 
+def plan(duration):
+    """Sample windows for a stream of this length; empty windows mean the stream is too short to sample."""
+    import sampled
+    return {"windows": [[float(a), float(n)] for a, n in sampled.plan_windows(duration)],
+            "extra": [[float(a), float(n)] for a, n in sampled.plan_extra_windows(duration)]}
+
+
+def sampled_sync(job_path, subtitle, output):
+    """Align a subtitle from short PCM samples (16 kHz mono s16le files); no video is read."""
+    import sampled
+    job = json.loads(Path(job_path).read_text(encoding="utf-8"))
+    subs = pysubs2.load(subtitle, encoding="utf-8")
+    cues = [(c.start, c.end) for c in subs]
+    pcm = [Path(item["pcm"]).read_bytes() for item in job["samples"]]
+    masks = sampled.speech_masks(pcm)
+    decision, fitted = sampled.align_samples(
+        [(float(item["start"]), mask) for item, mask in zip(job["samples"], masks)], cues, job.get("duration"))
+    result = {"accepted": bool(decision["accepted"]), "offset": float(decision["offset"]), "scale": float(decision["scale"]),
+              "method": str(decision["method"]), "reason": str(decision["reason"])}
+    if result["accepted"]:
+        # The fitted array is already rounded to whole milliseconds; text and formatting stay as pysubs2 keeps them.
+        for cue, (start, end) in zip(subs, fitted):
+            cue.start, cue.end = int(start), int(end)
+        subs.save(output, encoding="utf-8")
+    else:
+        shutil.copyfile(subtitle, output)
+    return result
+
+
 if __name__ == "__main__":
     try:
         # Third-party progress/logging must never contaminate the JSON protocol.
         with contextlib.redirect_stdout(sys.stderr):
-            decision = synchronize(*sys.argv[1:4], audio_only="--audio" in sys.argv[4:])
+            if sys.argv[1:2] == ["--plan"]:
+                decision = plan(float(sys.argv[2]))
+            elif sys.argv[1:2] == ["--sampled"]:
+                decision = sampled_sync(*sys.argv[2:5])
+            else:
+                decision = synchronize(*sys.argv[1:4], audio_only="--audio" in sys.argv[4:])
         print(json.dumps(decision, allow_nan=False))
     except Exception:
+        if sys.argv[1:2] == ["--sampled"]:
+            print(json.dumps({"accepted": False, "offset": 0, "scale": 1, "method": "none", "reason": "error"}))
+            sys.exit(1)
         print(json.dumps({"accepted": False, "offset": 0, "scale": 1, "method": "none", "segments": []}))
         sys.exit(1)

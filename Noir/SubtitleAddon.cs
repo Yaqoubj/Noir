@@ -9,7 +9,7 @@ public static class SubtitleAddon
     public static string Normalize(string text)
     {
         text=text.Trim();if(text.Length==0)return "";if(text.StartsWith("stremio://",StringComparison.OrdinalIgnoreCase))text="https://"+text[10..];
-        if(!Uri.TryCreate(text,UriKind.Absolute,out var u)||u.Scheme!="https"||u.Host.Length==0||u.UserInfo.Length>0||u.Port!=443||u.Query.Length>0||u.Fragment.Length>0||u.IsLoopback)throw new IOException("Paste an HTTPS Stremio subtitle addon link without credentials or a custom port.");
+        if(!SubtitleTransport.ValidUrl(text)||!Uri.TryCreate(text,UriKind.Absolute,out var u)||u.Query.Length>0)throw new IOException("Paste an HTTPS Stremio subtitle addon link without credentials or a custom port.");
         var path=u.AbsolutePath.TrimEnd('/');if(path.EndsWith("/manifest.json",StringComparison.OrdinalIgnoreCase))path=path[..^14];
         return u.GetLeftPart(UriPartial.Authority)+path;
     }
@@ -28,7 +28,7 @@ public static class SubtitleAddon
     {
         var baseUrl=Normalize(link);if(baseUrl.Length==0)throw new IOException("Paste a subtitle addon link first.");
         using var timeout=CancellationTokenSource.CreateLinkedTokenSource(ct);timeout.CancelAfter(TimeSpan.FromSeconds(15));
-        using var owned=client==null?new HttpClient(new HttpClientHandler{AllowAutoRedirect=false}):null;var http=client??owned!;
+        using var owned=client==null?SubtitleTransport.Client():null;var http=client??owned!;
         try{
             using var response=await http.GetAsync(baseUrl+"/manifest.json",HttpCompletionOption.ResponseHeadersRead,timeout.Token);response.EnsureSuccessStatusCode();
             const int max=256*1024;if(response.Content.Headers.ContentLength>max)throw new IOException("Subtitle addon manifest is too large.");

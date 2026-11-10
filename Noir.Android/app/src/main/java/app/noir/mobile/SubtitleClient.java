@@ -21,8 +21,14 @@ final class SubtitleClient {
     final DataStore data;final JSONObject item;final String id;final Transport internet;
     String videoHash="",release="",streamRelease=null;boolean identityRead=false;
     void streaming(String name){streamRelease=name==null?"":name;if(!streamRelease.isEmpty())release=streamRelease;videoHash="";identityRead=true;}
-    SubtitleClient(DataStore data,JSONObject item){this(data,item,SubtitleClient::fetch);}
-    SubtitleClient(DataStore data,JSONObject item,Transport internet){this.data=data;this.item=item;this.internet=internet;id=item.optString("id");release=item.optString("title")+(item.optBoolean("movie")?"":" S"+String.format(Locale.ROOT,"%02dE%02d",item.optInt("season"),item.optInt("episode")));}
+    final SubtitleSources sources;
+    SubtitleClient(DataStore data,JSONObject item){this(data,item,SubtitleClient::fetch,new SubtitleSources(new SubtitleTransport()));}
+    /** A caller-supplied transport stands in for the network entirely, so its hosts need no DNS and every request is a plain GET. */
+    SubtitleClient(DataStore data,JSONObject item,Transport internet){this(data,item,internet,new SubtitleSources(new SubtitleTransport((request,cap,deadline)->new SubtitleTransport.Response(200,null,legacy(internet,request.url,cap)),host->new java.net.InetAddress[]{PUBLIC})));}
+    static final java.net.InetAddress PUBLIC=publicAddress();
+    static java.net.InetAddress publicAddress(){try{return java.net.InetAddress.getByAddress(new byte[]{(byte)93,(byte)184,(byte)216,34});}catch(java.net.UnknownHostException e){throw new IllegalStateException(e);}}
+    static byte[] legacy(Transport internet,String url,int cap)throws IOException{try{return internet.read(url,cap);}catch(IOException e){throw e;}catch(Exception e){throw new IOException(e);}}
+    SubtitleClient(DataStore data,JSONObject item,Transport internet,SubtitleSources sources){this.data=data;this.item=item;this.internet=internet;this.sources=sources;id=item.optString("id");release=item.optString("title")+(item.optBoolean("movie")?"":" S"+String.format(Locale.ROOT,"%02dE%02d",item.optInt("season"),item.optInt("episode")));}
     static String language(String value){String s=value.trim().toLowerCase(Locale.ROOT);return Arrays.asList("en","eng","english").contains(s)?"en":Arrays.asList("ar","ara","arabic").contains(s)?"ar":"";}
     static String label(String language){return language.equals("ar")?"Arabic":"English";}
     static String hashBytes(long size,byte[] first,byte[] last){if(size<131072||first.length!=65536||last.length!=65536)return "";long hash=size;for(byte[] chunk:new byte[][]{first,last}){ByteBuffer bytes=ByteBuffer.wrap(chunk).order(ByteOrder.LITTLE_ENDIAN);while(bytes.hasRemaining())hash+=bytes.getLong();}return String.format(Locale.ROOT,"%016x",hash);}
@@ -48,8 +54,18 @@ final class SubtitleClient {
     List<JSONObject> search(String lang)throws Exception{
         String imdb=item.optString("imdb");if(!imdb.matches("tt\\d+"))throw new IOException("Correct this title's match in Noir before searching for subtitles.");
         try{identity();}catch(Exception ignored){}
-        JSONObject settings=new PhoneDownloadSettings(data.context).load();
-        List<String> urls=searchUrls(settings.optString("subtitleAddonUrl"),settings.optBoolean("subtitleAddonOnly",true),imdb,item.optBoolean("movie"),item.optInt("season"),item.optInt("episode"),release,videoHash);
+        SubtitleSources.Selection chosen=SubtitleSources.Selection.from(new PhoneDownloadSettings(data.context).load()).validate();
+        if(!chosen.chosen())return defaultSearch(lang,imdb);
+        // A chosen source is asked first. With "only" on, no other site is contacted, whatever happens.
+        List<JSONObject> own=new ArrayList<>();SubtitleSources.SubtitleFailure failure=null;
+        try{own=sources.search(chosen,item,release,lang,videoHash);}catch(SubtitleSources.SubtitleFailure e){failure=e;}
+        if(!own.isEmpty())return own;
+        if(!chosen.only)try{List<JSONObject> fallback=defaultSearch(lang,imdb);if(!fallback.isEmpty())return fallback;}catch(IOException e){if(failure==null)throw e;}
+        if(failure!=null)throw failure;
+        throw new IOException(chosen.name()+" · "+Loc.t("no "+label(lang)+" subtitles found"));
+    }
+    List<JSONObject> defaultSearch(String lang,String imdb)throws Exception{
+        List<String> urls=searchUrls("",true,imdb,item.optBoolean("movie"),item.optInt("season"),item.optInt("episode"),release,videoHash);
         List<JSONObject> found=new ArrayList<>();Set<String> seen=new HashSet<>();boolean succeeded=false;
         for(String url:urls)try{
             JSONObject response=new JSONObject(new String(internet.read(url,MAX),StandardCharsets.UTF_8));succeeded=true;JSONArray all=response.optJSONArray("subtitles");if(all==null)continue;
@@ -86,11 +102,30 @@ final class SubtitleClient {
         catch(Exception e){if(e instanceof IOException&&"This addon does not provide subtitles.".equals(e.getMessage()))throw e;throw new IOException("Couldn't check the subtitle addon. Check the link and connection.");}finally{c.disconnect();}
     }
     static int releaseScore(String subtitle,String release){Set<String> a=new HashSet<>(Arrays.asList(subtitle.toLowerCase(Locale.ROOT).split("[^a-z0-9]+"))),b=new HashSet<>(Arrays.asList(release.toLowerCase(Locale.ROOT).split("[^a-z0-9]+")));b.removeAll(Arrays.asList("","mkv","mp4","srt","eng","ara","en","ar"));a.retainAll(b);return b.isEmpty()?0:100*a.size()/b.size();}
-    JSONObject download(JSONObject candidate)throws Exception{
-        String lang=candidate.optString("language"),extension=extension(candidate.optString("subtitleFileName"));byte[] bytes=internet.read(candidate.getString("url"),MAX);
+    /** The saved identity of a subtitle is a hash: signed links and provider references never reach library.json. */
+    static String keyOf(String seed){try{return "sha256:"+DataStore.hex(MessageDigest.getInstance("SHA-256").digest(seed.getBytes(StandardCharsets.UTF_8))).toLowerCase(Locale.ROOT);}catch(java.security.NoSuchAlgorithmException e){throw new IllegalStateException(e);}}
+    byte[] fetchDefault(String url)throws Exception{
+        byte[] bytes=internet.read(url,MAX);
         if(bytes.length>2&&(bytes[0]&255)==31&&(bytes[1]&255)==139)try(InputStream gzip=new GZIPInputStream(new ByteArrayInputStream(bytes))){bytes=DataStore.read(gzip,MAX);}
+        return bytes;
+    }
+    JSONObject download(JSONObject candidate)throws Exception{
+        String lang=candidate.optString("language"),provider=candidate.optString("provider"),extension=extension(candidate.optString("subtitleFileName")),seed=candidate.optString("url");byte[] bytes;
+        if(provider.isEmpty())bytes=fetchDefault(candidate.getString("url"));
+        else{
+            SubtitleSources.Selection chosen=SubtitleSources.Selection.from(new PhoneDownloadSettings(data.context).load()).validate();
+            if(!chosen.source.equals(provider))throw new IOException(Loc.t("Subtitle source changed. Search again."));
+            seed=provider+":"+(seed.isEmpty()?lang+":"+candidate.optString("ref"):seed);
+            try{SubtitleArchive.Picked picked=sources.download(chosen,candidate,item,release);bytes=picked.bytes;extension=extension(picked.name);}
+            catch(SubtitleSources.SubtitleFailure failure){
+                if(chosen.only)throw failure;
+                List<JSONObject> other=defaultSearch(lang,item.optString("imdb"));if(other.isEmpty())throw failure;
+                candidate=other.get(0);seed=candidate.getString("url");extension=extension(candidate.optString("subtitleFileName"));bytes=fetchDefault(seed);
+            }
+        }
         String content=decode(bytes);if(!validText(content,extension))throw new IOException("This provider returned an invalid subtitle. Try another release.");
-        JSONObject sub=new JSONObject();DataStore.put(sub,"sourceKey",candidate.getString("url"));DataStore.put(sub,"language",lang);DataStore.put(sub,"name",label(lang)+" · "+candidate.optString("movieReleaseName",release));DataStore.put(sub,"extension",extension);DataStore.put(sub,"hashMatch",candidate.optString("m").equals("h"));if(streamRelease!=null)DataStore.put(sub,"streamRelease",streamRelease);return save(sub,content);
+        String rel=candidate.optString("movieReleaseName");if(rel.isEmpty())rel=candidate.optString("subtitleFileName");if(rel.isEmpty())rel=release;
+        JSONObject sub=new JSONObject();DataStore.put(sub,"sourceKey",keyOf(seed));DataStore.put(sub,"language",lang);DataStore.put(sub,"name",label(lang)+" · "+rel);DataStore.put(sub,"extension",extension);DataStore.put(sub,"hashMatch",candidate.optString("m").equals("h"));if(streamRelease!=null)DataStore.put(sub,"streamRelease",streamRelease);return save(sub,content);
     }
     JSONObject save(JSONObject sub,String content)throws Exception{
         String originalId=sub.optString("id");DataStore.put(sub,"id",DataStore.hex(MessageDigest.getInstance("SHA-256").digest((id+":"+sub.optString("sourceKey")+":"+sub.optString("streamRelease")+":"+content).getBytes(StandardCharsets.UTF_8))).substring(0,24));File target=data.subtitle(sub);if(target==null)throw new IOException("Unsupported subtitle file.");

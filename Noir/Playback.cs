@@ -453,7 +453,7 @@ public partial class MainWindow
         foreach(var option in new[]{(PL("Earlier by 0.5 seconds","أبكر بنصف ثانية"),-.5,"["),(PL("Later by 0.5 seconds","لاحقًا بنصف ثانية"),.5,"]"),(PL("Reset timing","إعادة ضبط التوقيت"),0d,"")})
         {var choice=option;var row=new MenuItem{Header=choice.Item1,InputGestureText=choice.Item3};row.Click+=(_,_)=>AdjustSubtitleDelay(choice.Item2,choice.Item2==0);delay.Items.Add(row);}
         // Auto-sync also sits where people look for timing, not only at the end of the subtitle list.
-        if(current is {} timed&&currentStream==null){delay.Items.Add(new Separator());var auto=new MenuItem{Header=PL("Auto-sync to the audio…","مزامنة تلقائية مع الصوت…‏"),ToolTip=PL("Shifts downloaded subtitles to match this video's speech","يضبط توقيت الترجمة المحفوظة ليطابق كلام هذا الفيديو")};auto.Click+=(_,_)=>DownloadSubtitleFiles(timed,true);delay.Items.Add(auto);}
+        if(current is {} timed){delay.Items.Add(new Separator());var auto=new MenuItem{Header=PL("Auto-sync to the audio…","مزامنة تلقائية مع الصوت…‏"),ToolTip=currentStream!=null?PL("Listens to a few short parts of this stream and shifts the saved subtitles to match its speech","يستمع إلى أجزاء قصيرة من هذا البث ويضبط توقيت الترجمة المحفوظة ليطابق كلامه"):PL("Shifts downloaded subtitles to match this video's speech","يضبط توقيت الترجمة المحفوظة ليطابق كلام هذا الفيديو")};auto.Click+=(_,_)=>DownloadSubtitleFiles(timed,true);delay.Items.Add(auto);}
         menu.Items.Add(delay);
         var add=new MenuItem { Header=PL("Load subtitle file…","تحميل ملف ترجمة…‏") };
         add.Click+=(_,_)=>

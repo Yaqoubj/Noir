@@ -86,7 +86,7 @@ public final class TvSetupActivity extends Activity {
     }
     static void copyFromPc(Activity a,DataStore source,java.util.function.Consumer<String> status,java.util.function.Consumer<JSONObject> copied,SetupWork work){
         status.accept("Confirm on your PC · up to 2 minutes…");
-        new Thread(()->{if(work.cancelled)return;try{JSONObject value=source.pcRequest("/v1/phone-downloads/settings",new JSONObject());if(a.isDestroyed()||a.isFinishing()||!work.save(source,value))return;a.runOnUiThread(()->{if(work.cancelled||a.isDestroyed()||a.isFinishing()||source!=NoirApp.data)return;copied.accept(value);status.accept("Copied from your PC");});}
+        new Thread(()->{if(work.cancelled)return;try{JSONObject value=new PhoneDownloadSettings(source.context).imported(source.pcRequest("/v1/phone-downloads/settings",new JSONObject()));if(a.isDestroyed()||a.isFinishing()||!work.save(source,value))return;a.runOnUiThread(()->{if(work.cancelled||a.isDestroyed()||a.isFinishing()||source!=NoirApp.data)return;copied.accept(value);status.accept("Copied from your PC");});}
             catch(Exception e){a.runOnUiThread(()->{if(!work.cancelled&&!a.isDestroyed()&&!a.isFinishing()&&source==NoirApp.data)status.accept("Not copied. Keep Noir open on the PC and click Send there within 2 minutes.");});}},"noir-tv-copy").start();
     }
 }
