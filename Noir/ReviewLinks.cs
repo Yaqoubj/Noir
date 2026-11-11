@@ -67,6 +67,18 @@ public static class ReviewLinks
 
     public const string SerializdSignIn = "https://www.serializd.com/login";
 
+    // H1: Harbor's detail deep link (its src/lib/deep-link.ts: harbor://detail/<type>/<id>[/<videoId>]).
+    // An episode passes its Stremio video id; Harbor may open the show page for it.
+    public static string? HarborUrl(string imdb, bool movie, int season = 0, int episode = 0)
+    {
+        if (!System.Text.RegularExpressions.Regex.IsMatch(imdb, @"^tt\d+$"))
+            return null;
+        var url = $"harbor://detail/{(movie ? "movie" : "series")}/{imdb}";
+        return !movie && season > 0 && episode > 0
+            ? url + "/" + Uri.EscapeDataString($"{imdb}:{season}:{episode}")
+            : url;
+    }
+
     // F15: where "Sign in" for a site opens. Serializd has pages for episodes only, so a movie's Reviews window
     // has no Serializd tab: pick an episode, or open Serializd's own sign-in page when the library has none.
     public static (VideoItem? Item, string? Url) AccountSignIn(IReadOnlyList<VideoItem> archive, string provider)

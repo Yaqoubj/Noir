@@ -276,7 +276,7 @@ public partial class MainWindow
                                     Margin = new(8),
                                     HorizontalAlignment = HorizontalAlignment.Left,
                                     VerticalAlignment = VerticalAlignment.Bottom,
-                                    Child = Text(T("TOP 4", "أفضل ٤"), 10, "#16120C", FontWeights.Bold),
+                                    Child = Text(T("TOP 4", "أفضل 4"), 10, "#16120C", FontWeights.Bold),
                                 }
                             );
                         panel.Children.Add(

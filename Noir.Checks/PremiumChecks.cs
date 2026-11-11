@@ -125,6 +125,14 @@ public static class PremiumChecks
                     && trakt.Item == film,
                 "F15 Serializd sign-in lands on serializd.com with a movie-only library and with a mixed one"
             );
+            check(
+                ReviewLinks.HarborUrl("tt0113277", true) == "harbor://detail/movie/tt0113277"
+                    && ReviewLinks.HarborUrl("tt11280740", false) == "harbor://detail/series/tt11280740"
+                    && ReviewLinks.HarborUrl("tt11280740", false, 1, 2)
+                        == "harbor://detail/series/tt11280740/tt11280740%3A1%3A2"
+                    && ReviewLinks.HarborUrl("12345", true) == null,
+                "H1 Open in Harbor builds Harbor's detail links for a movie, a show and an episode, and refuses unverified ids"
+            );
         }
         var picture = Path.Combine(directory, "cached.jpg");
         File.WriteAllBytes(picture, [1]);

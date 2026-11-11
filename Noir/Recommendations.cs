@@ -207,6 +207,43 @@ public partial class MainWindow
         }
     }
 
+    // Opens the title in the Harbor desktop app when it is installed (it registers harbor:// for the current user).
+    void OpenInHarbor(string imdb, bool movie, int season = 0, int episode = 0)
+    {
+        var url = ReviewLinks.HarborUrl(imdb, movie, season, episode);
+        if (url == null)
+        {
+            Status.Text = T(
+                "This title needs a verified match before it can open in Harbor.",
+                "يحتاج هذا العنوان إلى مطابقة مؤكدة قبل فتحه في Harbor."
+            );
+            return;
+        }
+        var installed = false;
+        try
+        {
+            using var user = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Classes\harbor");
+            using var machine = user == null ? Microsoft.Win32.Registry.ClassesRoot.OpenSubKey("harbor") : null;
+            installed = user != null || machine != null;
+        }
+        catch (System.Security.SecurityException) { }
+        if (!installed)
+        {
+            Status.Text = T("Harbor isn't installed on this PC.", "Harbor غير مثبّت على هذا الكمبيوتر.");
+            return;
+        }
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+            Status.Text = T("Opening in Harbor…", "جارٍ الفتح في Harbor…");
+        }
+        catch (Exception e)
+        {
+            store.Log(e);
+            Status.Text = T("Harbor couldn't be opened.", "تعذّر فتح Harbor.");
+        }
+    }
+
     // Nuvio's deep link (its AppUrlBridge: nuvio://meta?type=…&id=tt…) opens the title page in Nuvio Desktop
     // or on a phone. Without the desktop app, a QR code hands the same link to the phone.
     void OpenInNuvio(string imdb, bool movie, string name = "")

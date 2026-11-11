@@ -150,6 +150,63 @@ public partial class MainWindow
         };
     }
 
+    // O2 + O3: the two naming switches (new downloads and the organizer) and organizing new files by itself.
+    StackPanel OrganizingSettingsPanel()
+    {
+        var panel = new StackPanel { Margin = new(0, 8, 0, 12) };
+        panel.Children.Add(Body(T("File names and folders", "أسماء الملفات والمجلدات"), 13));
+        var manager = downloads!;
+        var prefs = manager.ManagementPreferences;
+        CheckBox Switch(string label, bool on, string hint, Action<bool> save)
+        {
+            var box = new CheckBox
+            {
+                Content = label,
+                IsChecked = on,
+                Margin = new(0, 6, 0, 2),
+            };
+            System.Windows.Automation.AutomationProperties.SetName(box, label);
+            box.Click += (_, _) => save(box.IsChecked == true);
+            panel.Children.Add(box);
+            panel.Children.Add(Body(hint, 12));
+            return box;
+        }
+        var episodeTitle = Switch(
+            T("Add the episode title to file names", "إضافة عنوان الحلقة إلى أسماء الملفات"),
+            prefs.Naming.EpisodeTitle,
+            T(
+                "New downloads are named Title (Year) S01E01 - Episode title. Files already saved are renamed only when you organize them.",
+                "تُسمّى التنزيلات الجديدة العنوان (السنة) S01E01 - عنوان الحلقة. لا تُغيَّر أسماء الملفات المحفوظة إلا عند تنظيمها."
+            ),
+            _ => { }
+        );
+        var movieFolder = Switch(
+            T("Keep each movie in its own folder", "إبقاء كل فيلم في مجلده الخاص"),
+            prefs.Naming.MovieFolder,
+            T(
+                "Movies go in Title (Year)/Title (Year).mkv. Off puts them directly in the movies folder.",
+                "تُحفظ الأفلام في العنوان (السنة)/العنوان (السنة).mkv. عند الإيقاف تُحفظ مباشرة في مجلد الأفلام."
+            ),
+            _ => { }
+        );
+        void SaveNaming() =>
+            manager.SetNaming(
+                new() { EpisodeTitle = episodeTitle.IsChecked == true, MovieFolder = movieFolder.IsChecked == true }
+            );
+        episodeTitle.Click += (_, _) => SaveNaming();
+        movieFolder.Click += (_, _) => SaveNaming();
+        Switch(
+            T("Organize new files automatically", "تنظيم الملفات الجديدة تلقائيًا"),
+            prefs.AutoOrganize,
+            T(
+                "Files that appear in your library folders are renamed and filed as in the organizer once their title is confirmed. Playing and downloading files are left alone, and Undo covers each run.",
+                "تُعاد تسمية الملفات الجديدة في مجلدات المكتبة وتُرتَّب كما في أداة التنظيم بعد تأكيد عنوانها. لا تُمَسّ الملفات قيد التشغيل أو التنزيل، ويشمل التراجع كل عملية."
+            ),
+            manager.SetAutoOrganize
+        );
+        return panel;
+    }
+
     void RenderDownloadSettings()
     {
         ContentPanel.Children.Add(
@@ -165,6 +222,7 @@ public partial class MainWindow
         }
         var c = downloads.Config;
         ContentPanel.Children.Add(ReadySettingsPanel());
+        ContentPanel.Children.Add(OrganizingSettingsPanel());
         var manifest = Secret(c.Manifest);
         var key = Secret(c.Key);
         // Every field saves itself: the whole form is read on the UI thread, then written (secrets encrypted by Configure).

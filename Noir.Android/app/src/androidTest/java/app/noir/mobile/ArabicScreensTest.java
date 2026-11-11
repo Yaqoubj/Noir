@@ -60,7 +60,12 @@ public final class ArabicScreensTest {
   DataStore data=NoirApp.data;String pairUri=TestRunner.arguments.getString("pairUri");if(data!=null&&!data.paired()&&pairUri!=null)data.pair(pairUri);else if(data!=null&&data.paired())data.sync();Assume.assumeTrue("needs the paired fixture",data!=null&&data.paired());Optional<JSONObject> item=DataStore.objects(data.items()).stream().filter(i->i.optBoolean("available")).findFirst();Assume.assumeTrue(item.isPresent());
   Loc.arabic=true;PlayerActivity p=(PlayerActivity)test.startActivitySync(new Intent(test.getTargetContext(),PlayerActivity.class).putExtra("id",item.get().optString("id")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
   try{for(int n=0;n<240&&p.controls==null;n++)Thread.sleep(250);assertNotNull(p.controls);
-   test.runOnMainSync(()->{for(String arabic:new String[]{"رجوع ١٠ ثوانٍ","تقديم ١٠ ثوانٍ","التالي"})assertNotNull("Control "+arabic,AuditPhoneFixture.find(p.controls,v->v.getContentDescription()!=null&&arabic.contentEquals(v.getContentDescription())));assertNotNull("Play/Pause is Arabic",AuditPhoneFixture.find(p.controls,v->v.getContentDescription()!=null&&("تشغيل".contentEquals(v.getContentDescription())||"إيقاف مؤقت".contentEquals(v.getContentDescription()))));});
+   test.runOnMainSync(()->{for(String arabic:new String[]{"رجوع 10 ثوانٍ","تقديم 10 ثوانٍ","التالي"})assertNotNull("Control "+arabic,AuditPhoneFixture.find(p.controls,v->v.getContentDescription()!=null&&arabic.contentEquals(v.getContentDescription())));assertNotNull("Play/Pause is Arabic",AuditPhoneFixture.find(p.controls,v->v.getContentDescription()!=null&&("تشغيل".contentEquals(v.getContentDescription())||"إيقاف مؤقت".contentEquals(v.getContentDescription()))));});
   }finally{test.runOnMainSync(()->{if(!p.isFinishing())p.finish();});Loc.arabic=was;}
+ }
+ /* The Connections cards below the sync cards are translated too (batch-2 review). */
+ @Test public void connectionsCardsBelowTheSyncCardsHaveArabic(){
+  for(String english:new String[]{"Streaming & phone downloads","Download straight to this phone with your own TorBox, Real-Debrid or AIOStreams.","Import files","Import an export file, or paste a list of titles. You review everything before it's added.","Import watched history directly from Plex or HTTPS Jellyfin / Emby. Kodi and PC-configured servers are also available when paired.","Connect on this phone"})
+   assertTrue("Arabic for: "+english,Loc.AR.containsKey(english)&&!Loc.AR.get(english).equals(english));
  }
 }

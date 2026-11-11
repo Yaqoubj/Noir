@@ -168,6 +168,7 @@ public partial class MainWindow
             return;
         }
         store.Save();
+        LibraryStore.FlushAll();
         var start = new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false };
         start.ArgumentList.Add("--restarted");
         System.Diagnostics.Process.Start(start);

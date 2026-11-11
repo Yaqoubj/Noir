@@ -5,6 +5,18 @@ static class OrganizerChecks
 {
     public static void Run(string root, Action<bool, string> check)
     {
+        var lib = Path.Combine("C:", "Library") + Path.DirectorySeparatorChar + "TV";
+        var from = Path.Combine(lib, "Show.S01E01.1080p.mkv");
+        var to = Path.Combine(lib, "Show (2020)", "Season 01", "Show (2020) S01E01.mkv");
+        check(
+            OrganizationMove.Relative(lib, from) == "Show.S01E01.1080p.mkv"
+                && OrganizationMove.Relative(lib + Path.DirectorySeparatorChar, to)
+                    == Path.Combine("Show (2020)", "Season 01", "Show (2020) S01E01.mkv")
+                && OrganizationMove.Relative(lib, lib + "-other" + Path.DirectorySeparatorChar + "x.mkv")
+                    == lib + "-other" + Path.DirectorySeparatorChar + "x.mkv"
+                && OrganizationMove.Relative("", from) == from,
+            "U91 organizer rows show paths relative to the library folder (a sibling folder with the same prefix stays full)"
+        );
         var dir = Path.Combine(root, "organizer-" + Guid.NewGuid().ToString("N"));
         var videos = Path.Combine(dir, "TV");
         Directory.CreateDirectory(videos);
@@ -74,6 +86,7 @@ static class OrganizerChecks
             refused && File.ReadAllText(nextPlan.Moves[0].To) == "different file" && File.Exists(source),
             "Stale previews cannot overwrite a file added later"
         );
+        OrganizerSharpenChecks.Run(dir, check);
         var recoveryDir = Path.Combine(dir, "recovery");
         var recovery = new LibraryStore(recoveryDir);
         recovery.State.Roots = [new() { Path = videos }];

@@ -889,6 +889,7 @@ public partial class MainWindow
             var openIn = new MenuItem { Header = T("Open in", "فتح في") };
             openIn.Items.Add(Row("Stremio", () => OpenInStremio(item.ImdbId, item.IsMovie, item.Season, item.Episode)));
             openIn.Items.Add(Row("Nuvio", () => OpenInNuvio(item.ImdbId, item.IsMovie, item.Title)));
+            openIn.Items.Add(Row("Harbor", () => OpenInHarbor(item.ImdbId, item.IsMovie, item.Season, item.Episode)));
             menu.Items.Add(openIn);
         }
         Gap();

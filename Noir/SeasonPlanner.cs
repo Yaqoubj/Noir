@@ -862,6 +862,7 @@ public sealed partial class PcDownloads
                     if (
                         ReadyPaused
                         || !NoirReadyPolicy.Enabled(preference)
+                        || !ReadyWindowOpen(ReadyState, ReadyClock())
                         || item.IsMovie
                         || Future(item)
                         || store.EverWatched(item)
@@ -1006,11 +1007,28 @@ public sealed partial class PcDownloads
                     KeepFreeBytes = s.KeepFreeBytes,
                     Paused = s.Paused,
                     CleanupWatched = s.CleanupWatched,
+                    Migrated = s.Migrated,
+                    RulesVersion = s.RulesVersion,
+                    RemoveAfterHours = s.RemoveAfterHours,
+                    RemoveScope = s.RemoveScope,
+                    RemoveMovies = s.RemoveMovies,
+                    KeepLastWatched = s.KeepLastWatched,
+                    RecycleRemoved = s.RecycleRemoved,
+                    ReadyCount = s.ReadyCount,
+                    AutoShows = s.AutoShows,
+                    WindowStart = s.WindowStart,
+                    WindowEnd = s.WindowEnd,
                     Titles = s
                         .Titles.Values.Where(t => t.Episodes.Count > 0 || t.State == "Blocked")
                         .Take(40)
                         .ToDictionary(t => t.Group, t => Copy(t)),
                     ManagedFiles = s.ManagedFiles.TakeLast(60).Select(Copy).ToList(),
+                    // Manual downloads show only when they are pinned or scheduled: there can be thousands.
+                    NoirFiles = s
+                        .NoirFiles.Where(f => f.Pinned || f.RemoveAt != null)
+                        .TakeLast(60)
+                        .Select(Copy)
+                        .ToList(),
                     Why = s.Why.TakeLast(200).Select(Copy).ToList(),
                 };
             }
@@ -1042,8 +1060,56 @@ public sealed partial class PcDownloads
                 ready.Log("Migrated keep ready preferences");
                 SaveReady();
             }
+            if (ready.RulesVersion < 1)
+            {
+                MigrateReadyRules(ready);
+                store.MigrateReadyRules();
+                ready.Log("Moved removal settings to the new rules");
+                SaveReady();
+            }
         }
     }
+
+    // A1–A8 migration keeps today's behaviour: remove watched on = 7 days after watching, off = never; Keep ready
+    // files only; delete permanently; 2 ahead; only shows switched on; any time. Dates already scheduled stay.
+    public static void MigrateReadyRules(NoirReadyState state)
+    {
+        state.RemoveAfterHours = state.CleanupWatched ? 168 : -1;
+        state.RemoveScope = "Keep ready";
+        state.RemoveMovies = false;
+        state.KeepLastWatched = 0;
+        state.RecycleRemoved = false;
+        state.ReadyCount = 2;
+        state.AutoShows = "Switched";
+        state.WindowStart = null;
+        state.WindowEnd = null;
+        foreach (var file in state.ManagedFiles.Where(f => f.RemoveAt != null))
+            file.RuleHours = 168;
+        state.RulesVersion = 1;
+    }
+
+    // A6+A7: why this show downloads automatically right now (its own switch, or the global choice), or null.
+    public string? AutomaticRule(string itemId)
+    {
+        var item = Item(itemId);
+        var preference = SeasonPreferences(itemId);
+        string shows;
+        lock (readyGate)
+            shows = ready?.AutoShows ?? "Switched";
+        var now = ReadyClock();
+        return NoirReadyPolicy.AutomaticReason(
+            preference,
+            new() { AutoShows = shows },
+            shows != "Switched" && store.WatchingShow(item.GroupKey, now),
+            shows == "Watchlist" && store.ReadyWatchlist().Contains(item.GroupKey)
+        );
+    }
+
+    // Test seam (A8 window, A1 schedules): the clock Keep ready decides with.
+    public Func<DateTimeOffset> ReadyClock { get; set; } = () => DateTimeOffset.UtcNow;
+
+    bool ReadyWindowOpen(NoirReadyState state, DateTimeOffset now) =>
+        NoirReadyPolicy.InWindow(state.WindowStart, state.WindowEnd, now.ToLocalTime().TimeOfDay);
 
     void SaveReady()
     {
@@ -1063,9 +1129,15 @@ public sealed partial class PcDownloads
             lock (readyGate)
             {
                 var wasPaused = ready!.Paused;
+                var (wasCleanup, wasHours) = (ready.CleanupWatched, ready.RemoveAfterHours);
                 change(ready);
                 ready.BudgetBytes = Math.Max(NoirReadyPolicy.GB, ready.BudgetBytes);
                 ready.KeepFreeBytes = Math.Max(10 * NoirReadyPolicy.GB, ready.KeepFreeBytes);
+                // Older callers still flip the one switch: on = 7 days, off = never.
+                if (ready.CleanupWatched != wasCleanup && ready.RemoveAfterHours == wasHours)
+                    ready.RemoveAfterHours = ready.CleanupWatched ? 168 : -1;
+                if (ready.RulesVersion >= 1)
+                    ready.CleanupWatched = NoirReadyPolicy.RemoveHours(ready) > 0;
                 paused = ready.Paused;
                 resume = wasPaused && !paused ? ready.PausedJobs.ToList() : [];
                 if (!paused)
@@ -1161,8 +1233,12 @@ public sealed partial class PcDownloads
         var state = ReadyState;
         if (state.Paused)
             return;
-        var now = DateTimeOffset.UtcNow;
-        var input = store.ReadyInputs(now);
+        var now = ReadyClock();
+        // A6: "Shows I am watching" = the followed shows of the new-episode alert (BackgroundMode), started ones only.
+        var watching = state.AutoShows is "Watching" or "Watchlist" ? store.WatchingShows(now) : [];
+        var watchlist = state.AutoShows == "Watchlist" ? store.ReadyWatchlist() : [];
+        var input = store.ReadyInputs(now, watching);
+        var windowOpen = ReadyWindowOpen(state, now);
         var preferences = input.GroupBy(x => x.Episode.Group).ToDictionary(g => g.Key, g => g.First().Preference);
         var active = preferences.Keys.ToHashSet();
         lock (readyGate)
@@ -1191,7 +1267,7 @@ public sealed partial class PcDownloads
             var episodes =
                 group.First().Season == 0
                     ? group.Where(e => !e.Watched).Take(1).ToList()
-                    : NoirReadyPolicy.Next(group, preference.KeepReadyCount, now);
+                    : NoirReadyPolicy.Next(group, NoirReadyPolicy.Count(preference, state), now);
             var cached = PreparedTitle(group.Key);
             if (
                 cached != null
@@ -1212,7 +1288,13 @@ public sealed partial class PcDownloads
                 Quality = preference.Resolution,
                 RecheckAt = now.AddHours(6),
             };
-            var automatic = NoirReadyPolicy.Enabled(preference) || preference.AlsoDownload;
+            var rule = NoirReadyPolicy.AutomaticReason(
+                preference,
+                state,
+                watching.Contains(group.Key),
+                watchlist.Contains(group.Key)
+            );
+            var automatic = rule != null;
             var missing = episodes.Where(e => !e.Local).ToList();
             if (episodes.Count == 0)
             {
@@ -1236,6 +1318,15 @@ public sealed partial class PcDownloads
             {
                 title.State = "Preparing";
                 title.Reason = pending.Any(j => j.Status == "Paused") ? "Download paused" : "Preparing on this PC";
+                PublishReady(title);
+                continue;
+            }
+            // A8: outside the download hours no new automatic job starts; running and manual downloads carry on.
+            if (automatic && !windowOpen)
+            {
+                title.State = "Waiting";
+                title.Reason = "Waiting for download hours";
+                title.RecheckAt = NoirReadyPolicy.NextWindowStart(state.WindowStart!.Value, now);
                 PublishReady(title);
                 continue;
             }
@@ -1305,9 +1396,16 @@ public sealed partial class PcDownloads
                         continue;
                     // Recheck consent and progress immediately before committing. No uncached selection enters the worker.
                     var current = SeasonPreferences(episode.ItemId);
+                    var latestState = ReadyState;
                     if (
-                        ReadyState.Paused
-                        || !(NoirReadyPolicy.Enabled(current) || current.AlsoDownload)
+                        latestState.Paused
+                        || NoirReadyPolicy.AutomaticReason(
+                            current,
+                            latestState,
+                            watching.Contains(group.Key),
+                            watchlist.Contains(group.Key)
+                        ) == null
+                        || !ReadyWindowOpen(latestState, ReadyClock())
                         || store.ReadyWatched(episode.ItemId)
                     )
                         break;
@@ -1351,7 +1449,7 @@ public sealed partial class PcDownloads
                             ready.Log(
                                 "Queued confirmed ready file",
                                 job.Name,
-                                source.Resolution + " · " + DownloadNaming.Size(decision.Charge)
+                                rule + " · " + source.Resolution + " · " + DownloadNaming.Size(decision.Charge)
                             );
                         }
                         SaveReady();
@@ -1560,13 +1658,69 @@ public sealed partial class PcDownloads
         return result;
     }
 
+    // A2: a manual download is recorded once, after it completes, with the size and date it was saved with, so
+    // "Everything Noir downloaded" can judge it even after "Clear finished" removed the job. Files Noir did not
+    // download (no completed job) are never recorded, so they are never removed.
+    bool RecordNoirFiles(Dictionary<string, PcDownloadJob> all)
+    {
+        HashSet<string> known;
+        List<ReadyManagedFile> records;
+        lock (readyGate)
+        {
+            known = ready!.ManagedFiles.Select(f => f.JobId).Concat(ready.NoirFiles.Select(f => f.JobId)).ToHashSet();
+            records = ready.NoirFiles.Select(f => new ReadyManagedFile { JobId = f.JobId, Path = f.Path }).ToList();
+        }
+        var added = new List<ReadyManagedFile>();
+        foreach (var job in all.Values.Where(j => j.Status == "Completed" && j.Destination.Length > 0))
+        {
+            if (known.Contains(job.Id))
+                continue;
+            var info = new FileInfo(job.Destination);
+            if (!info.Exists)
+                continue;
+            added.Add(
+                new()
+                {
+                    JobId = job.Id,
+                    ItemId = job.Target.Id,
+                    Group = job.Target.GroupKey,
+                    Path = job.Destination,
+                    Title = job.Name,
+                    Root = job.Root,
+                    Movie = job.Target.IsMovie,
+                    Season = job.Target.Season,
+                    Episode = job.Target.Episode,
+                    ImdbId = job.Target.ImdbId,
+                    FileBytes = info.Length,
+                    LastWriteUtc = info.LastWriteTimeUtc,
+                }
+            );
+        }
+        // Forget a record only when both its job and its file are gone.
+        var gone = records
+            .Where(f => !all.ContainsKey(f.JobId) && !File.Exists(f.Path))
+            .Select(f => f.JobId)
+            .ToHashSet();
+        if (added.Count == 0 && gone.Count == 0)
+            return false;
+        lock (readyGate)
+        {
+            var now = ready!.ManagedFiles.Select(f => f.JobId).Concat(ready.NoirFiles.Select(f => f.JobId)).ToHashSet();
+            ready.NoirFiles.AddRange(added.Where(f => !now.Contains(f.JobId)));
+            ready.NoirFiles.RemoveAll(f => gone.Contains(f.JobId));
+        }
+        return true;
+    }
+
+    sealed record ReadyCandidate(ReadyManagedFile File, bool Noir, VideoItem Target, string Root, FileInfo Info);
+
     void ReconcileReadyFiles(DateTimeOffset now)
     {
-        var state = ReadyState;
         var all = Jobs().ToDictionary(j => j.Id);
-        var inputs = state.CleanupWatched ? store.ReadyCleanupInputs(state.ManagedFiles.Select(f => f.ItemId)) : [];
-        var profiles = state.CleanupWatched ? ReadReadyProfiles() : null;
-        bool changed = false;
+        bool changed = RecordNoirFiles(all);
+        var state = ReadyState;
+        // One candidate per file that is still where its download put it.
+        var candidates = new List<ReadyCandidate>();
         foreach (var file in state.ManagedFiles)
         {
             if (
@@ -1576,84 +1730,194 @@ public sealed partial class PcDownloads
             )
                 continue;
             var info = new FileInfo(file.Path);
-            if (!info.Exists)
+            if (info.Exists)
+                candidates.Add(new(file, false, job.Target, job.Root, info));
+        }
+        foreach (var file in state.NoirFiles)
+        {
+            var job = all.GetValueOrDefault(file.JobId);
+            if (
+                job != null
+                && (job.Status != "Completed" || !file.Path.Equals(job.Destination, StringComparison.OrdinalIgnoreCase))
+            )
                 continue;
-            var before = (file.FileBytes, file.LastWriteUtc, file.RemoveAt, file.CleanupCancelled);
-            string log = "";
+            var info = new FileInfo(file.Path);
+            if (info.Exists)
+                candidates.Add(
+                    new(
+                        file,
+                        true,
+                        job?.Target
+                            ?? new VideoItem
+                            {
+                                Id = file.ItemId,
+                                CollectionKey = file.Group,
+                                IsMovie = file.Movie,
+                                Season = file.Season,
+                                Episode = file.Episode,
+                                ImdbId = file.ImdbId,
+                            },
+                        job?.Root ?? file.Root,
+                        info
+                    )
+                );
+        }
+        var preferences = store.ReadyCleanupPreferences(candidates.Select(c => c.File.Group));
+        // A1 per show, A2 scope: Keep ready files always; manual downloads only in "Everything Noir downloaded",
+        // and manual movies only with "Movies too".
+        int Hours(ReadyCandidate c) =>
+            !c.Noir || state.RemoveScope == "Noir" && (state.RemoveMovies || !(c.File.Movie || c.Target.IsMovie))
+                ? NoirReadyPolicy.RemoveHours(state, preferences.GetValueOrDefault(c.File.Group))
+                : -1;
+        var live = candidates.Where(c => Hours(c) > 0).ToList();
+        var inputs =
+            live.Count > 0
+                ? store.ReadyCleanupInputs(live.Select(c => c.File.ItemId))
+                : new Dictionary<string, (bool Watched, DateTimeOffset? At)>();
+        var profiles = live.Count > 0 ? ReadReadyProfiles() : null;
+        // A3: the last N watched episodes of each show stay for a rewatch (most recently watched first).
+        var keptLast = new HashSet<string>();
+        foreach (
+            var show in live.Where(c => inputs.GetValueOrDefault(c.File.ItemId) is (true, not null))
+                .GroupBy(c => c.File.Group)
+        )
+        {
+            var keep = NoirReadyPolicy.KeepLast(state, preferences.GetValueOrDefault(show.Key));
+            foreach (
+                var c in show.OrderByDescending(c => inputs[c.File.ItemId].At)
+                    .ThenByDescending(c => c.Target.Season)
+                    .ThenByDescending(c => c.Target.Episode)
+                    .Take(keep)
+            )
+                keptLast.Add(c.File.JobId);
+        }
+        foreach (var candidate in candidates)
+        {
+            var (file, noir, target, root, info) = candidate;
+            var before = (file.FileBytes, file.LastWriteUtc, file.RemoveAt, file.CleanupCancelled, file.RuleHours);
+            string log = "",
+                detail = "";
             if (file.LastWriteUtc == null)
             {
                 file.FileBytes = info.Length;
                 file.LastWriteUtc = info.LastWriteTimeUtc;
             }
+            var hours = Hours(candidate);
             var watched = inputs.GetValueOrDefault(file.ItemId);
-            var others = profiles?.Watched(job.Target) ?? [];
+            var others = profiles?.Watched(target) ?? [];
+            var why = NoirReadyPolicy.RuleLabel(hours) + " · " + (noir ? "Downloaded by Noir" : "Keep ready file");
             bool eligible =
-                state.CleanupWatched
+                hours > 0
                 && watched.Watched
                 && !file.Pinned
                 && !file.CleanupCancelled
                 && watched.At != null
-                && others.All(x => x == true);
+                && others.All(x => x == true)
+                && !keptLast.Contains(file.JobId);
             if (!eligible)
                 file.RemoveAt = null;
             else if (file.RemoveAt == null)
             {
-                var due = watched.At!.Value.AddDays(7);
-                file.RemoveAt = due > now ? due : now.AddDays(1);
+                file.RemoveAt = NoirReadyPolicy.Schedule(null, 0, hours, watched.At!.Value, now);
+                file.RuleHours = hours;
                 log = "Watched file removal scheduled";
+                detail = why;
             }
-            else if (
-                file.RemoveAt <= now
-                && NoirReadyPolicy.CanRemove(
-                    state.CleanupWatched,
-                    true,
-                    watched.Watched,
-                    file.Pinned,
-                    file.CleanupCancelled,
-                    watched.At,
-                    others,
-                    now
-                )
-            )
+            else
             {
-                var latest = store.ReadyCleanupInputs([file.ItemId]).GetValueOrDefault(file.ItemId);
-                lock (readyGate)
+                // A1: a rule change recomputes the date (later at once, earlier never sooner than now + 1 day).
+                var moved = NoirReadyPolicy.Schedule(file.RemoveAt, file.RuleHours, hours, watched.At!.Value, now);
+                if (moved != file.RemoveAt)
                 {
-                    var current = ready!.ManagedFiles.FirstOrDefault(f => f.JobId == file.JobId);
-                    if (
-                        ready.Paused
-                        || !ready.CleanupWatched
-                        || current == null
-                        || current.Pinned
-                        || current.CleanupCancelled
-                        || !NoirReadyPolicy.CanRemove(true, true, latest.Watched, false, false, latest.At, others, now)
-                        || profiles?.Fresh() != true
+                    file.RemoveAt = moved;
+                    log = "Removal date changed";
+                    detail = why;
+                }
+                file.RuleHours = hours;
+                if (
+                    file.RemoveAt <= now
+                    && NoirReadyPolicy.CanRemove(
+                        true,
+                        true,
+                        watched.Watched,
+                        file.Pinned,
+                        file.CleanupCancelled,
+                        watched.At,
+                        others,
+                        now,
+                        hours
                     )
-                        continue;
-                    info.Refresh();
-                    if (!info.Exists)
-                        continue;
-                    if (info.Length == file.FileBytes && info.LastWriteTimeUtc == file.LastWriteUtc)
+                )
+                {
+                    var latest = store.ReadyCleanupInputs([file.ItemId]).GetValueOrDefault(file.ItemId);
+                    var preference = store.GetShowDownloadPreference(file.Group);
+                    lock (readyGate)
                     {
-                        DownloadNaming.Validate(job.Root, file.Path);
-                        File.Delete(file.Path);
-                        file.RemoveAt = null;
-                        log = "Removed watched managed file";
-                    }
-                    else
-                    {
-                        file.CleanupCancelled = true;
-                        file.RemoveAt = null;
-                        log = "File changed; removal cancelled";
+                        var current = (noir ? ready!.NoirFiles : ready!.ManagedFiles).FirstOrDefault(f =>
+                            f.JobId == file.JobId
+                        );
+                        var go =
+                            !ready.Paused
+                            && NoirReadyPolicy.RemoveHours(ready, preference) == hours
+                            && (!noir || ready.RemoveScope == "Noir" && (ready.RemoveMovies || !target.IsMovie))
+                            && current is { Pinned: false, CleanupCancelled: false }
+                            && NoirReadyPolicy.CanRemove(
+                                true,
+                                true,
+                                latest.Watched,
+                                false,
+                                false,
+                                latest.At,
+                                others,
+                                now,
+                                hours
+                            )
+                            && profiles?.Fresh() == true
+                            && IsFilePlaying?.Invoke(file.Path) != true;
+                        info.Refresh();
+                        if (go && info.Exists)
+                        {
+                            if (info.Length == file.FileBytes && info.LastWriteTimeUtc == file.LastWriteUtc)
+                            {
+                                var recycle = ready.RecycleRemoved;
+                                try
+                                {
+                                    DownloadNaming.Validate(root, file.Path);
+                                    // A4: delete permanently (today) or the Recycle Bin, through the same remover as Manage.
+                                    RemoveDisk(file.Path, recycle);
+                                    file.RemoveAt = null;
+                                    log =
+                                        recycle && noir ? "Sent a watched Noir download to the Recycle Bin"
+                                        : recycle ? "Sent a watched Keep ready file to the Recycle Bin"
+                                        : noir ? "Removed a watched Noir download"
+                                        : "Removed watched managed file";
+                                    detail = why;
+                                }
+                                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                                {
+                                    store.Log(e);
+                                    log = "Removal failed; the file stays";
+                                    detail = why;
+                                }
+                            }
+                            else
+                            {
+                                file.CleanupCancelled = true;
+                                file.RemoveAt = null;
+                                log = "File changed; removal cancelled";
+                            }
+                        }
                     }
                 }
             }
             lock (readyGate)
             {
-                var current = ready!.ManagedFiles.FirstOrDefault(f => f.JobId == file.JobId);
+                var current = (noir ? ready!.NoirFiles : ready!.ManagedFiles).FirstOrDefault(f =>
+                    f.JobId == file.JobId
+                );
                 if (current == null)
                     continue;
-                if (before != (file.FileBytes, file.LastWriteUtc, file.RemoveAt, file.CleanupCancelled))
+                if (before != (file.FileBytes, file.LastWriteUtc, file.RemoveAt, file.CleanupCancelled, file.RuleHours))
                 {
                     current.FileBytes = file.FileBytes;
                     current.LastWriteUtc = file.LastWriteUtc;
@@ -1661,23 +1925,25 @@ public sealed partial class PcDownloads
                     {
                         current.RemoveAt = file.RemoveAt;
                         current.CleanupCancelled = file.CleanupCancelled;
+                        current.RuleHours = file.RuleHours;
                     }
                     changed = true;
                 }
                 if (log.Length > 0)
                 {
-                    ready.Log(log, file.Title);
+                    ready.Log(log, file.Title, detail, now);
                     changed = true;
                 }
             }
         }
+        // One write of noir-ready.json per pass, never a library save per removal (scale report item 2).
         if (changed)
             lock (readyGate)
                 SaveReady();
-        var root = Config.ShowsRoot;
-        if (root.Length == 0)
-            root = store.State.Roots.FirstOrDefault()?.Path ?? parts;
-        MeasureReadyStorage(root);
+        var showsRoot = Config.ShowsRoot;
+        if (showsRoot.Length == 0)
+            showsRoot = store.State.Roots.FirstOrDefault()?.Path ?? parts;
+        MeasureReadyStorage(showsRoot);
     }
 
     sealed class ReadyProfileLibraries
@@ -1863,13 +2129,103 @@ public sealed partial class LibraryStore
         }
     }
 
+    // A1–A8 migration, once: a show that was not switched on becomes "Same as default" (still off under the default
+    // "Only shows I switch on"), and a count of 2 (or one today's coercion turned into 2) follows the default of 2.
+    public void MigrateReadyRules()
+    {
+        lock (gate)
+        {
+            foreach (var p in State.ShowDownloads.Values)
+            {
+                if (p.KeepReadyEnabled == false && !p.AutoDownload)
+                    p.KeepReadyEnabled = null;
+                if (p.KeepReadyCount is not (1 or 3 or -1))
+                    p.KeepReadyCount = null;
+            }
+            Save();
+        }
+    }
+
+    // The followed shows of the new-episode alert (BackgroundMode.CheckNewEpisodes): not movies, not dropped, not
+    // hidden from Continue or the library.
+    public List<IGrouping<string, VideoItem>> FollowedShows()
+    {
+        lock (gate)
+            return State
+                .Catalog.Values.Select(x => x.Item)
+                .GroupBy(i => i.GroupKey)
+                .Where(g =>
+                    !g.First().IsMovie
+                    && TitleStatus(g) != "Dropped"
+                    && !State.HiddenContinue.Contains(g.Key)
+                    && !State.HiddenTitles.Contains(g.Key)
+                )
+                .ToList();
+    }
+
+    // The alert's "still following" test: watched in the last 180 days, or caught up to this episode.
+    public bool FollowingEpisode(VideoItem episode, DateTimeOffset now)
+    {
+        lock (gate)
+        {
+            var group = EpisodesFor(episode.GroupKey);
+            return group.Max(LastActivity) > now.AddDays(-180) || EarlierUnwatched(episode).Count == 0;
+        }
+    }
+
+    // A6 "Shows I am watching": a followed show whose next episode the alert would announce, started by the user.
+    public bool WatchingShow(string group, DateTimeOffset now)
+    {
+        lock (gate)
+        {
+            if (
+                State.HiddenContinue.Contains(group)
+                || State.HiddenTitles.Contains(group)
+                || EpisodesFor(group) is not { Count: > 0 } episodes
+                || episodes[0].IsMovie
+                || TitleStatus(episodes) == "Dropped"
+                || !episodes.Any(EverWatched)
+            )
+                return false;
+            return UpNextFor(episodes) is { Kind: UpNextKind.Ready or UpNextKind.NotOnPc } next
+                && FollowingEpisode(next.Item, now);
+        }
+    }
+
+    public HashSet<string> WatchingShows(DateTimeOffset now) =>
+        FollowedShows().Select(g => g.Key).Where(k => WatchingShow(k, now)).ToHashSet();
+
+    public HashSet<string> ReadyWatchlist()
+    {
+        lock (gate)
+            return State.Watchlist.ToHashSet();
+    }
+
+    public Dictionary<string, ShowDownloadPreference> ReadyCleanupPreferences(IEnumerable<string> groups)
+    {
+        lock (gate)
+            return groups
+                .Distinct()
+                .Where(State.ShowDownloads.ContainsKey)
+                .ToDictionary(
+                    g => g,
+                    g =>
+                        JsonSerializer.Deserialize<ShowDownloadPreference>(
+                            JsonSerializer.Serialize(State.ShowDownloads[g])
+                        )!
+                );
+    }
+
     public bool ReadyWatched(string id)
     {
         lock (gate)
             return State.Catalog.TryGetValue(id, out var e) && EverWatched(e.Item);
     }
 
-    public List<(ReadyEpisode Episode, ShowDownloadPreference Preference)> ReadyInputs(DateTimeOffset now)
+    public List<(ReadyEpisode Episode, ShowDownloadPreference Preference)> ReadyInputs(
+        DateTimeOffset now,
+        IEnumerable<string>? watching = null
+    )
     {
         lock (gate)
         {
@@ -1878,6 +2234,10 @@ public sealed partial class LibraryStore
                 .ShowDownloads.Where(x => NoirReadyPolicy.Enabled(x.Value) || x.Value.AlsoDownload)
                 .Select(x => x.Key)
                 .Concat(State.Watchlist)
+                // A6: shows I am watching, unless the show is switched off.
+                .Concat(
+                    (watching ?? []).Where(k => State.ShowDownloads.GetValueOrDefault(k)?.KeepReadyEnabled != false)
+                )
                 .Distinct();
             foreach (var key in keys)
             {

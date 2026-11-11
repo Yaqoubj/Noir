@@ -461,156 +461,11 @@ public partial class MainWindow
 
         Group("Sync your watches", "Kept in step automatically while Noir runs. Undo any import from Backup.");
         var sync = Cards();
-        foreach (
-            var (provider, mark, color, what) in new[]
-            {
-                (
-                    "Trakt",
-                    "T",
-                    "#ED2224",
-                    "Each movie or episode you finish or check off is marked watched on trakt.tv, through your website sign-in."
-                ),
-                (
-                    "Serializd",
-                    "Sz",
-                    "#1E9BE9",
-                    "Each episode you finish or check off is marked watched on Serializd (TV only)."
-                ),
-            }
-        )
-        {
-            var on = provider == "Trakt" ? store.State.SyncTrakt : store.State.SyncSerializd;
-            var jobs = store.State.WatchSync.Values.Where(j => j.Provider == provider).ToList();
-            var sent = jobs.Count(j => j.SyncedAt != null);
-            var last = jobs.Where(j => j.SyncedAt != null).Select(j => j.SyncedAt!.Value).DefaultIfEmpty().Max();
-            sync.Children.Add(
-                ConnectionCard(
-                    provider,
-                    mark,
-                    color,
-                    "#FFFFFF",
-                    on,
-                    on
-                        ? $"{T("Sending")} · {sent:N0} {T("confirmed")}"
-                            + (last > DateTimeOffset.MinValue ? " · " + T("last") + " " + Ago(last) : "")
-                        : T("Off"),
-                    what,
-                    panel =>
-                    {
-                        var check = new CheckBox
-                        {
-                            Content = T("Mark my watches on ") + provider,
-                            IsChecked = on,
-                            Margin = new(0, 0, 0, 8),
-                        };
-                        check.Click += (_, _) =>
-                        {
-                            if (provider == "Trakt")
-                                store.State.SyncTrakt = check.IsChecked == true;
-                            else
-                                store.State.SyncSerializd = check.IsChecked == true;
-                            store.Save();
-                            watchSync?.Retry();
-                            RenderQuiet();
-                        };
-                        panel.Children.Add(check);
-                        var row = Buttons(panel);
-                        if (!on)
-                        {
-                            row.Add("Connect " + provider, () => OpenAccountSignIn(provider), true);
-                            if (provider == "Trakt")
-                                row.Add("Import Trakt export…", () =>
-                                    ImportFromConnections(() => ChooseImportFile("Trakt"))
-                                );
-                        }
-                        else
-                        {
-                            row.Add("Sync now", () =>
-                            {
-                                watchSync?.Retry();
-                                Status.Text = provider + ": " + T("syncing waiting watches…");
-                            });
-                            var extra = new List<(string, Action)>
-                            {
-                                ("Sign in again", () => OpenAccountSignIn(provider)),
-                                ("Send earlier history", () =>
-                                {
-                                    watchSync?.QueuePrevious();
-                                    RenderQuiet();
-                                }),
-                            };
-                            if (provider == "Trakt")
-                                extra.Add(
-                                    ("Import Trakt export…", () =>
-                                        ImportFromConnections(() => ChooseImportFile("Trakt"))
-                                    )
-                                );
-                            row.More(extra.ToArray());
-                        }
-                        Queue(panel, provider);
-                    }
-                )
-            );
-        }
+        foreach (var provider in new[] { "Trakt", "Serializd" })
+            sync.Children.Add(SyncSiteCard(provider));
         sync.Children.Add(NuvioCard());
-        sync.Children.Add(
-            ConnectionCard(
-                "Stremio",
-                "S",
-                "#7B5BF5",
-                "#FFFFFF",
-                stremio,
-                stremio
-                    ? T("Connected")
-                        + " · "
-                        + (
-                            store.State.StremioImportedAt is { } at
-                                ? T("checked") + " " + Ago(at)
-                                : T("not checked yet")
-                        )
-                    : T("Not connected"),
-                "New watches in Stremio come into Noir every few hours. Stremio can't receive watches from other apps.",
-                panel =>
-                {
-                    var row = Buttons(panel);
-                    if (!stremio)
-                    {
-                        row.Add("Connect Stremio", ConnectStremio, true);
-                        return;
-                    }
-                    var auto = new CheckBox
-                    {
-                        Content = T("Check Stremio automatically"),
-                        IsChecked = store.State.StremioAutoImport,
-                        Margin = new(0, 0, 0, 8),
-                    };
-                    auto.Click += (_, _) =>
-                    {
-                        store.State.StremioAutoImport = auto.IsChecked == true;
-                        store.Save();
-                    };
-                    panel.Children.Insert(panel.Children.Count - 1, auto);
-                    row.Add("Sync now", async () =>
-                    {
-                        Status.Text = T("Checking Stremio for new watches…");
-                        await ImportStremio(true);
-                        if (Status.Text == T("Checking Stremio for new watches…"))
-                            Status.Text = T("Stremio is up to date.");
-                        RenderQuiet();
-                    });
-                    row.Add("Review & import", () => ImportFromConnections(() => _ = ImportStremio(false)));
-                    row.More(("Disconnect", () =>
-                        {
-                            try
-                            {
-                                File.Delete(StremioKeyPath);
-                            }
-                            catch (IOException) { }
-                            RenderQuiet();
-                        }));
-                }
-            )
-        );
+        sync.Children.Add(StremioCard());
+        sync.Children.Add(HarborCard());
 
         Group(
             "Media servers",
@@ -861,7 +716,8 @@ public partial class MainWindow
         string state,
         string what,
         Action<StackPanel> body,
-        bool compact = false
+        bool compact = false,
+        string dot = ""
     )
     {
         var card = new Border
@@ -884,32 +740,41 @@ public partial class MainWindow
         head.Children.Add(names);
         var title = new DockPanel();
         names.Children.Add(title);
-        if (on)
+        if (on || dot.Length > 0)
         {
-            var dot = new Border
+            var light = new Border
             {
                 Width = 8,
                 Height = 8,
                 CornerRadius = new(4),
-                Background = Brush("#7BD88F"),
+                Background = Brush(
+                    dot == "amber" ? "#E4C084"
+                    : dot == "grey" ? "#8F8A83"
+                    : "#7BD88F"
+                ),
                 Margin = new(8, 0, 0, 0),
                 VerticalAlignment = VerticalAlignment.Center,
                 ToolTip = T("Connected"),
             };
-            DockPanel.SetDock(dot, Dock.Right);
-            title.Children.Add(dot);
+            DockPanel.SetDock(light, Dock.Right);
+            title.Children.Add(light);
         }
         title.Children.Add(Text(name, 15.5, weight: FontWeights.SemiBold));
         var status = Bidi(Text(state, 11.5, on ? "#E4C084" : "#8F8A83"));
         status.TextTrimming = TextTrimming.CharacterEllipsis;
         names.Children.Add(status);
         stack.Children.Add(head);
-        var text = Bidi(Text(T(what), 12, "#8F8A83"));
-        text.Margin = new(0, 10, 0, 10);
-        text.LineHeight = 17;
-        if (compact)
-            text.MaxHeight = 52;
-        stack.Children.Add(text);
+        if (what.Length > 0)
+        {
+            var text = Bidi(Text(T(what), 12, "#8F8A83"));
+            text.Margin = new(0, 10, 0, 10);
+            text.LineHeight = 17;
+            if (compact)
+                text.MaxHeight = 52;
+            stack.Children.Add(text);
+        }
+        else
+            head.Margin = new(0, 0, 0, 10);
         body(stack);
         System.Windows.Automation.AutomationProperties.SetName(card, name);
         return card;
@@ -920,8 +785,10 @@ public partial class MainWindow
     {
         var jobs = store
             .State.WatchSync.Values.Where(j => j.Provider == provider && j.SyncedAt == null)
-            .OrderBy(j => j.WatchedAt)
+            .OrderByDescending(j => j.WatchedAt)
             .ToList();
+        // S4: the list shows the newest 50 with "and N more", however long the queue is.
+        var shown = CommunityQueue.Newest(store.State, provider).ToHashSet();
         var deletes = provider == "Nuvio" ? store.State.NuvioDeletes.Count : 0;
         if (jobs.Count + deletes == 0)
             return;
@@ -942,15 +809,15 @@ public partial class MainWindow
                 DockPanel.SetDock(fix, Dock.Right);
                 head.Children.Add(fix);
             }
-            head.Children.Add(Bidi(Text($"{group.Count()} · {reason}", 12, "#E9E4DC", FontWeights.SemiBold)));
+            head.Children.Add(Bidi(Text($"{group.Count()} · {T(reason)}", 12, "#E9E4DC", FontWeights.SemiBold)));
             list.Children.Add(head);
-            foreach (var job in group.Take(25))
+            foreach (var job in group.Where(shown.Contains))
             {
                 if (store.State.Catalog.GetValueOrDefault(job.ItemId)?.Item is not { } item)
                     continue;
                 var row = new DockPanel { Margin = new(10, 0, 0, 3) };
                 var j = job;
-                if (provider is "Trakt" or "Serializd")
+                if (provider is "Trakt" or "Serializd" or CommunityQueue.Stremio)
                 {
                     var skip = new Button
                     {
@@ -968,23 +835,37 @@ public partial class MainWindow
                     };
                     DockPanel.SetDock(skip, Dock.Right);
                     row.Children.Add(skip);
-                    var missingId = !System.Text.RegularExpressions.Regex.IsMatch(item.ImdbId, @"^tt\d+$");
-                    var open = new Button
+                    var missingId = CommunityQueue.NeedsMatch(item);
+                    var special = CommunityQueue.IsSpecial(job);
+                    // Stremio has no page to open; only a title without an IMDb ID gets Match.
+                    if (provider != CommunityQueue.Stremio || missingId)
                     {
-                        Content = missingId ? T("Fix match") : "[[external]]",
-                        Padding = new(7, 1, 7, 1),
-                        FontSize = 10.5,
-                        ToolTip = missingId ? T("Correct match / episode numbers") : T("Open on ") + provider,
-                    };
-                    open.Click += (_, _) =>
-                    {
-                        if (missingId)
-                            MatchDialog(item);
-                        else
-                            OpenReviews(item, provider);
-                    };
-                    DockPanel.SetDock(open, Dock.Right);
-                    row.Children.Add(open);
+                        var open = new Button
+                        {
+                            Content = missingId ? T("Match this title", "طابق هذا العنوان") : "[[external]]",
+                            Padding = new(7, 1, 7, 1),
+                            FontSize = 10.5,
+                            ToolTip =
+                                missingId ? T("Correct match / episode numbers")
+                                : special
+                                    ? T(
+                                        "Open the page to mark this special by hand",
+                                        "افتح الصفحة لتعليم هذه الحلقة الخاصة يدويًا"
+                                    )
+                                : T("Open on ") + provider,
+                        };
+                        open.Click += (_, _) =>
+                        {
+                            if (missingId)
+                                MatchDialog(item);
+                            else if (special)
+                                OpenPage(ReviewLinks.TraktUrl(item));
+                            else
+                                OpenReviews(item, provider);
+                        };
+                        DockPanel.SetDock(open, Dock.Right);
+                        row.Children.Add(open);
+                    }
                 }
                 var label = Text(item.Label + (job.Attempts > 1 ? $"  ·  ×{job.Attempts}" : ""), 12, "#B8B2AA");
                 label.TextTrimming = TextTrimming.CharacterEllipsis;
@@ -993,24 +874,16 @@ public partial class MainWindow
                 row.Children.Add(Bidi(label));
                 list.Children.Add(row);
             }
-            if (group.Count() > 25)
-                list.Children.Add(Text($"   …{T("and")} {group.Count() - 25} {T("more")}", 11.5, "#8F8A83"));
         }
+        if (jobs.Count > shown.Count)
+            list.Children.Add(Text($"   …{T("and")} {(jobs.Count - shown.Count):N0} {T("more")}", 11.5, "#8F8A83"));
         if (deletes > 0)
             list.Children.Add(
                 Text($"{deletes} {T("un-checked items waiting to be removed in Nuvio")}", 11.5, "#8F8A83")
             );
-        var summary =
-            groups.Count == 1 ? groups[0].Key
-            : groups.Count > 1 ? $"{groups.Count} {T("reasons")}"
-            : "";
         var expander = new Expander
         {
-            Header = Text(
-                $"{jobs.Count + deletes} {T("waiting")}" + (summary.Length > 0 ? " · " + summary : ""),
-                12,
-                "#E4C084"
-            ),
+            Header = Text(T("Show waiting", "اعرض ما ينتظر"), 12, "#E4C084"),
             Content = new ScrollViewer
             {
                 Content = list,
@@ -1028,8 +901,490 @@ public partial class MainWindow
         panel.Children.Add(expander);
     }
 
+    // U84/U85: one state in the header (counts are on the counts line), the dot green only after a good attempt.
+    (string Text, string Dot) SiteHeaderFor(string provider)
+    {
+        var header = CommunityQueue.Header(
+            store.State,
+            watchSync?.Backoff ?? new CommunityBackoff(),
+            provider,
+            watchSync?.Clock() ?? DateTimeOffset.UtcNow,
+            Loc.Arabic,
+            Loc.Culture
+        );
+        return (header.Text, header.Dot);
+    }
+
+    // The Trakt / Serializd card: Settings > Connections and History > Import build it the same way (U86).
+    FrameworkElement SyncSiteCard(string provider)
+    {
+        var (mark, color, what) =
+            provider == "Trakt"
+                ? (
+                    "T",
+                    "#ED2224",
+                    "Each movie or episode you finish or check off is marked watched on trakt.tv, through your website sign-in."
+                )
+                : ("Sz", "#1E9BE9", "Each episode you finish or check off is marked watched on Serializd (TV only).");
+        var on = provider == "Trakt" ? store.State.SyncTrakt : store.State.SyncSerializd;
+        var header = SiteHeaderFor(provider);
+        return ConnectionCard(
+            provider,
+            mark,
+            color,
+            "#FFFFFF",
+            on,
+            header.Text,
+            what,
+            panel =>
+            {
+                var check = new CheckBox
+                {
+                    Content = T("Mark my watches on ") + provider,
+                    IsChecked = on,
+                    Margin = new(0, 0, 0, 8),
+                };
+                check.Click += (_, _) =>
+                {
+                    if (provider == "Trakt")
+                        store.State.SyncTrakt = check.IsChecked == true;
+                    else
+                        store.State.SyncSerializd = check.IsChecked == true;
+                    store.Save();
+                    watchSync?.Retry();
+                    RenderQuiet();
+                };
+                panel.Children.Add(check);
+                var row = Buttons(panel);
+                if (!on)
+                {
+                    row.Add("Connect " + provider, () => OpenAccountSignIn(provider), true);
+                    if (provider == "Trakt")
+                        row.Add("Import Trakt export…", () => ImportFromConnections(() => ChooseImportFile("Trakt")));
+                }
+                else
+                {
+                    row.Add("Sync now", () =>
+                    {
+                        watchSync?.Retry();
+                        Status.Text = provider + ": " + T("syncing waiting watches…");
+                    });
+                    var extra = new List<(string, Action)> { ("Sign in again", () => OpenAccountSignIn(provider)) };
+                    if (provider == "Trakt")
+                        extra.Add(
+                            ("Import Trakt export…", () => ImportFromConnections(() => ChooseImportFile("Trakt")))
+                        );
+                    row.More(extra.ToArray());
+                }
+                SiteLines(panel, provider, on);
+                Queue(panel, provider);
+            },
+            dot: header.Dot
+        );
+    }
+
+    FrameworkElement StremioCard()
+    {
+        var stremio = StremioKey() != null;
+        return ConnectionCard(
+            "Stremio",
+            "S",
+            "#7B5BF5",
+            "#FFFFFF",
+            stremio,
+            stremio
+                ? T("Connected")
+                    + " · "
+                    + (store.State.StremioImportedAt is { } at ? T("checked") + " " + Ago(at) : T("not checked yet"))
+                : T("Not connected"),
+            stremio
+                ? T(
+                    "New watches in Stremio come into Noir every few hours. Noir can also mark what you watch in your Stremio account.",
+                    "تصل المشاهدات الجديدة في Stremio إلى Noir كل بضع ساعات. ويمكن لـ Noir أيضًا تعليم ما تشاهده في حساب Stremio."
+                )
+                : "New watches in Stremio come into Noir every few hours. Stremio can't receive watches from other apps.",
+            panel =>
+            {
+                var row = Buttons(panel);
+                if (!stremio)
+                {
+                    row.Add("Connect Stremio", ConnectStremio, true);
+                    return;
+                }
+                var auto = new CheckBox
+                {
+                    Content = T("Check Stremio automatically"),
+                    IsChecked = store.State.StremioAutoImport,
+                    Margin = new(0, 0, 0, 8),
+                };
+                auto.Click += (_, _) =>
+                {
+                    store.State.StremioAutoImport = auto.IsChecked == true;
+                    store.Save();
+                };
+                panel.Children.Insert(panel.Children.Count - 1, auto);
+                row.Add("Sync now", async () =>
+                {
+                    Status.Text = T("Checking Stremio for new watches…");
+                    await ImportStremio(true);
+                    if (Status.Text == T("Checking Stremio for new watches…"))
+                        Status.Text = T("Stremio is up to date.");
+                    RenderQuiet();
+                });
+                row.Add("Review & import", () => ImportFromConnections(() => _ = ImportStremio(false)));
+                row.More(("Disconnect", () =>
+                    {
+                        try
+                        {
+                            File.Delete(StremioKeyPath);
+                        }
+                        catch (IOException) { }
+                        // Without a key nothing can be marked: the switch goes off with the connection.
+                        CommunityQueue.SetStremio(store.State, false, null);
+                        store.Save();
+                        RenderQuiet();
+                    }));
+                StremioMarkControls(panel, RenderQuiet);
+            }
+        );
+    }
+
+    // H2: Harbor has no service of its own; its watched state lives in the Stremio account or Trakt it is signed in to.
+    FrameworkElement HarborCard() =>
+        ConnectionCard(
+            "Harbor",
+            "H",
+            "#2F6B8F",
+            "#FFFFFF",
+            false,
+            T("Through Stremio or Trakt", "عبر Stremio أو Trakt"),
+            "",
+            HarborRoutes
+        );
+
+    void HarborRoutes(StackPanel panel)
+    {
+        panel.Children.Add(
+            Body(
+                T(
+                    "Use your Stremio account to bring in what Harbor marked watched there. Use Trakt so what you watch in Noir shows in Harbor too.",
+                    "استخدم حساب Stremio لإحضار ما علّمه Harbor كمُشاهَد هناك. استخدم Trakt ليظهر ما تشاهده في Noir في Harbor أيضًا."
+                ),
+                11.5
+            )
+        );
+        var row = Buttons(panel);
+        row.Add(
+            T("Use my Stremio account", "استخدم حساب Stremio"),
+            () =>
+                ImportFromConnections(() =>
+                {
+                    if (StremioKey() == null)
+                        ConnectStremio();
+                    else
+                        _ = ImportStremio(false);
+                }),
+            true
+        );
+        row.Add(T("Use Trakt", "استخدم Trakt"), () =>
+        {
+            settingsSection = "Connections";
+            Navigate("Settings");
+        });
+    }
+
+    // A page opened in the user's own browser (specials are marked by hand on the website).
+    void OpenPage(string url)
+    {
+        try
+        {
+            if (Uri.TryCreate(url, UriKind.Absolute, out var u) && u.Scheme == "https")
+                System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }
+                );
+        }
+        catch (Exception e)
+        {
+            store.Log(e);
+        }
+    }
+
+    // F13: "Serializd has not synced since 5 Oct · 137 waiting" with Sign in; one row per stopped website.
+    FrameworkElement NoticeRow(CommunityQueue.SiteNotice n, bool withWaiting = true)
+    {
+        var row = new DockPanel { Margin = new(0, 6, 0, 6) };
+        var sign =
+            n.Provider == CommunityQueue.Stremio
+                ? ActionButton(T("Connect Stremio again", "اربط Stremio مجددًا"), ConnectStremio)
+                : ActionButton(T("Sign in", "تسجيل الدخول"), () => OpenAccountSignIn(n.Provider));
+        sign.Padding = new(10, 4, 10, 4);
+        sign.FontSize = 11.5;
+        sign.Margin = new(10, 0, 0, 0);
+        sign.VerticalAlignment = VerticalAlignment.Center;
+        DockPanel.SetDock(sign, Dock.Right);
+        row.Children.Add(sign);
+        var text = Bidi(Text(CommunityQueue.NoticeText(n, Loc.Arabic, Loc.Culture, withWaiting), 12, "#E4C084"));
+        text.TextWrapping = TextWrapping.Wrap;
+        text.VerticalAlignment = VerticalAlignment.Center;
+        row.Children.Add(text);
+        return row;
+    }
+
+    /// <summary>The History header line for websites that stopped syncing; null when none did.</summary>
+    FrameworkElement? SyncNoticeLine()
+    {
+        if (watchSync == null)
+            return null;
+        var notices = CommunityQueue.Notices(store.State, watchSync.Backoff, watchSync.Clock());
+        if (notices.Count == 0)
+            return null;
+        var stack = new StackPanel();
+        foreach (var n in notices)
+            stack.Children.Add(NoticeRow(n));
+        return new Border
+        {
+            Child = stack,
+            CornerRadius = new(10),
+            Padding = new(14, 2, 14, 2),
+            Margin = new(0, 10, 0, 0),
+            Background = Brush("#1AE4C084"),
+            BorderBrush = Brush("#33E4C084"),
+            BorderThickness = new(1),
+        };
+    }
+
+    // One website's line of numbers (S4), its stopped-site notice (F13) and the past-history controls (S3).
+    void SiteLines(StackPanel panel, string provider, bool enabled)
+    {
+        if (watchSync == null)
+            return;
+        var now = watchSync.Clock();
+        var backoff = watchSync.Backoff;
+        var status = CommunityQueue.Status(store.State, backoff, provider, now);
+        var line = Bidi(Text(CommunityQueue.StatusText(status, Loc.Arabic, Loc.Culture), 11.5, "#B8B2AA"));
+        line.TextWrapping = TextWrapping.Wrap;
+        line.Margin = new(0, 2, 0, 2);
+        panel.Children.Add(line);
+        if (CommunityQueue.Notices(store.State, backoff, now).FirstOrDefault(n => n.Provider == provider) is { } notice)
+            panel.Children.Add(NoticeRow(notice, false));
+        if (!enabled)
+            return;
+        var row = new WrapPanel { Margin = new(0, 4, 0, 4) };
+        if (status.Backlog > 0)
+        {
+            var paused = backoff.BacklogPaused(provider);
+            var pause = ActionButton(
+                paused
+                    ? T("Resume past history", "استئناف السجل السابق")
+                    : T("Pause past history", "إيقاف السجل السابق مؤقتًا"),
+                () =>
+                {
+                    watchSync.PausePrevious(provider, !paused);
+                    RenderQuiet();
+                }
+            );
+            pause.Margin = new(0, 0, 8, 0);
+            row.Children.Add(pause);
+            row.Children.Add(ActionButton(T("Cancel past history", "إلغاء السجل السابق"), () =>
+                {
+                    var removed = watchSync.CancelPrevious(provider);
+                    Status.Text = T(
+                        "{0} unsent past titles were removed from the queue. Anything already sent stays sent.",
+                        "أُزيل {0} من العناوين السابقة غير المرسلة من الطابور. ما أُرسل يبقى مُرسلًا.",
+                        removed
+                    );
+                    RenderQuiet();
+                }));
+        }
+        else if (CommunityQueue.PlanBacklog(store.State, provider).Titles > 0)
+            row.Children.Add(
+                ActionButton(T("Also send my past history", "أرسل سجلّي السابق أيضًا"), () =>
+                    ConfirmPastHistory(provider)
+                )
+            );
+        if (row.Children.Count > 0)
+            panel.Children.Add(row);
+    }
+
+    // The Stremio account's mark-watched switches (shown only while a Stremio key exists), its status line,
+    // notices and queue like the other sites, and Restore for every title Noir changed there.
+    void StremioMarkControls(StackPanel panel, Action rerender)
+    {
+        var on = CommunityQueue.StremioMarkOn(store.State);
+        var mark = new CheckBox
+        {
+            Content = new TextBlock
+            {
+                Text = T(
+                    "Mark watched in your Stremio account (also seen by Harbor)",
+                    "علّم المُشاهَد في حساب Stremio (يراه Harbor أيضًا)"
+                ),
+                TextWrapping = TextWrapping.Wrap,
+            },
+            IsChecked = on,
+            Margin = new(0, 8, 0, 4),
+        };
+        var add = new CheckBox
+        {
+            Content = new TextBlock
+            {
+                Text = T("Add watched titles to my Stremio library", "أضف العناوين المُشاهَدة إلى مكتبتي في Stremio"),
+                TextWrapping = TextWrapping.Wrap,
+            },
+            IsChecked = CommunityQueue.StremioAddTitles(store.State),
+            IsEnabled = on,
+            Margin = new(22, 0, 0, 4),
+        };
+        // S3: switching on sends only what is watched from now on; past history is its own button below.
+        mark.Click += (_, _) =>
+        {
+            CommunityQueue.SetStremio(store.State, mark.IsChecked == true, null);
+            store.Save();
+            watchSync?.Retry();
+            rerender();
+        };
+        add.Click += (_, _) =>
+        {
+            CommunityQueue.SetStremio(store.State, null, add.IsChecked == true);
+            store.Save();
+            watchSync?.Retry();
+            rerender();
+        };
+        panel.Children.Add(mark);
+        panel.Children.Add(add);
+        var note = Body(
+            T(
+                "New: try it on one title first, then check it in Stremio.",
+                "جديد: جرّبه على عنوان واحد أولًا، ثم تحقق منه في Stremio."
+            ),
+            11
+        );
+        note.Foreground = Brush("#E4C084");
+        note.Margin = new(0, 0, 0, 4);
+        panel.Children.Add(note);
+        SiteLines(panel, CommunityQueue.Stremio, on);
+        if (on && StremioSync.NeedsReconnect(store.State))
+        {
+            var again = ActionButton(T("Connect Stremio again", "اربط Stremio مجددًا"), ConnectStremio, true);
+            again.Margin = new(0, 4, 0, 4);
+            again.HorizontalAlignment = HorizontalAlignment.Left;
+            panel.Children.Add(again);
+        }
+        Queue(panel, CommunityQueue.Stremio);
+        var restorable = StremioSync.Restorable(store.State, store.DataDirectory);
+        if (restorable.Count == 0)
+            return;
+        var list = new StackPanel { Margin = new(0, 4, 0, 0) };
+        foreach (var (id, item) in restorable)
+        {
+            var row = new DockPanel { Margin = new(10, 0, 0, 3) };
+            var restore = ActionButton(T("Restore", "استعادة"), () => ConfirmStremioRestore(id, item, rerender));
+            restore.Padding = new(10, 3, 10, 3);
+            restore.FontSize = 11;
+            restore.Margin = new(8, 0, 0, 0);
+            DockPanel.SetDock(restore, Dock.Right);
+            row.Children.Add(restore);
+            var name = Bidi(Text(item.Title, 12, "#B8B2AA"));
+            name.TextTrimming = TextTrimming.CharacterEllipsis;
+            name.VerticalAlignment = VerticalAlignment.Center;
+            row.Children.Add(name);
+            list.Children.Add(row);
+        }
+        panel.Children.Add(
+            new Expander
+            {
+                Header = Text(
+                    T("Changed in your Stremio account · {0}", "تغيّر في حساب Stremio · {0}", restorable.Count),
+                    12,
+                    "#C7C2BC"
+                ),
+                Content = list,
+                Foreground = Brush("#C7C2BC"),
+                Margin = new(0, 2, 0, 0),
+            }
+        );
+    }
+
+    // Restore puts back the copy Noir saved before its first change, unless the title changed in Stremio since.
+    void ConfirmStremioRestore(string imdbId, VideoItem item, Action rerender)
+    {
+        var body = SmartPopup();
+        body.Children.Add(
+            Text(T("Restore {0} in Stremio?", "استعادة {0} في Stremio؟", item.Title), 15, weight: FontWeights.SemiBold)
+        );
+        body.Children.Add(
+            Body(
+                T(
+                    "Puts this title back in your Stremio account as it was before Noir first changed it. If it changed in Stremio since Noir's last change, it is left as it is.",
+                    "يعيد هذا العنوان في حساب Stremio كما كان قبل أول تغيير من Noir. وإن تغيّر في Stremio بعد آخر تغيير من Noir فيُترك كما هو."
+                ),
+                12
+            )
+        );
+        var row = new WrapPanel { Margin = new(0, 10, 0, 0) };
+        body.Children.Add(row);
+        var go = ActionButton(
+            T("Restore", "استعادة"),
+            async () =>
+            {
+                CloseSmart();
+                if (watchSync == null)
+                    return;
+                var summary = await watchSync.RestoreStremio(imdbId);
+                Status.Text = summary.Text(Loc.Arabic);
+                rerender();
+            },
+            true
+        );
+        go.Margin = new(0, 0, 8, 0);
+        row.Children.Add(go);
+        row.Children.Add(ActionButton(T("Cancel", "إلغاء"), CloseSmart));
+    }
+
+    // S3: say how many titles and how long before anything is queued.
+    void ConfirmPastHistory(string provider)
+    {
+        var plan = CommunityQueue.PlanBacklog(store.State, provider);
+        var body = SmartPopup();
+        body.Children.Add(
+            Text(
+                T("Also send my past history to {0}?", "هل تريد إرسال سجلّي السابق إلى {0} أيضًا؟", provider),
+                15,
+                weight: FontWeights.SemiBold
+            )
+        );
+        body.Children.Add(Body(CommunityQueue.BacklogText(plan, Loc.Arabic, Loc.Culture), 13));
+        body.Children.Add(
+            Body(
+                T(
+                    "It runs in the background, newest first, at a pace the website can live with. Pause or cancel any time: what was already sent stays sent.",
+                    "يعمل في الخلفية بدءًا من الأحدث وبوتيرة يتحملها الموقع. يمكنك الإيقاف أو الإلغاء في أي وقت، وما أُرسل يبقى مُرسلًا."
+                ),
+                12
+            )
+        );
+        var row = new WrapPanel { Margin = new(0, 10, 0, 0) };
+        body.Children.Add(row);
+        var go = ActionButton(
+            T("Send", "إرسال"),
+            () =>
+            {
+                CloseSmart();
+                watchSync?.QueuePrevious(provider);
+                RenderQuiet();
+            },
+            true
+        );
+        go.IsEnabled = plan.Titles > 0;
+        go.Margin = new(0, 0, 8, 0);
+        row.Children.Add(go);
+        row.Children.Add(ActionButton(T("Cancel", "إلغاء"), CloseSmart));
+    }
+
     Button? QueueFix(string provider, string reason, List<WatchSyncJob> jobs)
     {
+        if (provider == CommunityQueue.Stremio && StremioSync.IsReconnect(reason))
+            return ActionButton(T("Connect Stremio again", "اربط Stremio مجددًا"), ConnectStremio);
         if (reason.Contains("session has expired"))
             return ActionButton("Sign in again", () => OpenAccountSignIn(provider));
         if (reason.Contains("verified title ID"))
@@ -1120,13 +1475,15 @@ public partial class MainWindow
                     !importBusy;
                 row.More(("Send earlier history", () =>
                     {
+                        // Nuvio's own past-history send: queues Nuvio only, never the other sites (S3).
                         foreach (var e in store.State.Catalog.Values.Where(e => store.EverWatched(e.Item)))
                             CommunityQueue.Enqueue(
                                 store.State,
                                 e.Item,
                                 store.ViewingHistory(e.Item).FirstOrDefault()?.WatchedAt
                                     ?? e.Progress?.UpdatedAt
-                                    ?? DateTimeOffset.UtcNow
+                                    ?? DateTimeOffset.UtcNow,
+                                "Nuvio"
                             );
                         store.Save();
                         nuvioSync?.Wake();
@@ -1148,9 +1505,13 @@ public partial class MainWindow
     // Imports finish on History → Add history, where the review card lives.
     void ImportFromConnections(Action start)
     {
-        historyType = "All";
-        trackerTab = "Import";
-        Navigate("History");
+        // Already on History > Import: no navigation, so the page does not jump.
+        if (!(page == "History" && trackerTab == "Import"))
+        {
+            historyType = "All";
+            trackerTab = "Import";
+            Navigate("History");
+        }
         start();
     }
 

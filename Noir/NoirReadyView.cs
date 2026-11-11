@@ -43,10 +43,146 @@ public partial class MainWindow
             "New episode" => T(value, "حلقة جديدة"),
             "Six-hour refresh" => T(value, "تحديث كل ست ساعات"),
             "Retry" => T(value, "إعادة المحاولة"),
+            // A1–A8 rules: which rule removed, scheduled or downloaded something (Activity log, U73).
+            "Moved removal settings to the new rules" => T(value, "نُقلت إعدادات الإزالة إلى القواعد الجديدة"),
+            "Removal date changed" => T(value, "تغيّر موعد الإزالة"),
+            "Removed a watched Noir download" => T(value, "أُزيل ملف شوهد نزّله Noir"),
+            "Sent a watched Keep ready file to the Recycle Bin" => T(
+                value,
+                "نُقل ملف شوهد من إبقاء الحلقات جاهزة إلى سلة المحذوفات"
+            ),
+            "Sent a watched Noir download to the Recycle Bin" => T(value, "نُقل ملف شوهد نزّله Noir إلى سلة المحذوفات"),
+            "Removal failed; the file stays" => T(value, "تعذرت الإزالة؛ يبقى الملف"),
+            "Waiting for download hours" => T(value, "بانتظار ساعات التنزيل"),
+            "Right after watching" => T(value, "فور المشاهدة"),
+            "1 day after watching" => T(value, "بعد يوم من المشاهدة"),
+            "7 days after watching" => T(value, "بعد 7 أيام من المشاهدة"),
+            "30 days after watching" => T(value, "بعد 30 يومًا من المشاهدة"),
+            "Never" => T(value, "أبدًا"),
+            "Downloaded by Noir" => T(value, "نُزّل بواسطة Noir"),
+            "Keep ready file" => T(value, "ملف من إبقاء الحلقات جاهزة"),
+            "Switched on for this show" => T(value, "مفعّل لهذا المسلسل"),
+            "Also download automatically" => T(value, "تنزيل تلقائي أيضًا"),
+            "A show you are watching" => T(value, "مسلسل تتابعه"),
+            "On your watchlist" => T(value, "في قائمتك"),
             _ => T(value),
         };
 
-    static string ReadySize(long bytes) => bytes == 0 ? "0 GB" : DownloadNaming.Size(bytes);
+    // Activity entries whose detail names the rule that acted (A1–A8).
+    static readonly HashSet<string> ReadyRuleCodes =
+    [
+        "Watched file removal scheduled",
+        "Removal date changed",
+        "Removed watched managed file",
+        "Removed a watched Noir download",
+        "Sent a watched Keep ready file to the Recycle Bin",
+        "Sent a watched Noir download to the Recycle Bin",
+        "Removal failed; the file stays",
+        "Queued confirmed ready file",
+    ];
+
+    static string ReadyDetail(string detail) => string.Join(" · ", detail.Split(" · ").Select(ReadyText));
+
+    static (string Label, int Value)[] ReadyRemoveOptions() =>
+        [
+            (T("Never", "أبدًا"), -1),
+            (T("Right after watching", "فور المشاهدة"), 1),
+            (T("After 1 day", "بعد يوم"), 24),
+            (T("After 7 days", "بعد 7 أيام"), 168),
+            (T("After 30 days", "بعد 30 يومًا"), 720),
+        ];
+
+    static (string Label, int Value)[] ReadyCountOptions() =>
+        [
+            (T("Next episode", "الحلقة التالية"), 1),
+            (T("Next 2", "الحلقتان التاليتان"), 2),
+            (T("Next 3", "الحلقات الثلاث التالية"), 3),
+            (T("Next 5", "الحلقات الخمس التالية"), 5),
+            (T("Rest of the season", "بقية الموسم"), -1),
+        ];
+
+    static (string Label, int Value)[] ReadyKeepLastOptions() =>
+        [
+            (T("None", "لا شيء"), 0),
+            (T("Last 1", "آخر حلقة"), 1),
+            (T("Last 2", "آخر حلقتين"), 2),
+            (T("Last 3", "آخر 3 حلقات"), 3),
+        ];
+
+    // Per show: "Same as default" first, naming what the default is today.
+    static (string Label, int? Value)[] ReadyWithDefault((string Label, int Value)[] options, int current) =>
+        new[]
+        {
+            (
+                T(
+                    "Same as default · {0}",
+                    "مثل الافتراضي · {0}",
+                    options.FirstOrDefault(o => o.Value == current).Label ?? options[0].Label
+                ),
+                (int?)null
+            ),
+        }
+            .Concat(options.Select(o => (o.Label, (int?)o.Value)))
+            .ToArray();
+
+    // U47 pick-one row for the Keep ready rules: a caption, gold pills, an optional hint. Picking restyles the row.
+    FrameworkElement ReadyChoice<TV>(
+        string caption,
+        (string Label, TV Value)[] options,
+        TV selected,
+        Action<TV> pick,
+        string hint = ""
+    )
+    {
+        var column = new StackPanel { Margin = new(0, 12, 0, 2) };
+        column.Children.Add(Text(caption, 12, "#E4C084"));
+        var row = new WrapPanel { Margin = new(0, 6, 0, 0) };
+        var buttons = new List<(Button Button, TV Value)>();
+        foreach (var (label, value) in options)
+        {
+            var button = PillOption(
+                label,
+                () =>
+                {
+                    foreach (var (other, v) in buttons)
+                        StylePillOption(other, EqualityComparer<TV>.Default.Equals(v, value));
+                    pick(value);
+                },
+                EqualityComparer<TV>.Default.Equals(value, selected)
+            );
+            System.Windows.Automation.AutomationProperties.SetName(button, caption + " · " + label);
+            buttons.Add((button, value));
+            row.Children.Add(button);
+        }
+        column.Children.Add(row);
+        if (hint.Length > 0)
+            column.Children.Add(Body(hint, 12));
+        return column;
+    }
+
+    // Arabic: each Latin value (a size, a quality) is its own left-to-right run, so "60 GB" keeps its order.
+    static void LtrRuns(TextBlock block, params string[] values)
+    {
+        if (!Loc.Arabic)
+            return;
+        var text = block.Text;
+        block.Inlines.Clear();
+        var at = 0;
+        foreach (var value in values)
+        {
+            var i = value.Length == 0 ? -1 : text.IndexOf(value, at, StringComparison.Ordinal);
+            if (i < 0)
+                continue;
+            if (i > at)
+                block.Inlines.Add(new System.Windows.Documents.Run(text[at..i]));
+            block.Inlines.Add(new System.Windows.Documents.Run(value) { FlowDirection = FlowDirection.LeftToRight });
+            at = i + value.Length;
+        }
+        if (at < text.Length)
+            block.Inlines.Add(new System.Windows.Documents.Run(text[at..]));
+    }
+
+    static string ReadySize(long bytes) => NoirReadyPolicy.SizeText(bytes);
 
     Border ReadyCard(UIElement child) =>
         new()
@@ -189,22 +325,27 @@ public partial class MainWindow
                 13
             )
         );
-        var counts = new[]
-        {
-            T("1 episode", "حلقة واحدة"),
-            T("2 episodes", "حلقتان"),
-            T("3 episodes", "٣ حلقات"),
-            T("Whole season", "الموسم كاملًا"),
-        };
-        int[] values = [1, 2, 3, -1];
-        var count = new ComboBox
-        {
-            ItemsSource = counts,
-            SelectedIndex = Math.Max(0, Array.IndexOf(values, preference.KeepReadyCount)),
-            Margin = new(0, 10, 0, 12),
-            Padding = Density.InputPadding,
-        };
-        panel.Children.Add(count);
+        // A5 / A1 / A3 per show: "Same as default" first; the defaults live in the Keep ready settings.
+        var defaults = manager.ReadyViewState;
+        int? countChoice = preference.KeepReadyCount is 1 or 2 or 3 or 5 or -1 ? preference.KeepReadyCount : null;
+        int? removeChoice = preference.RemoveAfterHours is -1 or 1 or 24 or 168 or 720
+            ? preference.RemoveAfterHours
+            : null;
+        Action? rerunPreview = null;
+        int? keepChoice = preference.KeepLastWatched is >= 0 and <= 3 ? preference.KeepLastWatched : null;
+        panel.Children.Add(
+            ReadyChoice(
+                T("How far ahead", "إلى أي مدى مسبقًا"),
+                ReadyWithDefault(ReadyCountOptions(), NoirReadyPolicy.Count(new(), defaults)),
+                countChoice,
+                v =>
+                {
+                    countChoice = v;
+                    rerunPreview?.Invoke();
+                }
+            )
+        );
+        panel.Children.Add(new Border { Height = 10 });
         var rows = new StackPanel();
         var card = ReadyCard(rows);
         card.Padding = new(16);
@@ -219,7 +360,7 @@ public partial class MainWindow
             rows.Children.Clear();
             rows.Children.Add(Text(T("UP NEXT", "الحلقات القادمة"), 11, "#E4C084"));
             rows.Children.Add(Body(T("Checking sources…", "جارٍ فحص المصادر…"), 13));
-            var selected = values[Math.Max(0, count.SelectedIndex)];
+            var selected = countChoice ?? NoirReadyPolicy.Count(new(), defaults);
             var preview = await Task.Run(() =>
             {
                 var inputs = store.ReadyPreview(item.GroupKey);
@@ -244,6 +385,12 @@ public partial class MainWindow
             impact.Text = T(
                 "Quality: {0} · Budget: {1} · Keep free: {2}",
                 "الجودة: {0} · الميزانية: {1} · المساحة الحرة: {2}",
+                preference.Resolution,
+                ReadySize(manager.ReadyViewState.BudgetBytes),
+                ReadySize(manager.ReadyViewState.KeepFreeBytes)
+            );
+            LtrRuns(
+                impact,
                 preference.Resolution,
                 ReadySize(manager.ReadyViewState.BudgetBytes),
                 ReadySize(manager.ReadyViewState.KeepFreeBytes)
@@ -288,6 +435,13 @@ public partial class MainWindow
                         rows.Children.Add(Body($"S{e.Season:00} E{e.Episode:00} · " + ReadyText(decision.Reason), 12));
                 }
                 impact.Text += Environment.NewLine + T("Budget impact: {0}", "أثر الميزانية: {0}", ReadySize(bytes));
+                LtrRuns(
+                    impact,
+                    preference.Resolution,
+                    ReadySize(manager.ReadyViewState.BudgetBytes),
+                    ReadySize(manager.ReadyViewState.KeepFreeBytes),
+                    ReadySize(bytes)
+                );
             }
             catch (Exception)
             {
@@ -295,18 +449,27 @@ public partial class MainWindow
                     rows.Children.Add(Body(ReadyText("Source check failed; recheck scheduled"), 12));
             }
         }
-        var cleanup = new CheckBox
-        {
-            Content = T("Remove watched after 7 days", "إزالة ما تمت مشاهدته بعد ٧ أيام"),
-            IsChecked = manager.ReadyViewState.CleanupWatched,
-            Margin = new(0, 16, 0, 8),
-        };
-        panel.Children.Add(cleanup);
+        panel.Children.Add(
+            ReadyChoice(
+                T("Remove watched files", "إزالة الملفات المشاهدة"),
+                ReadyWithDefault(ReadyRemoveOptions(), NoirReadyPolicy.RemoveHours(defaults)),
+                removeChoice,
+                v => removeChoice = v
+            )
+        );
+        panel.Children.Add(
+            ReadyChoice(
+                T("Keep the last watched", "الإبقاء على آخر ما شوهد"),
+                ReadyWithDefault(ReadyKeepLastOptions(), NoirReadyPolicy.KeepLast(defaults)),
+                keepChoice,
+                v => keepChoice = v
+            )
+        );
         panel.Children.Add(
             Body(
                 T(
-                    "Only files Keep ready downloaded. Pinned files stay. Removal waits until every profile has finished; unknown progress keeps the file.",
-                    "فقط الملفات التي جلبتها ميزة إبقاء الحلقات جاهزة. تبقى الملفات المثبتة. تنتظر الإزالة حتى تنتهي جميع الملفات الشخصية من المشاهدة؛ وعند غياب معلومات التقدم يبقى الملف."
+                    "Pinned files and files you added yourself stay. Removal waits until every profile has finished; unknown progress keeps the file.",
+                    "تبقى الملفات المثبتة والملفات التي أضفتها بنفسك. تنتظر الإزالة حتى تنتهي جميع الملفات الشخصية من المشاهدة؛ وعند غياب معلومات التقدم يبقى الملف."
                 ),
                 12
             )
@@ -331,14 +494,11 @@ public partial class MainWindow
                 {
                     preference.KeepReadyEnabled = true;
                     preference.AutoDownload = true;
-                    preference.KeepReadyCount = values[Math.Max(0, count.SelectedIndex)];
+                    preference.KeepReadyCount = countChoice;
+                    preference.RemoveAfterHours = removeChoice;
+                    preference.KeepLastWatched = keepChoice;
                     await Task.Run(() => manager.SaveSeasonPreferences(item.Id, preference));
-                    var removeWatched = cleanup.IsChecked == true;
-                    await manager.ChangeReady(s =>
-                    {
-                        s.CleanupWatched = removeWatched;
-                        s.Log("Preferences changed", item.Title);
-                    });
+                    await manager.ChangeReady(s => s.Log("Preferences changed", item.Title));
                     window.Close(true);
                     _ = manager.PrepareReady("Preferences changed");
                 }
@@ -349,7 +509,7 @@ public partial class MainWindow
             },
             true
         );
-        count.SelectionChanged += (_, _) => keepReadyPreviewTask = Preview();
+        rerunPreview = () => keepReadyPreviewTask = Preview();
         window.Closed += _ => revision++;
         keepReadyPreviewTask = Preview();
     }
@@ -389,13 +549,161 @@ public partial class MainWindow
         }
         var budget = Number(T("Keep ready budget · GB", "ميزانية إبقاء الحلقات جاهزة · GB"), state.BudgetBytes);
         var free = Number(T("Keep free · at least 10 GB", "المساحة الحرة · 10 GB على الأقل"), state.KeepFreeBytes);
-        var cleanup = new CheckBox
+        // A1–A8 global defaults; each applies on click (P7). A show's own sheet can override A1, A3, A5 and the switch.
+        async Task Rule(Action<NoirReadyState> change)
         {
-            Content = T("Remove watched after 7 days", "إزالة ما تمت مشاهدته بعد ٧ أيام"),
-            IsChecked = state.CleanupWatched,
-            Margin = new(0, 8, 0, 8),
+            await manager.ChangeReady(s =>
+            {
+                change(s);
+                s.Log("Preferences changed");
+            });
+            _ = manager.PrepareReady("Preferences changed");
+        }
+        panel.Children.Add(
+            ReadyChoice(
+                T("Which shows download automatically", "المسلسلات التي تُنزّل تلقائيًا"),
+                [
+                    (T("Only shows I switch on", "المسلسلات التي أفعّلها فقط"), "Switched"),
+                    (T("Shows I am watching", "المسلسلات التي أتابعها"), "Watching"),
+                    (T("Also my watchlist", "وقائمتي أيضًا"), "Watchlist"),
+                ],
+                state.AutoShows,
+                v => _ = Rule(s => s.AutoShows = v),
+                T(
+                    "Shows I am watching are the started shows Noir alerts you about when a new episode airs: watched in the last six months or caught up. A show's own switch always wins.",
+                    "المسلسلات التي أتابعها هي التي بدأتها ويُنبّهك Noir عند عرض حلقة جديدة منها: شاهدتها خلال الأشهر الستة الأخيرة أو أنت مواكب لها. مفتاح المسلسل نفسه له الأولوية دائمًا."
+                )
+            )
+        );
+        panel.Children.Add(
+            ReadyChoice(
+                T("How far ahead", "إلى أي مدى مسبقًا"),
+                ReadyCountOptions(),
+                NoirReadyPolicy.Count(new(), state),
+                v => _ = Rule(s => s.ReadyCount = v)
+            )
+        );
+        var hours = Enumerable.Range(0, 24).Select(h => $"{h:00}:00").ToArray();
+        var window = new WrapPanel
+        {
+            Margin = new(0, 4, 0, 0),
+            Visibility = state.WindowStart != null ? Visibility.Visible : Visibility.Collapsed,
         };
-        panel.Children.Add(cleanup);
+        var from = new ComboBox
+        {
+            ItemsSource = hours,
+            SelectedIndex = (state.WindowStart ?? 0) / 60,
+            Width = 96,
+            Padding = Density.InputPadding,
+        };
+        var to = new ComboBox
+        {
+            ItemsSource = hours,
+            SelectedIndex = (state.WindowEnd ?? 360) / 60,
+            Width = 96,
+            Padding = Density.InputPadding,
+        };
+        window.Children.Add(from);
+        window.Children.Add(Body(" " + T("to", "إلى") + " ", 13));
+        window.Children.Add(to);
+        System.Windows.Automation.AutomationProperties.SetName(from, T("From", "من"));
+        System.Windows.Automation.AutomationProperties.SetName(to, T("To", "إلى"));
+        void SaveWindow(bool on)
+        {
+            var (a, b) = (from.SelectedIndex * 60, to.SelectedIndex * 60);
+            _ = Rule(s =>
+            {
+                s.WindowStart = on ? a : null;
+                s.WindowEnd = on ? b : null;
+            });
+        }
+        panel.Children.Add(
+            ReadyChoice(
+                T("When automatic downloads may start", "متى يمكن أن تبدأ التنزيلات التلقائية"),
+                [(T("Any time", "في أي وقت"), false), (T("Only between", "فقط بين"), true)],
+                state.WindowStart != null,
+                on =>
+                {
+                    window.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+                    SaveWindow(on);
+                },
+                T(
+                    "Only new automatic downloads wait for these hours. Downloads already running and the ones you start yourself are never stopped.",
+                    "تنتظر هذه الساعات التنزيلات التلقائية الجديدة فقط. لا تتوقف أبدًا التنزيلات الجارية ولا التي تبدؤها بنفسك."
+                )
+            )
+        );
+        panel.Children.Add(window);
+        from.SelectionChanged += (_, _) => SaveWindow(true);
+        to.SelectionChanged += (_, _) => SaveWindow(true);
+        panel.Children.Add(
+            ReadyChoice(
+                T("Remove watched files", "إزالة الملفات المشاهدة"),
+                ReadyRemoveOptions(),
+                NoirReadyPolicy.RemoveHours(state),
+                v => _ = Rule(s => s.RemoveAfterHours = v),
+                T(
+                    "Right after watching waits an hour so a mistaken mark can be undone. Changing this never removes a file sooner than a day from now. Removal waits until every profile has finished.",
+                    "«فور المشاهدة» ينتظر ساعة لتتمكن من التراجع عن علامة خاطئة. تغيير هذا الخيار لا يزيل أي ملف قبل مرور يوم من الآن. تنتظر الإزالة حتى تنتهي جميع الملفات الشخصية من المشاهدة."
+                )
+            )
+        );
+        var movies = new CheckBox
+        {
+            Content = T("Movies too", "الأفلام أيضًا"),
+            IsChecked = state.RemoveMovies,
+            Margin = new(0, 2, 0, 4),
+            IsEnabled = state.RemoveScope == "Noir",
+        };
+        panel.Children.Add(
+            ReadyChoice(
+                T("What removal covers", "ما تشمله الإزالة"),
+                [
+                    (T("Keep ready files only", "ملفات إبقاء الحلقات جاهزة فقط"), "Keep ready"),
+                    (T("Everything Noir downloaded", "كل ما نزّله Noir"), "Noir"),
+                ],
+                state.RemoveScope,
+                v =>
+                {
+                    movies.IsEnabled = v == "Noir";
+                    _ = Rule(s => s.RemoveScope = v);
+                },
+                T(
+                    "Files you added yourself are never removed, and neither are pinned files. Movies Noir downloaded stay unless you include them. Everything Noir downloaded includes downloads you started yourself in Noir, old ones too.",
+                    "لا تُزال أبدًا الملفات التي أضفتها بنفسك ولا الملفات المثبتة. تبقى الأفلام التي نزّلها Noir ما لم تُضمّنها. تشمل «كل ما نزّله Noir» التنزيلات التي بدأتها بنفسك في Noir، والقديمة منها أيضًا."
+                )
+            )
+        );
+        panel.Children.Add(movies);
+        movies.Click += (_, _) =>
+        {
+            var on = movies.IsChecked == true;
+            _ = Rule(s => s.RemoveMovies = on);
+        };
+        panel.Children.Add(
+            ReadyChoice(
+                T("Keep the last watched", "الإبقاء على آخر ما شوهد"),
+                ReadyKeepLastOptions(),
+                NoirReadyPolicy.KeepLast(state),
+                v => _ = Rule(s => s.KeepLastWatched = v),
+                T(
+                    "Keeps the most recently watched episodes of each show for a rewatch.",
+                    "يُبقي أحدث الحلقات المشاهدة من كل مسلسل لإعادة المشاهدة."
+                )
+            )
+        );
+        panel.Children.Add(
+            ReadyChoice(
+                T("Removed files go", "وجهة الملفات المُزالة"),
+                [(T("Delete permanently", "حذف نهائي"), false), (T("Recycle Bin", "سلة المحذوفات"), true)],
+                state.RecycleRemoved,
+                v => _ = Rule(s => s.RecycleRemoved = v),
+                T(
+                    "The Recycle Bin frees space only when the bin is emptied.",
+                    "سلة المحذوفات لا تُفرغ المساحة إلا عند إفراغها."
+                )
+            )
+        );
         var pause = new CheckBox
         {
             Content = ReadyText("Pause preparation"),
@@ -417,10 +725,10 @@ public partial class MainWindow
         // Settings apply as you change them (P7): numbers on Enter or when leaving the field, the checkbox on click.
         var status = Body("", 12);
         panel.Children.Add(status);
-        string last = budget.Text + "|" + free.Text + "|" + cleanup.IsChecked;
+        string last = budget.Text + "|" + free.Text;
         async Task Save()
         {
-            if (budget.Text + "|" + free.Text + "|" + cleanup.IsChecked == last)
+            if (budget.Text + "|" + free.Text == last)
                 return;
             if (
                 !double.TryParse(
@@ -449,17 +757,15 @@ public partial class MainWindow
                 );
                 return;
             }
-            var removeWatched = cleanup.IsChecked == true;
             await manager.ChangeReady(s =>
             {
                 s.BudgetBytes = (long)(b * NoirReadyPolicy.GB);
                 s.KeepFreeBytes = (long)(f * NoirReadyPolicy.GB);
-                s.CleanupWatched = removeWatched;
                 s.Log("Preferences changed");
             });
             status.Text = "✓ " + T("Saved", "تم الحفظ");
             _ = manager.PrepareReady("Preferences changed");
-            last = budget.Text + "|" + free.Text + "|" + cleanup.IsChecked;
+            last = budget.Text + "|" + free.Text;
         }
         foreach (var box in new[] { budget, free })
         {
@@ -470,7 +776,6 @@ public partial class MainWindow
                     await Save();
             };
         }
-        cleanup.Click += async (_, _) => await Save();
         return ReadyCard(panel);
     }
 
@@ -553,7 +858,7 @@ public partial class MainWindow
         void DrawFiles()
         {
             files.Children.Clear();
-            foreach (var file in state.ManagedFiles.TakeLast(60))
+            foreach (var file in state.ManagedFiles.TakeLast(60).Concat(state.NoirFiles))
             {
                 var row = new StackPanel();
                 row.Children.Add(Body(file.Title, 13));
@@ -565,6 +870,11 @@ public partial class MainWindow
                                     "الإزالة المجدولة · {0}",
                                     at.ToLocalTime().ToString("g", Loc.Culture)
                                 )
+                                    + (
+                                        file.RuleHours > 0
+                                            ? " · " + ReadyText(NoirReadyPolicy.RuleLabel(file.RuleHours))
+                                            : ""
+                                    )
                             : file.Pinned ? T("Pinned · stays on this PC", "مثبّت · يبقى على هذا الكمبيوتر")
                             : T("Kept ready", "محفوظ جاهزًا"),
                         12
@@ -578,7 +888,7 @@ public partial class MainWindow
                     {
                         await manager.ChangeReady(s =>
                         {
-                            var current = s.ManagedFiles.FirstOrDefault(f => f.JobId == file.JobId);
+                            var current = s.ManagedFiles.Concat(s.NoirFiles).FirstOrDefault(f => f.JobId == file.JobId);
                             if (current != null)
                             {
                                 edit(current);
@@ -629,7 +939,12 @@ public partial class MainWindow
                         entry.At.ToLocalTime().ToString("g", Loc.Culture)
                             + " · "
                             + ReadyText(entry.Code)
-                            + (entry.Title.Length > 0 ? " · " + entry.Title : ""),
+                            + (entry.Title.Length > 0 ? " · " + entry.Title : "")
+                            + (
+                                entry.Detail.Length > 0 && ReadyRuleCodes.Contains(entry.Code)
+                                    ? " · " + ReadyDetail(entry.Detail)
+                                    : ""
+                            ),
                         12
                     )
                 );
@@ -664,7 +979,12 @@ public partial class MainWindow
             var stamp =
                 state.Paused
                 + string.Join("|", state.Titles.Values.Select(t => t.Group + t.Reason + t.Bytes))
-                + string.Join("|", state.ManagedFiles.Select(f => f.JobId + f.Pinned + f.RemoveAt + f.CleanupCancelled))
+                + string.Join(
+                    "|",
+                    state
+                        .ManagedFiles.Concat(state.NoirFiles)
+                        .Select(f => f.JobId + f.Pinned + f.RemoveAt + f.CleanupCancelled)
+                )
                 + state.Why.LastOrDefault()?.At.ToString("O");
             if (stamp != drawn)
             {

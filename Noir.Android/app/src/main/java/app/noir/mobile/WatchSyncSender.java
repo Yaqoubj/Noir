@@ -13,7 +13,7 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
 
-/** P2: marks the phone's own viewings on Trakt and Serializd with an off-screen WebView on the app's signed-in session, in the PC's order:
+/** P2: marks the phone's own viewings on Trakt and Serializd with an off-screen WebView on the app's signed-in session, and in the phone's own Stremio account over HTTPS (StremioWriter), in the PC's order:
  open the page, read the control, already watched = done without a click, else click (Trakt: pick "Just now"), reload, confirm.
  Runs only while the app process is alive: after a viewing is recorded, on app start and every 15 minutes. Never on TV. */
 final class WatchSyncSender {
@@ -64,16 +64,17 @@ final class WatchSyncSender {
  static Problem title(String m){return new Problem(m,false);}
 
  static final class Pass {
-  final DataStore data;final Activity host;final Context context;WebView web;volatile boolean cancelled,loadFailed;volatile CountDownLatch load;
+  final DataStore data;final Activity host;final Context context;WebView web;StremioWriter stremio;volatile boolean cancelled,loadFailed;volatile CountDownLatch load;
   Pass(DataStore d,Activity h,Context c){data=d;host=h;context=c;}
   void run(){passes++;WatchSync.absorb(data);Set<String> stopped=new HashSet<>();boolean sentOne=false;
    try{for(JSONObject job:WatchSync.due(data,WatchSync.clock.now())){String p=job.optString("provider"),key=WatchSync.key(job);if(cancelled)break;if(stopped.contains(p)||WatchSync.waiting(data,p,WatchSync.clock.now())||!WatchSync.current(data,job))continue;
      JSONObject item=data.item(job.optString("itemId"));if(!WatchSync.syncedAt(item,p).isEmpty()){WatchSync.absorb(data);continue;}
      if(WatchSync.paced(data,p,WatchSync.clock.now())){stopped.add(p);continue;}
      if(sentOne)try{sleep(WatchSync.SPACING);}catch(Cancelled e){break;}catch(InterruptedException e){Thread.currentThread().interrupt();break;}
-     WatchSync.started(data,key);WatchSync.counted(data,p);sentOne=true;
-     try{Step step=testStep;if(step!=null)step.send(job,item);else send(job,item);if(WatchSync.current(data,job)){WatchSync.done(data,key);WatchSync.siteWorked(data,p);}else WatchSync.interrupted(data,key);}
-     catch(Problem e){if(e.site){WatchSync.siteFailed(data,p,key,e.getMessage());stopped.add(p);}else WatchSync.titleFailed(data,key,item,e.getMessage());}
+     WatchSync.started(data,key);sentOne=true;
+     /* Like the PC: a mark counts toward the pace only after a confirmed send or a per-title failure, never for a skip, an interruption or a site failure (the backoff covers those). */
+     try{Step step=testStep;if(step!=null)step.send(job,item);else if(p.equals(WatchSync.STREMIO))stremio(job,item);else send(job,item);if(WatchSync.current(data,job)){WatchSync.done(data,key);WatchSync.counted(data,p);WatchSync.siteWorked(data,p);}else WatchSync.interrupted(data,key);}
+     catch(Problem e){if(e.site){WatchSync.siteFailed(data,p,key,e.getMessage());stopped.add(p);}else{WatchSync.titleFailed(data,key,item,e.getMessage());WatchSync.counted(data,p);}}
      catch(Skip e){WatchSync.interrupted(data,key);}
      catch(Cancelled e){WatchSync.interrupted(data,key);break;}
      catch(InterruptedException e){WatchSync.interrupted(data,key);Thread.currentThread().interrupt();break;}
@@ -98,6 +99,10 @@ final class WatchSyncSender {
    /* Both sites update their controls optimistically. Reload before calling the job successful. */
    sleep(4000);navigate(url);
    if(!"watched".equals(waitControl(item,p)))throw site("The website hasn't confirmed the watched mark. Noir will recheck later.");}
+
+  /* Stremio: one read-modify-write per title, no page. Already watched there = done with no write; the switch going off = not sent. */
+  void stremio(JSONObject job,JSONObject item)throws Exception{check();if(stremio==null)stremio=StremioWriter.forPhone(data);StremioWriter.Result r=stremio.mark(item,job.optLong("watchedAt"));check();
+   if(r.status==StremioWriter.Status.OFF)throw new Skip();if(r.site())throw site(r.message);if(r.title())throw title(r.message);}
 
   String control(JSONObject item,String p,boolean click)throws Exception{Object v=read(p.equals("Serializd")?WatchSync.serializdControl(click):WatchSync.traktControl(item,click));return v instanceof String?(String)v:"waiting";}
   String waitControl(JSONObject item,String p)throws Exception{for(int i=0;i<50;i++){check();String r=control(item,p,false);if(r.equals("watched")||r.equals("ready"))return r;if(r.equals("signed-out")&&i>=10)return r;sleep(500);}return "waiting";}

@@ -406,6 +406,8 @@ public partial class MainWindow
         header.Children.Add(caption);
         header.SizeChanged += (_, e) => DockPanel.SetDock(actions, e.NewSize.Width < 640 ? Dock.Bottom : Dock.Right);
         ContentPanel.Children.Add(header);
+        if (SyncNoticeLine() is { } syncNotice)
+            ContentPanel.Children.Add(syncNotice);
         ContentPanel.Children.Add(HistoryPillTabs());
         switch (trackerTab)
         {
@@ -2009,6 +2011,7 @@ public partial class MainWindow
     {
         var popup = new Popup
         {
+            FlowDirection = LibraryRoot.FlowDirection,
             PlacementTarget = anchor,
             Placement = anchor == null ? PlacementMode.MousePoint : PlacementMode.Bottom,
             StaysOpen = false,

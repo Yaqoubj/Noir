@@ -959,6 +959,7 @@ public sealed class HistoryImporter(LibraryStore store, DiscoveryClient discover
     {
         int added = 0;
         var id = store.BeginImport(plan.Service);
+        using var scope = store.MatchScope();
         using (store.Batch())
             foreach (var title in plan.Titles)
             {

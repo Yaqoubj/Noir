@@ -21,6 +21,10 @@ public sealed class DownloadScopePreference
 public sealed class DownloadManagePreference
 {
     public DownloadDeleteChoice WhenDeleting { get; set; }
+
+    // O2: shared by new downloads and the organizer. O3: organize new files after a library scan.
+    public NamingOptions Naming { get; set; } = new();
+    public bool AutoOrganize { get; set; }
     public Dictionary<string, DownloadScopePreference> Shows { get; set; } = [];
 }
 
@@ -55,7 +59,10 @@ public sealed record DownloadSpaceItem(
     long Bytes,
     string Path = "",
     DownloadLocalFile? File = null,
-    string JobId = ""
+    string JobId = "",
+    bool Preselect = true,
+    bool ListOnly = false,
+    string KeepPath = ""
 );
 
 public sealed record DownloadSpaceGroup(string Kind, List<DownloadSpaceItem> Items)
@@ -82,6 +89,7 @@ public sealed partial class PcDownloads
                 return;
             movesTracked = true;
             store.DownloadFileMoved += UpdateMovedFile;
+            store.DownloadFilesMoved += UpdateMovedFiles;
         }
     }
 
@@ -113,6 +121,33 @@ public sealed partial class PcDownloads
             p.WhenDeleting = choice;
             Atomic(ManagePath, JsonSerializer.SerializeToUtf8Bytes(p, Json));
         }
+    }
+
+    public void SetNaming(NamingOptions naming)
+    {
+        lock (manageGate)
+        {
+            var p = ManagementPreferences;
+            p.Naming = new() { EpisodeTitle = naming.EpisodeTitle, MovieFolder = naming.MovieFolder };
+            Atomic(ManagePath, JsonSerializer.SerializeToUtf8Bytes(p, Json));
+        }
+    }
+
+    public void SetAutoOrganize(bool on)
+    {
+        lock (manageGate)
+        {
+            var p = ManagementPreferences;
+            p.AutoOrganize = on;
+            Atomic(ManagePath, JsonSerializer.SerializeToUtf8Bytes(p, Json));
+        }
+    }
+
+    // A file a download is still writing, or about to write: never organized or cleaned up under it.
+    public bool IsDownloadingFile(string path)
+    {
+        lock (gate)
+            return jobs.Any(j => Live(j) && j.Destination.Equals(path, StringComparison.OrdinalIgnoreCase));
     }
 
     public DownloadScopePreference ScopePreferences(string group) =>
@@ -384,13 +419,19 @@ public sealed partial class PcDownloads
         }
     }
 
-    public void UpdateMovedFile(string from, string to)
+    public void UpdateMovedFile(string from, string to) => UpdateMovedFiles([(from, to)]);
+
+    // One pass for a whole organizing run: one save of the job list and of the ready list, not one per file.
+    public void UpdateMovedFiles(IReadOnlyList<(string From, string To)> moves)
     {
-        List<PcDownloadJob> changed;
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (from, to) in moves)
+            map[from] = to;
+        List<(PcDownloadJob Job, string To)> changed;
         lock (gate)
         {
-            changed = jobs.Where(j => j.Destination.Equals(from, StringComparison.OrdinalIgnoreCase)).ToList();
-            foreach (var job in changed)
+            changed = jobs.Where(j => map.ContainsKey(j.Destination)).Select(j => (j, map[j.Destination])).ToList();
+            foreach (var (job, to) in changed)
             {
                 job.Destination = to;
                 job.Target.Path = to;
@@ -404,16 +445,28 @@ public sealed partial class PcDownloads
             if (changed.Count > 0)
                 Save();
         }
-        foreach (var job in changed)
+        foreach (var (job, to) in changed)
             TorrentFileMoved(job, to);
         InitializeReady();
         lock (readyGate)
         {
-            foreach (
-                var file in ready!.ManagedFiles.Where(f => f.Path.Equals(from, StringComparison.OrdinalIgnoreCase))
-            )
-                file.Path = to;
-            SaveReady();
+            var any = false;
+            foreach (var file in ready!.ManagedFiles.Where(f => map.ContainsKey(f.Path)))
+            {
+                file.Path = map[file.Path];
+                any = true;
+            }
+            // A2: a moved manual download keeps its record (and the root its removal is checked against).
+            var roots = changed.ToDictionary(c => c.Job.Id, c => c.Job.Root);
+            foreach (var file in ready.NoirFiles.Where(f => map.ContainsKey(f.Path)))
+            {
+                file.Path = map[file.Path];
+                if (roots.TryGetValue(file.JobId, out var root))
+                    file.Root = root;
+                any = true;
+            }
+            if (any)
+                SaveReady();
         }
         Changed?.Invoke();
     }
@@ -450,7 +503,7 @@ public sealed partial class PcDownloads
                     ct.ThrowIfCancellationRequested();
                     ValidateLibraryPath(file.Path, file.Item.IsMovie);
                     RefusePlaying(file.Path);
-                    var to = DownloadNaming.Destination(root, file.Item, file.Path);
+                    var to = DownloadNaming.Destination(root, file.Item, file.Path, ManagementPreferences.Naming);
                     if (to.Equals(file.Path, StringComparison.OrdinalIgnoreCase))
                         continue;
                     var bundle = FileBundle(file.Path);
@@ -706,6 +759,10 @@ public sealed partial class PcDownloads
         }
         foreach (var job in all.Where(Sharing))
             items.Add(new(job.Id, "Torrents only sharing back", job.Name, 0, JobId: job.Id));
+        items.AddRange(CleanupSuggestions());
+        items.AddRange(
+            DuplicateSuggestions(local, items.Select(i => i.Path).ToHashSet(StringComparer.OrdinalIgnoreCase))
+        );
         return items.GroupBy(i => i.Kind).Select(g => new DownloadSpaceGroup(g.Key, g.ToList())).ToList();
     }
 
@@ -716,7 +773,18 @@ public sealed partial class PcDownloads
     )
     {
         var chosen = selection.DistinctBy(i => i.Key).ToList();
-        var result = await DeleteLocal(chosen.Where(i => i.File != null).Select(i => i.File!), choice, ct: ct);
+        // Duplicates: never every copy of one title, and its progress and intro/outro marks move to the copy that stays.
+        var duplicates = DuplicatePicks(chosen.Where(i => i.Kind == KindDuplicates));
+        foreach (var (delete, keep) in duplicates)
+            store.CopyPathState(delete.Item.Id, delete.Path, keep.Item.Id, keep.Path);
+        var files = chosen
+            .Where(i => i.File != null && i.Kind != KindDuplicates)
+            .Select(i => i.File!)
+            .Concat(duplicates.Select(d => d.Delete))
+            .DistinctBy(f => f.Path, StringComparer.OrdinalIgnoreCase);
+        var result = await DeleteLocal(files, choice, ct: ct);
+        HashSet<string>? current = null;
+        var removedLeftovers = new List<string>();
         foreach (var item in chosen.Where(i => i.File == null))
             try
             {
@@ -729,14 +797,20 @@ public sealed partial class PcDownloads
                         TorrentStop(job, false);
                     continue;
                 }
-                // Refresh the orphan list, so a download started since opening the sheet is protected.
-                if (
-                    !SpaceSuggestions()
-                        .SelectMany(g => g.Items)
-                        .Any(i => i.File == null && i.Path.Equals(item.Path, StringComparison.OrdinalIgnoreCase))
-                )
+                // Refresh the orphan list once, so a download started since opening the sheet is protected.
+                current ??= SpaceSuggestions()
+                    .SelectMany(g => g.Items)
+                    .Where(i => i.File == null)
+                    .Select(i => i.Path)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (!current.Contains(item.Path))
                     continue;
-                RemoveDisk(item.Path, choice == DownloadDeleteChoice.Recycle);
+                if (item.Kind is KindEmptyFolders or KindSamples or KindLoose)
+                    RemoveLeftover(item, choice == DownloadDeleteChoice.Recycle);
+                else
+                    RemoveDisk(item.Path, choice == DownloadDeleteChoice.Recycle);
+                if (item.Kind is KindSamples)
+                    removedLeftovers.Add(item.Path);
                 result.Files++;
                 result.Bytes += item.Bytes;
             }
@@ -744,6 +818,8 @@ public sealed partial class PcDownloads
             {
                 result.Errors.Add(item.Label + " · " + e.Message);
             }
+        if (removedLeftovers.Count > 0)
+            store.DownloadFilesRemoved(removedLeftovers);
         Changed?.Invoke();
         return result;
     }
@@ -852,6 +928,29 @@ public sealed partial class LibraryStore
                 }
             }
             Save();
+        }
+    }
+
+    // O5: the file that stays takes over the progress and intro/outro marks of the copy that goes, as Relocate does for a move.
+    public void CopyPathState(string deletedId, string deletedPath, string keptId, string keptPath)
+    {
+        lock (gate)
+        {
+            State.Catalog.TryGetValue(deletedId, out var from);
+            State.Catalog.TryGetValue(keptId, out var kept);
+            var progress = from?.Progress ?? State.Progress.GetValueOrDefault(deletedPath);
+            if (progress != null)
+            {
+                if (!State.Progress.TryGetValue(keptPath, out var existing) || existing.UpdatedAt < progress.UpdatedAt)
+                    State.Progress[keptPath] = progress;
+                if (kept != null && (kept.Progress == null || kept.Progress.UpdatedAt < progress.UpdatedAt))
+                    kept.Progress = progress;
+            }
+            if (State.Intros.TryGetValue(deletedPath, out var intro) && !State.Intros.ContainsKey(keptPath))
+                State.Intros[keptPath] = intro;
+            if (State.Outros.TryGetValue(deletedPath, out var outro) && !State.Outros.ContainsKey(keptPath))
+                State.Outros[keptPath] = outro;
+            SaveDeferred();
         }
     }
 

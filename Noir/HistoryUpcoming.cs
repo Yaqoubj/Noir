@@ -664,6 +664,10 @@ public partial class MainWindow
             );
         if (!TrackerOnly && show.ImdbId.Length > 0)
             Small("Nuvio", "Open it in Nuvio", () => OpenInNuvio(show.ImdbId, false, show.Title));
+        if (!TrackerOnly && show.ImdbId.Length > 0)
+            Small("Harbor", T("Open it in Harbor", "افتحه في Harbor"), () =>
+                OpenInHarbor(show.ImdbId, false, a.Episode.Season, a.Episode.Episode)
+            );
         if (item != null)
         {
             var tools = new StackPanel

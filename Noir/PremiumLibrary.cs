@@ -169,9 +169,10 @@ public partial class MainWindow
     void RenderHomeExtras(List<List<VideoItem>> groups)
     {
         // The play queue as a row; order and removal are small icon buttons on each card.
+        var archive = HomeArchive();
         var queued = store
             .State.PlayQueue.ToList()
-            .Select(id => store.Archive.FirstOrDefault(i => i.Id == id))
+            .Select(id => archive.FirstOrDefault(i => i.Id == id))
             .OfType<VideoItem>()
             .ToList();
         HomeRow("queue", () =>

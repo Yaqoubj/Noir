@@ -296,14 +296,24 @@ public sealed partial class LibraryStore
             throw new IOException("This title has no download identity.");
         lock (gate)
         {
-            var same = State.Catalog.Values.FirstOrDefault(e =>
+            bool Same(CatalogEntry e) =>
                 e.Item.IsMovie == title.IsMovie
                 && (
                     e.Item.ImdbId == title.Id
                     || MatchTitle(e.Item.Title) == MatchTitle(title.Name)
                         && (e.Item.Year == title.Year || e.Item.Year == 0 || title.Year == 0)
-                )
-            );
+                );
+            // S6: inside an import's MatchScope, look the title up instead of scanning the catalog.
+            var index = ActiveMatchIndex();
+            CatalogEntry? same;
+            if (index == null)
+                same = State.Catalog.Values.FirstOrDefault(Same);
+            else
+            {
+                var candidates = new HashSet<CatalogEntry>(index.Imdb.GetValueOrDefault(title.Id) ?? []);
+                candidates.UnionWith(index.Title.GetValueOrDefault(MatchTitle(title.Name)) ?? []);
+                same = Unique(candidates, Same);
+            }
             var representative = same?.Item;
             if (representative == null)
             {
@@ -334,7 +344,7 @@ public sealed partial class LibraryStore
                     .DistinctBy(e => (e.Season, e.Episode))
                     .ToList();
             }
-            foreach (var entry in State.Catalog.Values.Where(e => e.Item.GroupKey == group))
+            foreach (var entry in EntriesFor(group))
             {
                 var item = entry.Item;
                 if (item.ImdbId.Length == 0)
@@ -351,6 +361,7 @@ public sealed partial class LibraryStore
                 item.SourceName = "Cinemeta";
                 item.SourceUrl = "https://www.imdb.com/title/" + title.Id + "/";
                 entry.MetadataCheckedAt = DateTimeOffset.UtcNow;
+                Reindexed(entry);
             }
             if (watchlist)
             {

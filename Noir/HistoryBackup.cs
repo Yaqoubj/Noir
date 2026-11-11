@@ -156,6 +156,7 @@ public sealed partial class LibraryStore
     // Adds whatever the backup has that this library lacks. Existing ratings, notes and statuses win.
     public int MergeBackup(BackupPreview backup)
     {
+        using var scope = MatchScope();
         var other = backup.State;
         var id = BeginImport(
             "backup "
@@ -163,10 +164,18 @@ public sealed partial class LibraryStore
         );
         int added = 0;
         CopyArt(backup.Path);
+        // S6: one listing of the art folder instead of a File.Exists per picture (120,000 here, 6.7 s).
+        var artFolder = System.IO.Path.Combine(DataDirectory, "art");
+        var artFiles = Directory.Exists(artFolder)
+            ? Directory
+                .EnumerateFiles(artFolder)
+                .Select(f => System.IO.Path.GetFileName(f))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : [];
         string Rebase(string path)
         {
-            var local = System.IO.Path.Combine(DataDirectory, "art", System.IO.Path.GetFileName(path));
-            return File.Exists(local) ? local : path;
+            var name = System.IO.Path.GetFileName(path);
+            return name.Length > 0 && artFiles.Contains(name) ? System.IO.Path.Combine(artFolder, name) : path;
         }
         foreach (var entry in other.Catalog.Values)
         {
@@ -262,11 +271,12 @@ public sealed partial class LibraryStore
                 foreach (var (key, score) in other.SeasonRatings)
                     if (State.SeasonRatings.TryAdd(key, score))
                         record.SeasonRatingKeys.Add(key);
+                var groupKeys = State.Catalog.Values.Select(e => e.Item.GroupKey).ToHashSet();
                 foreach (var (name, members) in other.Collections)
                 {
                     if (!State.Collections.TryGetValue(name, out var set))
                         State.Collections[name] = set = [];
-                    set.UnionWith(members.Where(g => State.Catalog.Values.Any(e => e.Item.GroupKey == g)));
+                    set.UnionWith(members.Where(groupKeys.Contains));
                 }
                 Save();
             }
@@ -299,6 +309,8 @@ public sealed partial class LibraryStore
     // (instance id and receipts) is kept so a paired phone simply receives the restored history.
     public void StageReplace(BackupPreview backup)
     {
+        // S6: the last deferred change is on disk before the safety copy and the restart.
+        FlushPending();
         SafetyBackup("before-restore");
         var pending = System.IO.Path.Combine(DataDirectory, "restore-pending");
         if (Directory.Exists(pending))

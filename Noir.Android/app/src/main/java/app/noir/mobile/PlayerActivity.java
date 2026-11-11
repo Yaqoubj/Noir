@@ -54,7 +54,7 @@ public final class PlayerActivity extends Activity {
     static {String[][] words={{"Phone file is unavailable","ملف الهاتف غير متاح"},{"Audio & subtitles","الصوت والترجمة"},{"‹ Library","‹ المكتبة"}};for(String[] w:words)Loc.AR.putIfAbsent(w[0],w[1]);}
     String playerText(String s){return PlayerPrefs.t(s);}
     TextView text(String s,int size){TextView t=new TextView(this);t.setText(playerText(s));t.setTextSize(tv?Math.max(13,size):size);t.setTextColor(MainActivity.WHITE);return t;}
-    static {String[][] words={{"Play","تشغيل"},{"Pause","إيقاف مؤقت"},{"Next","التالي"},{"Back 10 seconds","رجوع ١٠ ثوانٍ"},{"Forward 10 seconds","تقديم ١٠ ثوانٍ"}};for(String[] w:words)Loc.AR.putIfAbsent(w[0],w[1]);}
+    static {String[][] words={{"Play","تشغيل"},{"Pause","إيقاف مؤقت"},{"Next","التالي"},{"Back 10 seconds","رجوع 10 ثوانٍ"},{"Forward 10 seconds","تقديم 10 ثوانٍ"}};for(String[] w:words)Loc.AR.putIfAbsent(w[0],w[1]);}
     /** U74: phone transport controls are drawn icons (play/pause, back 10, forward 10, next); the description carries the name. */
     Button iconButton(String icon,String description,Runnable action){Button b=button("",action);b.setContentDescription(description);b.setMinWidth(dp(52));b.setPadding(0,0,0,0);setIcon(b,icon);return b;}
     void setIcon(Button b,String icon){android.graphics.drawable.LayerDrawable d=new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{MainActivity.bg(MainActivity.PANEL,dp(10)),NoirIcons.drawable(this,icon,MainActivity.WHITE)});d.setLayerGravity(1,Gravity.CENTER);d.setLayerSize(1,dp(26),dp(26));b.setBackground(d);b.setTag(icon);}

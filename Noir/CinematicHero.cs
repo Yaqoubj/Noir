@@ -697,11 +697,48 @@ public partial class MainWindow
             FollowHomeHero(card, () => HomeHeroItem(discover));
             return;
         }
-        var item = store.Archive.FirstOrDefault(i =>
-            names.Any(n => n == i.Title + " details" || n == "Continue " + i.Label)
-        );
-        if (item != null)
+        // S6: was a scan of the whole archive per card (with two strings built per item); now one
+        // lookup per page build. Same answer: the first archive item whose name matches.
+        var lookup = HomeCardNames();
+        var first = names.Select(n => lookup.GetValueOrDefault(n, int.MaxValue)).DefaultIfEmpty(int.MaxValue).Min();
+        if (first != int.MaxValue)
+        {
+            var item = homeArchive![first];
             FollowHomeHero(card, () => item);
+        }
+    }
+
+    // One archive copy per page build for Home's card wiring (Render clears it).
+    List<VideoItem>? homeArchive;
+    Dictionary<string, int>? homeCardNames,
+        homeTitles;
+
+    List<VideoItem> HomeArchive() => homeArchive ??= store.Archive;
+
+    Dictionary<string, int> HomeCardNames()
+    {
+        if (homeCardNames != null)
+            return homeCardNames;
+        var archive = HomeArchive();
+        homeCardNames = new();
+        for (var n = 0; n < archive.Count; n++)
+        {
+            homeCardNames.TryAdd(archive[n].Title + " details", n);
+            homeCardNames.TryAdd("Continue " + archive[n].Label, n);
+        }
+        return homeCardNames;
+    }
+
+    VideoItem? HomeItemTitled(string title)
+    {
+        var archive = HomeArchive();
+        if (homeTitles == null)
+        {
+            homeTitles = new();
+            for (var n = 0; n < archive.Count; n++)
+                homeTitles.TryAdd(archive[n].Title, n);
+        }
+        return homeTitles.TryGetValue(title, out var at) ? archive[at] : null;
     }
 
     FrameworkElement HomeTitleMark(VideoItem item, double maxHeight, double maxWidth, double fontSize)

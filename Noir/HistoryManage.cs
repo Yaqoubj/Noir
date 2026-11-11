@@ -26,97 +26,6 @@ public partial class MainWindow
 
     NuvioSession? NuvioSessionNow() => NuvioStorage.Load(store.DataDirectory);
 
-    FrameworkElement NuvioTile()
-    {
-        var session = NuvioSessionNow();
-        var connected = session is { Profile: > 0 } && store.State.NuvioConnected;
-        var waiting =
-            store.State.WatchSync.Values.Count(j => j.Provider == "Nuvio" && j.SyncedAt == null)
-            + store.State.NuvioDeletes.Count;
-        var state = connected
-            ? $"Connected · {(session!.ProfileName.Length > 0 ? session.ProfileName : "profile " + session.Profile)} · "
-                + (store.State.NuvioImportedAt is { } at ? "checked " + Ago(at) : "not checked yet")
-                + (waiting > 0 ? $" · {waiting} waiting to send" : "")
-            : "Not connected";
-        return SyncTile(
-            "Nuvio",
-            "Nv",
-            "#6C4CF1",
-            "#FFFFFF",
-            state,
-            connected
-                ? "Two-way: Nuvio's watches come into Noir every few hours, and what you finish or check off in Noir is marked watched in Nuvio."
-                : "Link with a code — no password. Watches flow both ways, like Stremio but two-way.",
-            panel =>
-            {
-                if (!connected)
-                {
-                    panel.Children.Add(ActionButton("Connect Nuvio", ConnectNuvio, true));
-                    return;
-                }
-                var auto = new CheckBox
-                {
-                    Content = "Check Nuvio automatically",
-                    IsChecked = store.State.NuvioAutoImport,
-                    Margin = new(0, 4, 0, 2),
-                };
-                auto.Click += (_, _) =>
-                {
-                    store.State.NuvioAutoImport = auto.IsChecked == true;
-                    store.Save();
-                };
-                panel.Children.Add(auto);
-                var send = new CheckBox
-                {
-                    Content = "Mark my Noir watches in Nuvio",
-                    IsChecked = store.State.SyncNuvio,
-                    Margin = new(0, 2, 0, 8),
-                };
-                send.Click += (_, _) =>
-                {
-                    store.State.SyncNuvio = send.IsChecked == true;
-                    store.Save();
-                    nuvioSync?.Wake();
-                };
-                panel.Children.Add(send);
-                var row = new WrapPanel();
-                panel.Children.Add(row);
-                void Add(string text, Action act, bool primary = false)
-                {
-                    var b = ActionButton(text, act, primary);
-                    b.Margin = new(0, 0, 8, 8);
-                    b.IsEnabled = !importBusy;
-                    row.Children.Add(b);
-                }
-                Add("Import now", () => _ = ImportNuvio(false), true);
-                Add("Send earlier history", () =>
-                {
-                    foreach (var e in store.State.Catalog.Values.Where(e => store.EverWatched(e.Item)))
-                        CommunityQueue.Enqueue(
-                            store.State,
-                            e.Item,
-                            store.ViewingHistory(e.Item).FirstOrDefault()?.WatchedAt
-                                ?? e.Progress?.UpdatedAt
-                                ?? DateTimeOffset.UtcNow
-                        );
-                    store.Save();
-                    nuvioSync?.Wake();
-                    RenderQuiet();
-                });
-                Add("Switch profile", () => _ = PickNuvioProfile(session!));
-                Add("Disconnect", () =>
-                {
-                    NuvioStorage.Forget(store.DataDirectory);
-                    store.State.NuvioConnected = false;
-                    store.Save();
-                    RenderQuiet();
-                });
-                if (nuvioSync?.Message is { Length: > 0 } m)
-                    panel.Children.Add(Body(m, 11));
-            }
-        );
-    }
-
     // The TV-style link: show a code and QR, poll until it's approved at nuvio.tv/link.
     void ConnectNuvio()
     {
@@ -782,6 +691,7 @@ public partial class MainWindow
                 Status.Text = "The backup couldn't be prepared. Nothing changed.";
                 return;
             }
+            LibraryStore.FlushAll();
             var start = new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false };
             foreach (
                 var arg in Environment

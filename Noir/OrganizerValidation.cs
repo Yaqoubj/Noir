@@ -50,7 +50,7 @@ public partial class MainWindow
             var dialog = FindSheet("Organize your files")!;
             dialog.Panel.UpdateLayout();
             Check(
-                Descendants(dialog.Panel).OfType<Button>().Any(b => b.Content?.ToString() == "Organize these files"),
+                Descendants(dialog.Panel).OfType<Button>().Any(b => b.Content?.ToString() == "Organize selected"),
                 "Organizer opens with apply and undo controls"
             );
             dialog.Close(false);

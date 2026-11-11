@@ -187,18 +187,41 @@ public partial class MainWindow
                         == "Keep ready on this PC",
                 "Keep ready is a side sheet whose footer ends with the primary action"
             );
+            // A1–A8: the rule rows are U47 gold pills; each pill's automation name is "<row> · <option>".
+            List<Button> Row(DependencyObject root, string caption) =>
+                Descendants(root)
+                    .OfType<Button>()
+                    .Where(b =>
+                        System
+                            .Windows.Automation.AutomationProperties.GetName(b)
+                            .StartsWith(caption + " · ", StringComparison.Ordinal)
+                    )
+                    .ToList();
+            static bool Picked(Button b) =>
+                b.Background is SolidColorBrush { Color: var c } && c == Color.FromRgb(0xE4, 0xC0, 0x84);
+            var before = manager.ReadyViewState;
+            var countRow = Row(sheet.Overlay, "How far ahead").Select(b => b.Content as string).ToList();
             Check(
-                Descendants(sheet.Overlay).OfType<ComboBox>().Any(c => c.Items.Count == 4),
-                "Keep ready offers 1, 2, 3 and whole season"
+                countRow.Count == 6
+                    && countRow[0]?.StartsWith("Same as default · ", StringComparison.Ordinal) == true
+                    && countRow
+                        .Skip(1)
+                        .SequenceEqual(["Next episode", "Next 2", "Next 3", "Next 5", "Rest of the season"]),
+                "Keep ready offers Same as default, 1, 2, 3, 5 and rest of the season"
             );
+            // Consent: a show starts on "Same as default", the default is Never, and the sheet itself never
+            // preselects a removing option the user did not choose in Settings.
+            var removeRow = Row(sheet.Overlay, "Remove watched files");
+            var removeDefault = ReadyRemoveOptions().First(o => o.Value == NoirReadyPolicy.RemoveHours(before)).Label;
             Check(
-                Descendants(sheet.Overlay)
-                    .OfType<CheckBox>()
-                    .Any(c => c.Content as string == "Remove watched after 7 days"),
+                NoirReadyPolicy.RemoveHours(new NoirReadyState { RulesVersion = 1 }) == -1
+                    && removeRow.Count == 6
+                    && removeRow.Count(Picked) == 1
+                    && removeRow.Single(Picked).Content as string == "Same as default · " + removeDefault
+                    && removeRow.Any(b => b.Content as string == "Never"),
                 "Keep ready cleanup requires explicit consent"
             );
             // The settings controls save on a background thread; this once threw a cross-thread error.
-            var before = manager.ReadyViewState;
             var settings = ReadySettingsPanel();
             var checkBoxes = Descendants(settings).OfType<CheckBox>().ToList();
             var pause = checkBoxes.First(c => c.Content as string == "Pause keep ready");
@@ -207,24 +230,35 @@ public partial class MainWindow
             for (var i = 0; i < 40 && manager.ReadyViewState.Paused == before.Paused; i++)
                 await Task.Delay(50);
             Check(manager.ReadyViewState.Paused != before.Paused, "Pause keep ready saves from Settings");
-            var cleanupBox = checkBoxes.First(c => c.Content as string == "Remove watched after 7 days");
-            cleanupBox.IsChecked = !before.CleanupWatched;
-            cleanupBox.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            // Pick a different removal choice that cannot remove anything in this pass: Never, or 30 days from Never.
+            var beforeHours = NoirReadyPolicy.RemoveHours(before);
+            var target = beforeHours == -1 ? "After 30 days" : "Never";
+            var choice = Row(settings, "Remove watched files").Single(b => b.Content as string == target);
+            choice.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
             Check(
-                !Descendants(settings).OfType<Button>().Any(b => b.Content as string == "Save preparation settings"),
+                !Descendants(settings).OfType<Button>().Any(b => b.Content as string == "Save preparation settings")
+                    && !Descendants(settings).OfType<Button>().Any(b => b.Content as string == "Save"),
                 "Preparation settings have no Save button (U8)"
             );
-            for (var i = 0; i < 40 && manager.ReadyViewState.CleanupWatched == before.CleanupWatched; i++)
+            for (var i = 0; i < 40 && NoirReadyPolicy.RemoveHours(manager.ReadyViewState) == beforeHours; i++)
                 await Task.Delay(50);
             Check(
-                manager.ReadyViewState.CleanupWatched != before.CleanupWatched,
+                NoirReadyPolicy.RemoveHours(manager.ReadyViewState) == (beforeHours == -1 ? 720 : -1) && Picked(choice),
                 "The cleanup choice saves as soon as it is clicked"
             );
             await manager.ChangeReady(s =>
             {
                 s.Paused = before.Paused;
+                s.RemoveAfterHours = before.RemoveAfterHours;
                 s.CleanupWatched = before.CleanupWatched;
             });
+            Check(
+                manager.ReadyViewState is var restored
+                    && restored.Paused == before.Paused
+                    && restored.RemoveAfterHours == before.RemoveAfterHours
+                    && restored.CleanupWatched == before.CleanupWatched,
+                "Keep ready settings are restored after the check"
+            );
             sheet.Close(false);
             sheet = null;
             store.State.Catalog.Remove(visualItem.Id);

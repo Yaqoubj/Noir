@@ -367,6 +367,16 @@ public partial class MainWindow
                 "Wide Continue watching card renders by default"
             );
             Check(
+                Descendants(Art("", "No Art Title", 100, false, false)).OfType<TextBlock>().Count() == 0
+                    && Descendants(Art("", "No Art Title", 100)).OfType<TextBlock>().Count() == 1
+                    && !Descendants(ContentPanel)
+                        .OfType<FrameworkElement>()
+                        .Where(e => Equals(e.Tag, "HomeWideContinue"))
+                        .SelectMany(e => Descendants(e).OfType<TextBlock>())
+                        .Any(t => t.FontSize == 21 && t.FontWeight == FontWeights.SemiBold),
+                "U99 a Continue watching tile without artwork shows its name once (the placeholder text is left out)"
+            );
+            Check(
                 !Descendants(ContentPanel).OfType<Button>().Any(b => Equals(b.Tag, "HomeSeeAllTile")),
                 "Home rails offer See all once, as the header link (U31)"
             );

@@ -16,6 +16,8 @@ namespace Noir;
 // Separate popups, context menus and windows are copied from their own screen rectangle and saved as <screen>-popup-...
 public partial class MainWindow
 {
+    System.Threading.ManualResetEventSlim? statsGate; // held while a stats capture waits (HistoryStats.BeginStatsWork)
+
     sealed class ShotsEmptyHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token) =>
@@ -151,7 +153,13 @@ public partial class MainWindow
             {
                 using (var g = Drawing.Graphics.FromImage(bitmap))
                     g.Clear(Drawing.Color.FromArgb(0x0B, 0x0B, 0x0D));
-                DrawVisual(bitmap, x, y, source);
+                // The sheets and popovers sit beside LibraryRoot in its parent grid, so draw that whole grid.
+                DrawVisual(
+                    bitmap,
+                    x,
+                    y,
+                    ReferenceEquals(source, LibraryRoot) && LibraryRoot.Parent is Grid host ? host : source
+                );
                 Note($"RENDERED {name}: the screen is covered by another app; drawn from Noir's own visual");
             }
             // The player's controls live in VLC's separate overlay window, which a screen copy misses: draw that visual over the video frame.
@@ -542,6 +550,9 @@ public partial class MainWindow
         }
         async Task Reset(bool keepPlayer)
         {
+            statsGate?.Set();
+            statsGate = null;
+            DropFixture();
             CloseAllSheets();
             CloseShortcutSheet();
             CloseSmart();
@@ -610,6 +621,219 @@ public partial class MainWindow
             Navigate("Settings");
             await Task.Delay(80);
         }
+        // ---- Second-batch fixtures (profile copy only; nothing here touches the real profile or any real file). ----
+        var syncSeeded = false;
+        void SeedSync()
+        {
+            if (syncSeeded)
+                return;
+            syncSeeded = true;
+            store.State.WatchSync.Clear(); // the profile copy's own queue would mix its numbers into the shots
+            store.State.SyncPace.Clear();
+            watchSync ??= new CommunitySync(store, Dispatcher, () => { }) { Paused = true }; // paused: no website is ever contacted
+            var st = store.State;
+            var now = DateTimeOffset.UtcNow;
+            st.SyncTrakt = true;
+            st.SyncSerializd = true;
+            void Jobs(string provider, int synced, int waiting, DateTimeOffset lastSynced, bool backlog, string message)
+            {
+                for (var n = 0; n < synced; n++)
+                    st.WatchSync[provider + ":shots-s" + n] = new()
+                    {
+                        Provider = provider,
+                        ItemId = "shots-s" + n,
+                        WatchedAt = lastSynced.AddDays(-n),
+                        SyncedAt = lastSynced.AddHours(-n * 7),
+                    };
+                for (var n = 0; n < waiting; n++)
+                    st.WatchSync[provider + ":shots-w" + n] = new()
+                    {
+                        Provider = provider,
+                        ItemId = "shots-w" + n,
+                        WatchedAt = now.AddDays(-n / 3.0),
+                        Backlog = backlog,
+                        Message = message,
+                    };
+            }
+            Jobs("Trakt", 14, 2, now.AddHours(-3), false, "Waiting to sync");
+            Jobs("Serializd", 6, 137, now.AddDays(-5), true, "The website could not load.");
+            Jobs(CommunityQueue.Stremio, 3, 0, now.AddHours(-20), false, "Waiting to sync");
+            watchSync.Backoff.SiteFailed("Serializd", now.AddDays(-3)); // failing since 3 days: the F13 notice
+            CommunityQueue.SetStremio(st, true, true);
+            st.StremioImportedAt = now.AddHours(-3);
+            st.StremioAutoImport = true;
+            // A fake key (DPAPI, this user) so the Stremio card shows its connected controls; it lives in the profile copy only.
+            File.WriteAllBytes(
+                Path.Combine(store.DataDirectory, "stremio.dpapi"),
+                System.Security.Cryptography.ProtectedData.Protect(
+                    System.Text.Encoding.UTF8.GetBytes("ui-shots-fake-stremio-key"),
+                    null,
+                    System.Security.Cryptography.DataProtectionScope.CurrentUser
+                )
+            );
+        }
+        async Task ScrollText(string text, double pad = 24)
+        {
+            await Settle(700);
+            var t = Descendants(ContentPanel).OfType<TextBlock>().FirstOrDefault(x => x.IsVisible && x.Text == text)
+                ?? throw new InvalidOperationException("text not found: " + text);
+            ContentScroll.ScrollToVerticalOffset(
+                Math.Max(
+                    0,
+                    ContentScroll.VerticalOffset
+                        + t.TranslatePoint(new Point(), ContentScroll).Y
+                        - TopBar.ActualHeight
+                        - pad
+                )
+            );
+            await Settle(500);
+        }
+        List<LibraryRoot>? savedRoots = null;
+        var fixtureIds = new List<string>();
+        void DropFixture()
+        {
+            if (savedRoots == null)
+                return;
+            store.State.Roots = savedRoots;
+            savedRoots = null;
+            foreach (var id in fixtureIds)
+                store.State.Catalog.Remove(id);
+            fixtureIds.Clear();
+        }
+        // A small messy library in the output folder: loose names to organize, plus leftovers and duplicates to free up.
+        void BuildFixture()
+        {
+            if (savedRoots != null)
+                return;
+            var shows = Path.Combine(directory, "fixture-b2", "shows");
+            var movies = Path.Combine(directory, "fixture-b2", "movies");
+            Directory.CreateDirectory(shows);
+            Directory.CreateDirectory(movies);
+            void Bytes(string path, long bytes)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                using var f = File.Create(path);
+                f.SetLength(bytes); // zero-filled, no data written: only the size matters to these screens
+            }
+            const long MB = 1024 * 1024;
+            void Entry(
+                string id,
+                string title,
+                int year,
+                string key,
+                int season,
+                int episode,
+                string epTitle,
+                bool movie,
+                params string[] paths
+            )
+            {
+                var item = new VideoItem
+                {
+                    Id = id,
+                    Title = title,
+                    Year = year,
+                    CollectionKey = key,
+                    Season = season,
+                    Episode = episode,
+                    EpisodeTitle = epTitle,
+                    Path = paths[0],
+                    Available = true,
+                    IsMovie = movie,
+                    SourceUrl = "https://fixture.invalid/" + key,
+                    ImdbId = "tt9000" + fixtureIds.Count.ToString("00"),
+                };
+                store.State.Catalog[id] = new() { Item = item, Paths = paths.ToList() };
+                fixtureIds.Add(id);
+            }
+            Bytes(Path.Combine(shows, "night.signal.s01e01.720p.hdtv.mkv"), 120 * MB);
+            Bytes(Path.Combine(shows, "night.signal.s01e01.720p.hdtv.en.srt"), 40);
+            Bytes(Path.Combine(shows, "night.signal.s01e02.720p.hdtv.mkv"), 130 * MB);
+            Bytes(Path.Combine(shows, "night.signal.s01e03.720p.hdtv.mkv"), 125 * MB);
+            Bytes(Path.Combine(shows, "paper.lanterns.s02e01.mkv"), 110 * MB);
+            Bytes(Path.Combine(shows, "paper.lanterns.s02e02.mkv"), 115 * MB);
+            Bytes(Path.Combine(movies, "the.long.winter.2021.1080p.mkv"), 400 * MB);
+            Entry(
+                "b2-ns1",
+                "Night Signal",
+                2024,
+                "night-signal",
+                1,
+                1,
+                "Pilot",
+                false,
+                Path.Combine(shows, "night.signal.s01e01.720p.hdtv.mkv")
+            );
+            Entry(
+                "b2-ns2",
+                "Night Signal",
+                2024,
+                "night-signal",
+                1,
+                2,
+                "Static",
+                false,
+                Path.Combine(shows, "night.signal.s01e02.720p.hdtv.mkv"),
+                Path.Combine(shows, "extra", "Night.Signal.S01E02.1080p.WEB-DL.mkv")
+            );
+            Entry(
+                "b2-ns3",
+                "Night Signal",
+                2024,
+                "night-signal",
+                1,
+                3,
+                "Relay",
+                false,
+                Path.Combine(shows, "night.signal.s01e03.720p.hdtv.mkv")
+            );
+            Entry(
+                "b2-pl1",
+                "Paper Lanterns",
+                2022,
+                "paper-lanterns",
+                2,
+                1,
+                "Wick",
+                false,
+                Path.Combine(shows, "paper.lanterns.s02e01.mkv")
+            );
+            Entry(
+                "b2-pl2",
+                "Paper Lanterns",
+                2022,
+                "paper-lanterns",
+                2,
+                2,
+                "Smoke",
+                false,
+                Path.Combine(shows, "paper.lanterns.s02e02.mkv")
+            );
+            Entry(
+                "b2-m1",
+                "The Long Winter",
+                2021,
+                "the-long-winter",
+                0,
+                0,
+                "",
+                true,
+                Path.Combine(movies, "the.long.winter.2021.1080p.mkv"),
+                Path.Combine(movies, "Remux", "The.Long.Winter.2021.2160p.REMUX.mkv")
+            );
+            // The second copies (bigger, so the first listed is the one kept) and the leftovers.
+            Bytes(Path.Combine(shows, "extra", "Night.Signal.S01E02.1080p.WEB-DL.mkv"), 300 * MB);
+            Bytes(Path.Combine(movies, "Remux", "The.Long.Winter.2021.2160p.REMUX.mkv"), 900 * MB);
+            Directory.CreateDirectory(Path.Combine(shows, "Old Season 3"));
+            Bytes(Path.Combine(shows, "sample", "night.signal.s01e01.720p.hdtv-sample.mkv"), 40 * MB);
+            Bytes(Path.Combine(shows, "readme.nfo"), 120);
+            Bytes(Path.Combine(shows, "Visit-Release-Site.url"), 60);
+            Bytes(Path.Combine(shows, "RELEASE-NOTES.txt"), 200);
+            Bytes(Path.Combine(shows, "install_codec_pack.exe"), 3 * MB);
+            savedRoots = store.State.Roots;
+            store.State.Roots = [new() { Path = shows }, new() { Path = movies, Movies = true }];
+        }
+        NoirSheet? OrganizerSheet() => FindSheet(T("Organize your files", "نظّم ملفاتك"));
         Note("UI shots · " + DateTimeOffset.Now.ToString("O") + " · widths " + string.Join(",", sizes));
         Note(
             "MISSING phone-pairing: the Pair Noir for Android sheet needs a running mobile sync server (opens a network port); validation mode never starts it and ShowPhonePairing returns early without one."
@@ -1162,6 +1386,189 @@ public partial class MainWindow
                 AskStillWatching(next, null);
                 await Task.Delay(600);
             }
+        });
+        // ---- Second batch (b2-*): run with --ui-screens b2-... ; each screen seeds what it needs in the profile copy. ----
+        Add("b2-history-notice", async () =>
+        {
+            SeedSync();
+            History("Up next");
+            await Task.CompletedTask;
+        });
+        Add("b2-connections-sync", async () =>
+        {
+            SeedSync();
+            Settings("Connections");
+            await ScrollText("Trakt");
+        });
+        Add("b2-connections-stremio", async () =>
+        {
+            SeedSync();
+            Settings("Connections");
+            await ScrollText("Stremio");
+        });
+        Add("b2-past-history-estimate", async () =>
+        {
+            SeedSync();
+            Settings("Connections");
+            await ScrollText("Trakt");
+            ConfirmPastHistory("Trakt");
+            await Task.Delay(500);
+            if (smartPopup?.Child is not FrameworkElement child)
+                throw new InvalidOperationException("the past-history popup did not open");
+            pops.Add(child);
+        });
+        Add("b2-import-top", async () =>
+        {
+            SeedSync();
+            History("Import");
+            await Task.CompletedTask;
+        });
+        Add("b2-import-stremio-harbor", async () =>
+        {
+            SeedSync();
+            History("Import");
+            await ScrollText("Harbor", 380);
+        });
+        Add("b2-organizer", async () =>
+        {
+            BuildFixture();
+            Navigate("Settings");
+            OpenOrganizer();
+            await Until(() => OrganizerSheet() is { } o && Descendants(o.Panel).OfType<CheckBox>().Count() > 2, 15000);
+        });
+        Add("b2-organizer-ticks-names", async () =>
+        {
+            BuildFixture();
+            Navigate("Settings");
+            OpenOrganizer();
+            await Until(() => OrganizerSheet() is { } o && Descendants(o.Panel).OfType<CheckBox>().Count() > 2, 15000);
+            var sheet = OrganizerSheet()!;
+            var boxes = Descendants(sheet.Panel).OfType<CheckBox>().ToList();
+            var episodeTitle = boxes.First(b =>
+                b.Content as string == T("Add the episode title to file names", "إضافة عنوان الحلقة إلى أسماء الملفات")
+            );
+            episodeTitle.IsChecked = true;
+            episodeTitle.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            await Task.Delay(1500);
+            boxes = Descendants(sheet.Panel).OfType<CheckBox>().ToList();
+            var group = boxes.Where(b => b.Content is string c && c.Contains(" · ")).Skip(1).First();
+            group.IsChecked = false; // one group left unticked: it moves to "Left as they are"
+            group.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            foreach (var e in Descendants(sheet.Panel).OfType<Expander>().Take(1))
+                e.IsExpanded = true;
+            await Task.Delay(500);
+        });
+        Add("b2-free-space", async () =>
+        {
+            BuildFixture();
+            Navigate("Downloads");
+            await Settle(500);
+            ShowDownloadFreeSpace();
+            await Until(
+                () =>
+                    FindSheet(T("Free up space", "تحرير مساحة")) is { } f
+                    && Descendants(f.Panel).OfType<Expander>().Any(),
+                15000
+            );
+            await Task.Delay(500);
+        });
+        Add("b2-free-space-files", async () =>
+        {
+            BuildFixture();
+            Navigate("Downloads");
+            await Settle(500);
+            ShowDownloadFreeSpace();
+            await Until(
+                () =>
+                    FindSheet(T("Free up space", "تحرير مساحة")) is { } f
+                    && Descendants(f.Panel).OfType<Expander>().Any(),
+                15000
+            );
+            var sheet = FindSheet(T("Free up space", "تحرير مساحة"))!;
+            foreach (var e in Descendants(sheet.Panel).OfType<Expander>())
+                e.IsExpanded = true;
+            await Settle(600);
+            if (Descendants(sheet.Overlay).OfType<ScrollViewer>().FirstOrDefault(v => v.ScrollableHeight > 8) is { } sv)
+                sv.ScrollToVerticalOffset(sv.ScrollableHeight * 0.45);
+            await Task.Delay(500);
+        });
+        Add("b2-free-space-files-end", async () =>
+        {
+            BuildFixture();
+            Navigate("Downloads");
+            await Settle(500);
+            ShowDownloadFreeSpace();
+            await Until(
+                () =>
+                    FindSheet(T("Free up space", "تحرير مساحة")) is { } f
+                    && Descendants(f.Panel).OfType<Expander>().Any(),
+                15000
+            );
+            var sheet = FindSheet(T("Free up space", "تحرير مساحة"))!;
+            foreach (var e in Descendants(sheet.Panel).OfType<Expander>())
+                e.IsExpanded = true;
+            await Settle(600);
+            if (Descendants(sheet.Overlay).OfType<ScrollViewer>().FirstOrDefault(v => v.ScrollableHeight > 8) is { } sv)
+                sv.ScrollToVerticalOffset(sv.ScrollableHeight);
+            await Task.Delay(500);
+        });
+        Add("b2-keep-ready-sheet-end", async () =>
+        {
+            Navigate("Shows");
+            ShowKeepReady(DownloadEpisode());
+            await Until(() => FindSheet(T("Keep ready", "إبقاء الحلقات جاهزة")) != null);
+            if (keepReadyPreviewTask != null)
+                await Task.WhenAny(keepReadyPreviewTask, Task.Delay(1500));
+            await Task.Delay(400);
+            var sheet = FindSheet(T("Keep ready", "إبقاء الحلقات جاهزة"))!;
+            if (Descendants(sheet.Overlay).OfType<ScrollViewer>().FirstOrDefault(v => v.ScrollableHeight > 8) is { } sv)
+                sv.ScrollToVerticalOffset(sv.ScrollableHeight);
+            await Task.Delay(500);
+        });
+        AddNow("b2-keep-ready-settings", () => Settings("Downloads"));
+        Add("b2-keep-ready-settings-rules", async () =>
+        {
+            Settings("Downloads");
+            await ScrollText(T("Which shows download automatically", "المسلسلات التي تُنزّل تلقائيًا"), 60);
+        });
+        AddNow("b2-keep-ready-settings-end", () => Settings("Downloads"), 1);
+        Add("b2-stats-working", async () =>
+        {
+            statsGate = new System.Threading.ManualResetEventSlim(false);
+            History("Stats");
+            await Task.CompletedTask;
+        });
+        Add("b2-stats-filled", async () =>
+        {
+            statsGate = null;
+            History("Stats");
+            await Until(
+                () =>
+                    Descendants(ContentPanel)
+                        .OfType<TextBlock>()
+                        .All(t => t.Text != T("Working out your stats…", "جارٍ حساب إحصاءاتك…")),
+                20000
+            );
+        });
+        AddNow("b2-home", () => Navigate("Home"));
+        Add("b2-home-continue", async () =>
+        {
+            Navigate("Home");
+            await ScrollText(T("Continue watching"), 40);
+        });
+        AddNow("b2-home-end", () => Navigate("Home"), 1);
+        Add("b2-open-in-menu", async () =>
+        {
+            Navigate("Shows");
+            await Settle(900);
+            var item = store.Archive.FirstOrDefault(i => !i.IsMovie && i.ImdbId.Length > 0 && !i.Id.StartsWith("b2-"))
+                ?? throw new InvalidOperationException("no title with an IMDb id in the profile copy");
+            var menu = ItemMenu(item);
+            await MenuAt(menu, Find(b => b.IsVisible));
+            var openIn = menu.Items.OfType<MenuItem>().First(m => IconSet.Src(m.Header) == T("Open in", "فتح في"));
+            openIn.IsSubmenuOpen = true;
+            await Task.Delay(500);
+            pops.Add((FrameworkElement)openIn.Items[0]);
         });
         var originalDensity = Density.Mode;
         var originalLanguage = Loc.Arabic ? "ar" : "en";

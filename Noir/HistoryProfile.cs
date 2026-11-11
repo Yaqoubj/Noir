@@ -11,6 +11,20 @@ namespace Noir;
 public partial class MainWindow
 {
     public static Func<string, IReadOnlyList<string>>? PeopleFor;
+
+    // Reads the cached credits for every title once, off the UI thread (Stats then finds them in memory).
+    static void WarmPeople(List<Watched> views)
+    {
+        if (PeopleFor is not { } people)
+            return;
+        foreach (var key in views.Select(v => v.Item.GroupKey).Distinct())
+            try
+            {
+                people(key);
+            }
+            catch { }
+    }
+
     bool GoalPaused => File.Exists(System.IO.Path.Combine(store.DataDirectory, "goal-paused"));
 
     void PauseGoal(bool paused)

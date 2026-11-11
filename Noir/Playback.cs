@@ -1273,7 +1273,7 @@ public partial class MainWindow
         Add("Edit intro & credits times", () => Intro_Click(sender, e));
         var boost = new MenuItem
         {
-            Header = PL("Volume boost (up to 200%)", "تعزيز الصوت (حتى ٢٠٠٪)"),
+            Header = PL("Volume boost (up to 200%)", "تعزيز الصوت (حتى 200٪)"),
             IsCheckable = true,
             IsChecked = Prefs.VolumeBoost,
         };

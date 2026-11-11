@@ -610,7 +610,7 @@ public partial class MainWindow
         ShowControls();
         ShowPlayerHint(
             Prefs.VolumeBoost
-                ? PL("Volume boost on · up to 200%", "تعزيز الصوت يعمل · حتى ٢٠٠٪")
+                ? PL("Volume boost on · up to 200%", "تعزيز الصوت يعمل · حتى 200٪")
                 : PL("Volume boost off", "تعزيز الصوت متوقف")
         );
     }
@@ -669,8 +669,8 @@ public partial class MainWindow
         [
             PL("Never", "أبداً"),
             PL("After 2 episodes", "بعد حلقتين"),
-            PL("After 3 episodes", "بعد ٣ حلقات"),
-            PL("After 5 episodes", "بعد ٥ حلقات"),
+            PL("After 3 episodes", "بعد 3 حلقات"),
+            PL("After 5 episodes", "بعد 5 حلقات"),
         ];
         panel.Children.Add(
             Chips(
@@ -703,7 +703,7 @@ public partial class MainWindow
             }));
         var boost = new CheckBox
         {
-            Content = PL("Volume boost (up to 200%) for quiet videos", "تعزيز الصوت (حتى ٢٠٠٪) للفيديوهات الهادئة"),
+            Content = PL("Volume boost (up to 200%) for quiet videos", "تعزيز الصوت (حتى 200٪) للفيديوهات الهادئة"),
             IsChecked = Prefs.VolumeBoost,
             Margin = new(0, 10, 0, 0),
         };

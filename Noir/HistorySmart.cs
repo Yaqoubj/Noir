@@ -41,6 +41,8 @@ public partial class MainWindow
         KeyboardNavigation.SetControlTabNavigation(body, KeyboardNavigationMode.Cycle);
         var popup = new Popup
         {
+            // U90: a popup is its own window and does not inherit the app's flow direction.
+            FlowDirection = LibraryRoot.FlowDirection,
             Placement = keyboard && invoker != null ? PlacementMode.Bottom : PlacementMode.MousePoint,
             PlacementTarget = keyboard ? invoker : null,
             StaysOpen = false,

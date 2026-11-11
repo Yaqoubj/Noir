@@ -583,6 +583,52 @@ public partial class MainWindow
         };
     }
 
+    // U96: WPF ignores the Unicode direction marks, so a Latin part in brackets (the extension list) is its own
+    // left-to-right run inside an Arabic title.
+    static TextBlock FreeSpaceGroupLabel(string title, string figure)
+    {
+        var block = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        var last = 0;
+        foreach (
+            System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
+                title,
+                @"\(([ -~]+)\)"
+            )
+        )
+        {
+            block.Inlines.Add(new System.Windows.Documents.Run(title[last..(m.Index + 1)]));
+            block.Inlines.Add(
+                new System.Windows.Documents.Run(m.Groups[1].Value) { FlowDirection = FlowDirection.LeftToRight }
+            );
+            last = m.Index + m.Length - 1;
+        }
+        block.Inlines.Add(new System.Windows.Documents.Run(title[last..] + (figure.Length > 0 ? " · " : "")));
+        if (figure.Length > 0)
+            block.Inlines.Add(new System.Windows.Documents.Run(figure) { FlowDirection = FlowDirection.LeftToRight });
+        return block;
+    }
+
+    // Arabic: a Latin part (a size, a file or title name) is its own left-to-right run, so "40.0 MB" and
+    // "Night Signal - S01" keep their order. Plain text in English. ltr null means the whole text.
+    static object LtrInside(string text, string? ltr)
+    {
+        if (!Loc.Arabic)
+            return text;
+        var block = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        var at = ltr == null ? 0 : text.IndexOf(ltr, StringComparison.Ordinal);
+        if (at < 0)
+            return text;
+        var length = ltr == null ? text.Length : ltr.Length;
+        if (at > 0)
+            block.Inlines.Add(new System.Windows.Documents.Run(text[..at]));
+        block.Inlines.Add(
+            new System.Windows.Documents.Run(text.Substring(at, length)) { FlowDirection = FlowDirection.LeftToRight }
+        );
+        if (at + length < text.Length)
+            block.Inlines.Add(new System.Windows.Documents.Run(text[(at + length)..]));
+        return block;
+    }
+
     async void ShowDownloadFreeSpace()
     {
         PrepareDownloadManagement();
@@ -602,6 +648,16 @@ public partial class MainWindow
             { "Finished shows", T("Finished shows (all watched)", "مسلسلات مكتملة المشاهدة") },
             { "Leftover partial downloads", T("Leftover partial downloads", "بقايا تنزيلات جزئية") },
             { "Torrents only sharing back", T("Torrents only sharing back", "تورنت يشارك الملفات فقط") },
+            { PcDownloads.KindEmptyFolders, T("Empty folders", "مجلدات فارغة") },
+            { PcDownloads.KindSamples, T("Sample videos", "مقاطع تجريبية") },
+            {
+                PcDownloads.KindLoose,
+                T("Leftover files from releases (.nfo, .txt, .url)", "ملفات متبقية من الإصدارات (.nfo, .txt, .url)")
+            },
+            {
+                PcDownloads.KindDuplicates,
+                T("Duplicates · the smaller copy is ticked", "نسخ مكررة · النسخة الأصغر محددة")
+            },
         };
         var choices = new ComboBox { Margin = new(0, 8, 0, 12) };
         foreach (
@@ -630,6 +686,7 @@ public partial class MainWindow
         );
         sheet.Add(warning);
         var items = new List<(CheckBox Box, DownloadSpaceItem Item)>();
+        var groupFigures = new List<Action>();
         var sections = new StackPanel();
         sheet.Add(sections);
         var status = Body(T("Looking for files…", "جارٍ البحث عن الملفات…"), 12);
@@ -646,11 +703,11 @@ public partial class MainWindow
         void Update()
         {
             var bytes = items.Where(x => x.Box.IsChecked == true).Sum(x => x.Item.Bytes);
-            submit.Content =
-                Choice() == DownloadDeleteChoice.Permanent
-                    ? T("Delete {0}", "حذف {0}", DownloadNaming.Size(bytes))
-                    : T("Move {0} to Recycle Bin", "نقل {0} إلى سلة المحذوفات", DownloadNaming.Size(bytes));
+            var buttonText = FreeSpaceText.Button(Choice(), bytes, Loc.Arabic);
+            submit.Content = LtrInside(buttonText, bytes > 0 ? DownloadNaming.Size(bytes) : "0 KB");
             submit.IsEnabled = items.Any(x => x.Box.IsChecked == true);
+            foreach (var redraw in groupFigures)
+                redraw();
         }
         choices.SelectionChanged += (_, _) =>
         {
@@ -670,32 +727,64 @@ public partial class MainWindow
             {
                 var groupBox = new CheckBox
                 {
-                    Content = label[group.Kind] + " · " + DownloadNaming.Size(group.Bytes),
-                    IsChecked = true,
+                    Content = FreeSpaceGroupLabel(label[group.Kind], ""),
+                    IsChecked = group.Items.Any(i => i.Preselect && !i.ListOnly),
                     Margin = new(0, 12, 0, 8),
                 };
                 DownloadName(groupBox, label[group.Kind]);
+                // U93: the figure beside a group is what its ticked files free, and it follows the ticks.
+                var groupKind = group.Kind;
+                var groupTitle = label[group.Kind];
+                groupFigures.Add(() =>
+                    groupBox.Content = FreeSpaceGroupLabel(
+                        groupTitle,
+                        FreeSpaceText.GroupFigure(
+                            groupKind,
+                            items.Where(x => x.Item.Kind == groupKind && x.Box.IsChecked == true).Select(x => x.Item),
+                            Loc.Arabic
+                        )
+                    )
+                );
                 var list = new StackPanel();
                 var groupItems = new List<CheckBox>();
+                var groupSpace = new List<DownloadSpaceItem>();
                 foreach (var item in group.Items)
                 {
+                    if (item.ListOnly)
+                    {
+                        list.Children.Add(
+                            Body(
+                                item.Label
+                                    + " · "
+                                    + T("Program file · Noir does not remove these", "ملف برنامج · لا يحذفه Noir"),
+                                12
+                            )
+                        );
+                        continue;
+                    }
                     var check = new CheckBox
                     {
-                        Content = item.Label + " · " + DownloadNaming.Size(item.Bytes),
-                        IsChecked = true,
+                        Content = LtrInside(
+                            item.Label + (item.Bytes > 0 ? " · " + DownloadNaming.Size(item.Bytes) : ""),
+                            null
+                        ),
+                        IsChecked = item.Preselect,
                         Margin = new(16, 6, 0, 6),
                     };
                     DownloadName(check, item.Label);
+                    if (item.Path.Length > 0)
+                        check.ToolTip = item.Path;
                     check.Checked += (_, _) => Update();
                     check.Unchecked += (_, _) => Update();
                     list.Children.Add(check);
                     items.Add((check, item));
                     groupItems.Add(check);
+                    groupSpace.Add(item);
                 }
                 groupBox.Checked += (_, _) =>
                 {
-                    foreach (var box in groupItems)
-                        box.IsChecked = true;
+                    for (var n = 0; n < groupItems.Count; n++)
+                        groupItems[n].IsChecked = groupSpace[n].Preselect;
                     Update();
                 };
                 groupBox.Unchecked += (_, _) =>
@@ -713,6 +802,7 @@ public partial class MainWindow
         }
         catch (Exception e)
         {
+            store.Log(e);
             status.Text = e.Message;
         }
         submit.Click += async (_, _) =>

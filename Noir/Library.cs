@@ -161,9 +161,15 @@ public sealed class ShowDownloadPreference
     public string Language { get; set; } = "All";
     public long MaxEpisodeBytes { get; set; }
     public bool AutoDownload { get; set; }
-    public int KeepReadyCount { get; set; } = 2;
+
+    // A5: null = same as the Keep ready default (2 unless changed); 1, 2, 3, 5 or -1 (rest of the season).
+    public int? KeepReadyCount { get; set; }
     public bool? KeepReadyEnabled { get; set; }
     public bool AlsoDownload { get; set; }
+
+    // A1 / A3 per-show overrides; null = same as default.
+    public int? RemoveAfterHours { get; set; }
+    public int? KeepLastWatched { get; set; }
 }
 
 public sealed class ViewingRecord
@@ -352,8 +358,46 @@ public sealed partial class LibraryStore
     readonly Dictionary<string, MediaSeed> metadata;
     readonly object gate = new(),
         scanGate = new();
-    readonly object writeGate = new(),
-        saveQueueGate = new();
+
+    // S6: one writer per library.json in the whole process (a reopened store, a direct Save and the
+    // deferred worker all take this lock), so library.json, its .bak and temp files see one write at a time.
+    readonly object writeGate;
+    readonly object saveQueueGate = new();
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, object> writeGates = new(
+        StringComparer.OrdinalIgnoreCase
+    );
+
+    // Deferred-save workers still running, by library.json path: a store opened on the same folder (or
+    // the app exiting) waits for them, so nothing reads the file back before the last change is on disk.
+    static readonly Dictionary<string, List<Task>> pendingWorkers = new(StringComparer.OrdinalIgnoreCase);
+
+    static void WaitForWorkers(string? path)
+    {
+        List<Task> tasks;
+        lock (pendingWorkers)
+        {
+            tasks = (
+                path == null ? pendingWorkers.Values.SelectMany(t => t)
+                : pendingWorkers.TryGetValue(path, out var list) ? list
+                : []
+            ).ToList();
+            foreach (var list2 in pendingWorkers.Values)
+                list2.RemoveAll(t => t.IsCompleted);
+        }
+        foreach (var task in tasks)
+            try
+            {
+                task.Wait();
+            }
+            catch { }
+    }
+
+    /// <summary>Waits until every deferred save in this process is on disk (app exit, restart).</summary>
+    public static void FlushAll() => WaitForWorkers(null);
+
+    /// <summary>Waits until this store's deferred saves are on disk; throws if the last write failed.</summary>
+    public void FlushPending() => FlushPendingAsync().GetAwaiter().GetResult();
+
     long saveRevision,
         writtenRevision;
     (long Revision, PlayerState State)? queuedSnapshot;
@@ -371,12 +415,18 @@ public sealed partial class LibraryStore
         PropertyNameCaseInsensitive = true,
     };
 
+    // S6: library.json is written compact (indentation was a third of its 72 MB); indented files still load.
+    static readonly JsonSerializerOptions StateWriteOptions = new() { PropertyNameCaseInsensitive = true };
+
     public LibraryStore(string? directory = null)
     {
         TraceStartup("Store preparation started");
         DataDirectory = directory ?? ProfileLocation.Prepare();
         Directory.CreateDirectory(DataDirectory);
-        statePath = System.IO.Path.Combine(DataDirectory, "library.json");
+        statePath = System.IO.Path.GetFullPath(System.IO.Path.Combine(DataDirectory, "library.json"));
+        writeGate = writeGates.GetOrAdd(statePath, _ => new object());
+        WaitForWorkers(statePath);
+        RemoveStaleTemps();
         TraceStartup("Store preparation ended");
         TraceStartup("Pending restore started");
         ApplyPendingRestore();
@@ -414,7 +464,13 @@ public sealed partial class LibraryStore
                 ? "Recovered library settings from the last backup. · تم استرداد المكتبة من آخر نسخة احتياطية."
                 : "Library and backup could not be read. Saving is disabled for this session; both files are preserved. · تعذرت قراءة المكتبة والنسخة الاحتياطية. تم تعطيل الحفظ لهذه الجلسة مع الحفاظ على الملفين.";
             var suffix = ".unreadable-" + DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss-fffffff");
-            foreach (var path in new[] { statePath, statePath + ".bak" }.Where(File.Exists))
+            // Keep a copy only of what could not be read: a .bak that loaded is the good file and is not copied
+            // (a crash between the two renames of a save leaves library.json missing and the .bak intact).
+            foreach (
+                var path in new[] { statePath, backup == null ? statePath + ".bak" : null }
+                    .OfType<string>()
+                    .Where(File.Exists)
+            )
                 try
                 {
                     File.Copy(path, path + suffix, false);
@@ -642,7 +698,7 @@ public sealed partial class LibraryStore
             TrackMobileChanges();
             snapshot = (++saveRevision, LibrarySnapshot.Copy(State));
         }
-        WriteSnapshot((snapshot.Revision, JsonSerializer.SerializeToUtf8Bytes(snapshot.State, JsonOptions)));
+        WriteSnapshot((snapshot.Revision, JsonSerializer.SerializeToUtf8Bytes(snapshot.State, StateWriteOptions)));
     }
 
     public void SaveDeferred() => SaveDeferredCore(true);
@@ -671,6 +727,13 @@ public sealed partial class LibraryStore
                 return;
             writerRunning = true;
             saveWorker = Task.Run(DrainSaves);
+            lock (pendingWorkers)
+            {
+                if (!pendingWorkers.TryGetValue(statePath, out var list))
+                    pendingWorkers[statePath] = list = [];
+                list.RemoveAll(t => t.IsCompleted);
+                list.Add(saveWorker);
+            }
         }
     }
 
@@ -691,7 +754,9 @@ public sealed partial class LibraryStore
             }
             try
             {
-                WriteSnapshot((snapshot.Revision, JsonSerializer.SerializeToUtf8Bytes(snapshot.State, JsonOptions)));
+                WriteSnapshot(
+                    (snapshot.Revision, JsonSerializer.SerializeToUtf8Bytes(snapshot.State, StateWriteOptions))
+                );
             }
             catch (Exception e)
             {
@@ -722,26 +787,40 @@ public sealed partial class LibraryStore
             throw new IOException("Your latest library changes could not be saved.", error);
     }
 
+    // Checks only: runs as a write starts (S6 checks which thread a check-off writes on).
+    internal Action? WritingSnapshot = null; // test seam (Noir.Checks): runs while a save serializes
+
     void WriteSnapshot((long Revision, byte[] Data) snapshot)
     {
+        WritingSnapshot?.Invoke();
         lock (writeGate)
         {
             if (savesBlocked || snapshot.Revision <= writtenRevision)
                 return;
-            var temp = statePath + ".tmp";
-            using (var file = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None))
+            // A temp name of its own per write, as a second line of defence behind the lock.
+            var temp = statePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
             {
+                using var file = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None);
                 file.Write(snapshot.Data);
                 file.Flush(true);
             }
+            catch
+            {
+                TryDelete(temp);
+                throw;
+            }
             // Windows scanners can briefly hold an otherwise writable JSON file. Keep the
             // flushed new file and previous good copy intact while retrying the atomic commit.
+            // S6: the previous file becomes the .bak by rename (no 72 MB copy). If the second rename
+            // fails or the process dies between the two, library.json is missing and the next start
+            // loads the .bak, which is exactly the previous good file.
             for (int attempt = 0; ; attempt++)
             {
                 try
                 {
                     if (File.Exists(statePath) && !recoveredBackup)
-                        File.Copy(statePath, statePath + ".bak", true);
+                        File.Move(statePath, statePath + ".bak", true);
                     File.Move(temp, statePath, true);
                     writtenRevision = snapshot.Revision;
                     saveFailure = null;
@@ -752,8 +831,37 @@ public sealed partial class LibraryStore
                 {
                     Thread.Sleep(40 * (attempt + 1));
                 }
+                catch
+                {
+                    TryDelete(temp);
+                    throw;
+                }
             }
         }
+    }
+
+    static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch { }
+    }
+
+    // Temp files a crash left behind (library.json.tmp from older builds, library.json.<id>.tmp now).
+    // Only old ones: a temp younger than a minute could belong to another Noir writing this folder.
+    void RemoveStaleTemps()
+    {
+        try
+        {
+            foreach (
+                var temp in Directory.EnumerateFiles(DataDirectory, "library.json*.tmp", SearchOption.TopDirectoryOnly)
+            )
+                if (File.GetLastWriteTimeUtc(temp) < DateTime.UtcNow.AddMinutes(-1))
+                    TryDelete(temp);
+        }
+        catch { }
     }
 
     public static Bookmark? ProgressFor(PlayerState state, VideoItem item) =>
@@ -918,7 +1026,8 @@ public sealed partial class LibraryStore
                 CommunityQueue.Enqueue(State, entry.Item, entry.Progress.UpdatedAt);
             if (!completed)
                 CommunityQueue.CancelPending(State, entry.Item.Id);
-            Save();
+            // S6: check-offs happen on the UI thread; the full write runs on the save worker.
+            SaveDeferred();
         }
         if (completed)
             WatchCompleted?.Invoke();
@@ -1256,6 +1365,13 @@ public sealed partial class LibraryStore
         }
     }
 
+    // The first saved item of the title that has an IMDb id (by the group index, not an archive copy).
+    public VideoItem? FirstWithImdb(string groupKey)
+    {
+        lock (gate)
+            return EntriesFor(groupKey).Select(e => e.Item).FirstOrDefault(i => i.ImdbId.Length > 0);
+    }
+
     public List<VideoItem> EpisodesFor(string groupKey)
     {
         lock (gate)
@@ -1362,10 +1478,11 @@ public sealed partial class LibraryStore
                 && entries.All(e => e.MetadataCheckedAt > DateTimeOffset.UtcNow.AddHours(-6));
     }
 
-    static string MatchTitle(string title) => Regex.Replace(title.ToUpperInvariant(), @"[^\p{L}\p{N}]", "");
-
     static string Fingerprint(string path)
     {
+        // Imported and discovered titles have no file; File.Open("") throws, which costs per item.
+        if (path.Length == 0)
+            return "";
         try
         {
             using var file = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
@@ -1409,26 +1526,30 @@ public sealed partial class LibraryStore
             && e.Item.Episode == item.Episode
             && MatchTitle(e.Item.Title) == MatchTitle(item.Title)
             && (e.Item.Year == 0 || item.Year == 0 || e.Item.Year == item.Year);
-        IEnumerable<CatalogEntry> pathCandidates =
-            scanPaths == null ? State.Catalog.Values : scanPaths.GetValueOrDefault(item.Path) ?? [];
-        var entry = pathCandidates.FirstOrDefault(e =>
+        var index = ActiveMatchIndex();
+        bool SamePath(CatalogEntry e) =>
             e.Paths.Contains(item.Path, StringComparer.OrdinalIgnoreCase)
             && (
                 State.Matches.ContainsKey(e.Item.Id)
                 || SameTitle(e)
                 || fingerprint.Length > 0 && fingerprint == e.Fingerprint
-            )
-        )
-            ?? (
-                fingerprint.Length > 0
-                    ? State.Catalog.Values.FirstOrDefault(e =>
-                        e.Fingerprint == fingerprint && e.Item.IsMovie == item.IsMovie
-                    )
-                    : null
             );
+        bool SameFile(CatalogEntry e) => e.Fingerprint == fingerprint && e.Item.IsMovie == item.IsMovie;
+        var entry =
+            scanPaths != null ? (scanPaths.GetValueOrDefault(item.Path) ?? []).FirstOrDefault(SamePath)
+            : index != null ? Unique(index.Path.GetValueOrDefault(item.Path), SamePath)
+            : State.Catalog.Values.FirstOrDefault(SamePath);
+        if (entry == null && fingerprint.Length > 0)
+            entry =
+                index != null
+                    ? Unique(index.Fingerprint.GetValueOrDefault(fingerprint), SameFile)
+                    : State.Catalog.Values.FirstOrDefault(SameFile);
         if (entry == null)
         {
-            var matches = State.Catalog.Values.Where(SameTitle).ToList();
+            var matches =
+                index != null
+                    ? AllPassing(index.Title.GetValueOrDefault(MatchTitle(item.Title)), SameTitle)
+                    : State.Catalog.Values.Where(SameTitle).ToList();
             entry = matches.Count == 1 ? matches[0] : null;
         }
         var old = entry?.Item;
@@ -1444,14 +1565,18 @@ public sealed partial class LibraryStore
             collection = item.CollectionKey;
         if (string.IsNullOrEmpty(collection))
         {
+            var showKey = item.IsMovie ? "" : ShowKey(item.Title);
+            bool SameShow(CatalogEntry e) =>
+                !e.Item.IsMovie
+                && (index?.ShowKeyOf(e.Item.Title) ?? ShowKey(e.Item.Title)) == showKey
+                && (e.Item.Year == 0 || item.Year == 0 || e.Item.Year == item.Year);
             var existingShows = item.IsMovie
                 ? []
-                : State
-                    .Catalog.Values.Where(e =>
-                        !e.Item.IsMovie
-                        && MatchTitle(CleanShowTitle(e.Item.Title)) == MatchTitle(CleanShowTitle(item.Title))
-                        && (e.Item.Year == 0 || item.Year == 0 || e.Item.Year == item.Year)
-                    )
+                : (
+                    index != null
+                        ? AllPassing(index.Show.GetValueOrDefault(showKey), SameShow)
+                        : State.Catalog.Values.Where(SameShow)
+                )
                     .Select(e => e.Item.GroupKey)
                     .Distinct()
                     .ToList();
@@ -1510,8 +1635,9 @@ public sealed partial class LibraryStore
             .FirstOrDefault();
         if (legacy != null && (entry.Progress == null || legacy.UpdatedAt > entry.Progress.UpdatedAt))
             entry.Progress = legacy;
+        var countBefore = State.Catalog.Count;
         State.Catalog[id] = entry;
-        CatalogChanged();
+        Remembered(id, entry, countBefore);
         if (scanPaths != null)
             foreach (var path in entry.Paths)
             {

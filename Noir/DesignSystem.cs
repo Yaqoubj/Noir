@@ -297,6 +297,7 @@ public partial class MainWindow
         hoverOwner = owner;
         hoverCard = new Popup
         {
+            FlowDirection = LibraryRoot.FlowDirection,
             Child = border,
             PlacementTarget = anchor,
             Placement = PlacementMode.Center,

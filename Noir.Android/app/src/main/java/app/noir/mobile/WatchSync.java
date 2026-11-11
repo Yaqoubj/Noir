@@ -6,7 +6,9 @@ import java.util.*;
 /** The phone's own watch-sync queue (P1), the PC's control scripts ported byte for byte (P2, checked against the shared golden file) and provider backoff (P5).
  Stored in the profile's library.json under "watchSync": jobs keyed provider:itemId like the PC's WatchSync, provider backoff, Serializd season links. */
 final class WatchSync {
- static final String[] PROVIDERS={"Trakt","Serializd"};
+ static final String STREMIO="Stremio";
+ /* Every queue: the two websites (marked through an off-screen WebView) and the phone's own Stremio account (plain HTTPS, StremioWriter). */
+ static final String[] PROVIDERS={"Trakt","Serializd",STREMIO},SITES={"Trakt","Serializd"};
  /* Site-level failures wait 5 min, 30 min, 2 h, 12 h, then daily; a success or Retry resets. */
  static final long[] BACKOFF={5*60000L,30*60000L,2*3600000L,12*3600000L,24*3600000L};
  static final long DAY=24*3600000L;
@@ -21,7 +23,10 @@ final class WatchSync {
  static JSONObject state(DataStore d){return d.live("watchSync");}
  static JSONObject section(JSONObject s,String key){JSONObject o=s.optJSONObject(key);if(o==null){o=new JSONObject();DataStore.put(s,key,o);}return o;}
  /* The switches are the PC's settings (synced in the library as syncTrakt / syncSerializd); a phone switch overrides them. */
- static boolean enabled(DataStore d,String p){return d.playbackFlag("sync"+p,false);}
+ static boolean enabled(DataStore d,String p){return d.playbackFlag("sync"+p,false)&&(!p.equals(STREMIO)||stremioKey(d));}
+ /* Stremio marks need this phone's own Stremio sign-in (HistoryToolsActivity); both Stremio switches are phone settings, off by default. */
+ static boolean stremioKey(DataStore d){return !d.stateObject("stremio").optString("key").isEmpty();}
+ static boolean stremioAdd(DataStore d){return d.playbackFlag("stremioAddTitles",false);}
  static void enable(DataStore d,String p,boolean on){d.phoneSetting("sync"+p,on);if(on)retry(d,p);}
  static String name(JSONObject i){String r=i.optString("reviewTitle");return r.isEmpty()?i.optString("title"):r;}
  static String titleKey(JSONObject i){return i.optString("imdb")+"|"+i.optBoolean("movie")+"|"+i.optInt("season")+"|"+i.optInt("episode")+"|"+name(i)+"|"+i.optInt("year");}
@@ -58,7 +63,7 @@ final class WatchSync {
  static boolean held(JSONObject job,JSONObject item){return job.optBoolean("held")&&(item==null||job.optString("titleKey").equals(titleKey(item)));}
  static List<JSONObject> due(DataStore d,long now){List<JSONObject> list=new ArrayList<>();
   synchronized(d){Set<String> open=new HashSet<>();for(String p:PROVIDERS)if(enabled(d,p)&&!waiting(d,p,now))open.add(p);
-  for(JSONObject j:live(d)){if(j.has("syncedAt")||!open.contains(j.optString("provider"))||j.optLong("retryAt")>now)continue;if(held(j,d.item(j.optString("itemId"))))continue;list.add(DataStore.copy(j));}}
+  Map<String,JSONObject> byId=null;for(JSONObject j:live(d)){if(j.has("syncedAt")||!open.contains(j.optString("provider"))||j.optLong("retryAt")>now)continue;if(j.optBoolean("held")){if(byId==null)byId=d.liveItems();if(held(j,byId.get(j.optString("itemId"))))continue;}list.add(DataStore.copy(j));}}
   /* S1: newest first, so today's episode never waits behind years of backlog. */
   Collections.sort(list,(a,b)->Long.compare(b.optLong("watchedAt"),a.optLong("watchedAt")));return list;}
  /* S2: each provider takes at most 30 marks an hour and 200 a day on this phone (rolling, persisted); a read that finds "already watched" counts too. The rest waits. */
@@ -70,7 +75,7 @@ final class WatchSync {
  static boolean current(DataStore d,JSONObject job){if(!enabled(d,job.optString("provider"))||tv.test(d.context))return false;JSONObject now=job(d,key(job));if(now==null||now.has("syncedAt")||!now.optString("viewingId").equals(job.optString("viewingId")))return false;JSONObject item=d.item(job.optString("itemId"));return item!=null&&DataStore.watched(item);}
 
  /* P4: jobs the other device already confirmed are done without loading a page. */
- static int absorb(DataStore d){synchronized(d){int n=0;for(JSONObject j:live(d)){if(j.has("syncedAt"))continue;String at=syncedAt(d.item(j.optString("itemId")),j.optString("provider"));if(at.isEmpty())continue;long when=parse(at);DataStore.put(j,"syncedAt",when>0?when:clock.now());DataStore.put(j,"message","Watched ✓");DataStore.put(j,"by","PC");n++;}if(n>0)d.liveChanged();return n;}}
+ static int absorb(DataStore d){synchronized(d){int n=0;Map<String,JSONObject> byId=null;for(JSONObject j:live(d)){if(j.has("syncedAt"))continue;if(byId==null)byId=d.liveItems();String at=syncedAt(byId.get(j.optString("itemId")),j.optString("provider"));if(at.isEmpty())continue;long when=parse(at);DataStore.put(j,"syncedAt",when>0?when:clock.now());DataStore.put(j,"message","Watched ✓");DataStore.put(j,"by","PC");n++;}if(n>0)d.liveChanged();return n;}}
  static void started(DataStore d,String key){editJob(d,key,j->{DataStore.put(j,"attempts",j.optInt("attempts")+1);DataStore.put(j,"message","Syncing…");});}
  static void interrupted(DataStore d,String key){editJob(d,key,j->DataStore.put(j,"message","Waiting to sync"));}
  static void done(DataStore d,String key){long now=clock.now();String[] sent=new String[3];editJob(d,key,j->{DataStore.put(j,"syncedAt",now);DataStore.put(j,"message","Watched ✓");j.remove("held");sent[0]=j.optString("provider");sent[1]=j.optString("itemId");sent[2]=j.optString("viewingId");});if(sent[0]!=null)tellPc(d,sent[0],sent[1],sent[2],now);}
@@ -85,6 +90,8 @@ final class WatchSync {
  /* P4, phone to PC: a "synced" operation carries the confirmation; mark/progress ops still waiting to be sent carry it too. */
  static void tellPc(DataStore d,String p,String itemId,String viewingId,long at){if(viewingId.isEmpty())return;JSONObject synced=new JSONObject();DataStore.put(synced,p,java.time.Instant.ofEpochMilli(at).toString());JSONObject op=d.operation(itemId,"synced");DataStore.put(op,"viewingId",viewingId);DataStore.put(op,"synced",synced);d.attachSynced(viewingId,p,synced.optString(p));d.queue(op);}
 
+ /* S6: Harbor's Retry button: any waiting job held or backed off, without copying the queue. */
+ static boolean stuck(DataStore d,String p,long now){synchronized(d){for(JSONObject j:live(d))if(j.optString("provider").equals(p)&&!j.has("syncedAt")&&(j.optBoolean("held")||j.optLong("retryAt")>now))return true;return false;}}
  static int count(DataStore d,String p,boolean synced){synchronized(d){int n=0;for(JSONObject j:live(d))if(j.optString("provider").equals(p)&&j.has("syncedAt")==synced)n++;return n;}}
  /* F13: the site has failed for a day. */
  static boolean failingForADay(DataStore d,String p,long now){long since=provider(d,p).optLong("failingSince");return since>0&&now-since>=DAY;}

@@ -13,6 +13,14 @@ Directory.CreateDirectory(dir);
 var source = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".noir");
 if (!args.Contains("--offline") && File.Exists(Path.Combine(source, "library.json")))
     File.Copy(Path.Combine(source, "library.json"), Path.Combine(dir, "library.json"));
+
+// S5: serve the synthetic big library (Noir.Checks --generate-scale) instead; offline only, never with the personal copy.
+if (
+    args.Contains("--offline")
+    && Array.IndexOf(args, "--scale-library") is var scale and >= 0
+    && scale + 1 < args.Length
+)
+    File.Copy(Path.Combine(args[scale + 1], "library.json"), Path.Combine(dir, "library.json"), true);
 Directory.CreateDirectory(Path.Combine(dir, "art"));
 foreach (
     var image in !args.Contains("--offline") && Directory.Exists(Path.Combine(source, "art"))

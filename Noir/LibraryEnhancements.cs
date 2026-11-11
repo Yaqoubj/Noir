@@ -100,6 +100,8 @@ public partial class MainWindow
         return button;
     }
 
+    internal const int HomeContinueLimit = 20;
+
     // U31 (P4): "See all" is the header link only; the trailing "See all" tile a rail adds beside it is dropped.
     FrameworkElement ContinueShelf(
         IEnumerable<UpNext> videos,
@@ -119,10 +121,15 @@ public partial class MainWindow
             );
         var layout = HomeLayout.Load(store.DataDirectory);
         homePosterTitles = layout.ShowPosterTitles;
+        // S6: Home shows the newest few; "See all" opens History → Up next with every one of them
+        // (a big library has about a thousand, and each card costs several milliseconds to build).
         return Rail(
             label,
             subtitle,
-            videos.Select(entry => HomeContinueCard(entry, layout.ContinueStyle != "Poster")).ToList(),
+            videos
+                .Take(HomeContinueLimit)
+                .Select(entry => HomeContinueCard(entry, layout.ContinueStyle != "Poster"))
+                .ToList(),
             () =>
             {
                 trackerTab = "Up next";
@@ -166,7 +173,7 @@ public partial class MainWindow
             : wide && File.Exists(item.Backdrop) ? item.Backdrop
             : item.Poster;
         var play = ActionButton("", Open);
-        play.Content = Art(image, item.Title, height, !wide);
+        play.Content = Art(image, item.Title, height, !wide, !(wide || homePosterTitles));
         play.Padding = new(0);
         play.HorizontalAlignment = HorizontalAlignment.Stretch;
         System.Windows.Automation.AutomationProperties.SetName(play, T("Continue {0}", "متابعة {0}", item.Label));

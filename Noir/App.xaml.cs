@@ -241,6 +241,8 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        // S6: deferred library saves (check-offs, sync jobs) finish before the process ends.
+        LibraryStore.FlushAll();
         single?.Dispose();
         base.OnExit(e);
         StartupTrace.Mark("App exit");

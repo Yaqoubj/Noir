@@ -465,6 +465,39 @@ static class Loc
         ["Game-Show"] = "برامج مسابقات",
         ["Short"] = "قصير",
         ["Film-Noir"] = "فيلم نوار",
+        ["Link with a code at nuvio.tv/link. Noir pulls Nuvio's watches and marks yours watched in Nuvio."] =
+            "اربط برمز عبر nuvio.tv/link. يسحب Noir مشاهدات Nuvio ويعلّم مشاهداتك في Nuvio.",
+        ["Each movie or episode you finish or check off is marked watched on trakt.tv, through your website sign-in."] =
+            "يُعلَّم كل فيلم أو حلقة تنهيها أو تعلّمها كمُشاهَدة على trakt.tv عبر تسجيل دخولك إلى الموقع.",
+        ["Each episode you finish or check off is marked watched on Serializd (TV only)."] =
+            "تُعلَّم كل حلقة تنهيها أو تعلّمها كمُشاهَدة على Serializd (للمسلسلات فقط).",
+        ["Details"] = "التفاصيل",
+        ["Auto-next, subtitles, after watching"] = "التشغيل التلقائي، الترجمة، بعد المشاهدة",
+        ["The website could not load."] = "تعذر تحميل الموقع.",
+        ["The website could not load. Noir will retry later."] = "تعذر تحميل الموقع. سيعيد Noir المحاولة لاحقًا.",
+        ["The website's security check wasn't completed."] = "لم يكتمل الفحص الأمني للموقع.",
+        [
+            "Your website session has expired. Sign in once under Reviews & comments; Noir resumes syncing automatically."
+        ] = "انتهت جلسة الموقع. سجّل الدخول مرة واحدة ضمن المراجعات والتعليقات؛ يستأنف Noir المزامنة تلقائيًا.",
+        ["The website's watched controls are unavailable. Noir will retry automatically."] =
+            "أزرار المشاهدة في الموقع غير متاحة. سيعيد Noir المحاولة تلقائيًا.",
+        ["The watched control changed. Noir will retry later."] = "تغيّر زر المشاهدة. سيعيد Noir المحاولة لاحقًا.",
+        ["Trakt's watched-date control is unavailable. Noir will retry automatically."] =
+            "حقل تاريخ المشاهدة في Trakt غير متاح. سيعيد Noir المحاولة تلقائيًا.",
+        ["The website hasn't confirmed the watched mark. Noir will recheck later."] =
+            "لم يؤكد الموقع علامة المشاهدة. سيعيد Noir الفحص لاحقًا.",
+        ["Website unavailable. Noir will retry later."] = "الموقع غير متاح. سيعيد Noir المحاولة لاحقًا.",
+        ["Waiting its turn: the site is sent a limited number of marks per hour and day."] =
+            "بانتظار دوره: يستقبل الموقع عددًا محدودًا من العلامات في الساعة واليوم.",
+        ["Waiting for a verified title ID. Refresh information in Settings."] =
+            "بانتظار معرّف عنوان موثّق. حدّث المعلومات من الإعدادات.",
+        [
+            "Two-way: Nuvio's watches come into Noir every few hours, and what you finish or check off in Noir is marked watched in Nuvio."
+        ] = "باتجاهين: تصل مشاهدات Nuvio إلى Noir كل بضع ساعات، وما تنهيه أو تعلّمه في Noir يُعلَّم كمُشاهَد في Nuvio.",
+        ["Link with a code — no password. Watches flow both ways."] =
+            "اربط برمز بلا كلمة مرور. تنتقل المشاهدات في الاتجاهين.",
+        ["New watches in Stremio come into Noir every few hours. Stremio can't receive watches from other apps."] =
+            "تصل المشاهدات الجديدة في Stremio إلى Noir كل بضع ساعات. ولا يستقبل Stremio مشاهدات من تطبيقات أخرى.",
     };
 }
 

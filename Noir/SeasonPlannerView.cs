@@ -520,26 +520,60 @@ public partial class MainWindow
             more.Expanded += (_, _) => optionsOpen = true;
             more.Collapsed += (_, _) => optionsOpen = false;
             controls.Children.Add(more);
+            // A6+A7: the per-show switch shows what happens now (own switch or the global "Which shows" choice);
+            // ticking or unticking makes it this show's own choice, "Same as default" gives it back.
+            var quietAuto = false;
+            var rule = manager.AutomaticRule(item.Id);
             var auto = new CheckBox
             {
                 Content = T("Auto-download new episodes", "تنزيل الحلقات الجديدة تلقائيًا"),
-                IsChecked = preference.AutoDownload,
+                IsChecked = preference.AutoDownload || rule != null,
                 Margin = new(0, 12, 0, 4),
             };
+            var sameAsDefault = ActionButton(T("Same as default", "مثل الافتراضي"), () =>
+            {
+                preference.AutoDownload = false;
+                preference.KeepReadyEnabled = null;
+                SavePreference();
+                var effective = manager.AutomaticRule(item.Id) != null;
+                if (auto.IsChecked != effective)
+                {
+                    quietAuto = true;
+                    auto.IsChecked = effective;
+                    quietAuto = false;
+                }
+            });
+            sameAsDefault.Visibility = preference.KeepReadyEnabled == null ? Visibility.Collapsed : Visibility.Visible;
+            var autoHint = Body(
+                preference.KeepReadyEnabled == null && rule != null
+                    ? T("On by default: {0}", "مفعّل افتراضيًا: {0}", ReadyText(rule))
+                    : "",
+                12
+            );
             auto.Checked += (_, _) =>
             {
+                if (quietAuto)
+                    return;
                 preference.AutoDownload = true;
                 preference.KeepReadyEnabled = true;
                 SavePreference();
+                sameAsDefault.Visibility = Visibility.Visible;
+                autoHint.Text = "";
                 ShowKeepReady(item);
             };
             auto.Unchecked += (_, _) =>
             {
+                if (quietAuto)
+                    return;
                 preference.AutoDownload = false;
                 preference.KeepReadyEnabled = false;
                 SavePreference();
+                sameAsDefault.Visibility = Visibility.Visible;
+                autoHint.Text = "";
             };
             controls.Children.Add(auto);
+            controls.Children.Add(autoHint);
+            controls.Children.Add(sameAsDefault);
             controls.Children.Add(
                 ActionButton(
                     T("Keep ready · choose episodes & storage", "إبقاء الحلقات جاهزة · اختيار العدد والمساحة"),

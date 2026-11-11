@@ -2,6 +2,46 @@
 using LibVLCSharp.Shared;
 using Noir;
 
+// S5 scale tool: build the synthetic big library, or time it (see ScaleChecks.cs).
+if (Array.IndexOf(args, "--generate-scale") is var gen and >= 0 && gen + 1 < args.Length)
+{
+    ScaleChecks.Generate(
+        args[gen + 1],
+        Array.IndexOf(args, "--divide") is var dv and >= 0 && dv + 1 < args.Length ? int.Parse(args[dv + 1]) : 1
+    );
+    return;
+}
+
+// S6: the save stress check N times, one line per run (also appended to the given log).
+if (Array.IndexOf(args, "--s6-stress") is var sst and >= 0 && sst + 1 < args.Length)
+{
+    var stressRoot = Path.Combine(Path.GetTempPath(), "noir-s6-stress-" + Guid.NewGuid().ToString("N")[..8]);
+    var failed = false;
+    for (var run = 1; run <= int.Parse(args[sst + 1]); run++)
+    {
+        var (ok, line) = ScaleChecks.Stress(Path.Combine(stressRoot, "run-" + run));
+        line = $"{(ok ? "PASS" : "FAIL")} run {run}: {line}";
+        failed |= !ok;
+        Console.WriteLine(line);
+        if (sst + 2 < args.Length)
+            File.AppendAllText(args[sst + 2], line + Environment.NewLine);
+    }
+    Directory.Delete(stressRoot, true);
+    Environment.Exit(failed ? 1 : 0);
+}
+
+// S6: only the backup merge into the same library (for tracing).
+if (Array.IndexOf(args, "--scale-merge") is var smg and >= 0 && smg + 1 < args.Length)
+{
+    ScaleChecks.MergeProbe(args[smg + 1]);
+    return;
+}
+if (Array.IndexOf(args, "--scale-measure") is var sm and >= 0 && sm + 1 < args.Length)
+{
+    await ScaleChecks.Measure(args[sm + 1], sm + 2 < args.Length ? args[sm + 2] : null);
+    return;
+}
+
 // Every case folder of this run lives under one run folder, deleted when all checks pass and kept on failure for diagnosis.
 var validationRoot = Path.Combine(Directory.GetCurrentDirectory(), "NoirValidation");
 var root = Path.Combine(
@@ -84,6 +124,7 @@ if (args.Contains("--stream-sampling"))
 await DataSafetyChecks.Run(Check);
 await BackendAuditChecks.Run(root, Check);
 TasteCodeChecks.Run(Check);
+await StremioLibraryChecks.Run(root, Check);
 Check(
     EpisodeText.Tidy("Let'S Use Our Resources With Care") == "Let's Use Our Resources With Care"
         && EpisodeText.Tidy("Don’T Stop I'M Here") == "Don’t Stop I'm Here"
@@ -147,6 +188,7 @@ Check(
 );
 await NoirReadyChecks.Run(root, Check);
 await RefreshChecks.Run(root, Check);
+await ScaleChecks.Run(root, Check);
 store.Record(episodes[1], 37.42, 100);
 Check(store.ContinueFor(all)?.Path == episodes[1].Path, "Continue selects the interrupted episode, not episode one");
 var reopened = new LibraryStore(caseRoot);
@@ -318,6 +360,9 @@ var missingThird = knownEpisodes.Single(e => e.Season == 1 && e.Episode == 3);
 var missingFourth = knownEpisodes.Single(e => e.Season == 1 && e.Episode == 4);
 interruptedRewatch.Mark(missingThird, true);
 interruptedRewatch.Mark(missingFourth, false);
+
+// S6: check-offs are written by the save worker; wait for it as the app does before closing.
+await interruptedRewatch.FlushPendingAsync();
 var virtualReload = new LibraryStore(caseRoot);
 Check(
     virtualReload.GetProgress(missingThird)?.Completed == true

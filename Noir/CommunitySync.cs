@@ -16,11 +16,42 @@ public sealed class CommunitySync : IDisposable
     readonly DispatcherTimer timer;
     readonly CommunityBackoff backoff;
     public bool Paused { get; set; }
+    public CommunityBackoff Backoff => backoff;
+
+    /// <summary>F14: the daily title-ID lookup (set by the window: the Cinemeta metadata refresh).</summary>
+    public Func<Task>? RefreshIds { get; set; }
 
     /// <summary>Clock seam: tests drive <see cref="CommunityQueue.Pass"/> with their own.</summary>
     public Func<DateTimeOffset> Clock { get; set; } = () => DateTimeOffset.UtcNow;
     Window? host;
     WebView2? web;
+    StremioLibraryWriter? stremio;
+    StremioVideoCache? stremioVideos;
+
+    /// <summary>The one Stremio account writer of this process (key: the import's stored key, read only).</summary>
+    public StremioLibraryWriter Stremio
+    {
+        get
+        {
+            if (stremio != null)
+                return stremio;
+            stremioVideos = new(
+                StremioLibraryWriter.CinemetaVideos(new System.Net.Http.HttpClientHandler()),
+                TimeSpan.FromHours(12)
+            );
+            return stremio = new StremioLibraryWriter(
+                store.DataDirectory,
+                new System.Net.Http.HttpClientHandler(),
+                stremioVideos.Get,
+                new StremioMarkOptions()
+            );
+        }
+    }
+
+    /// <summary>Puts titles back in the Stremio account as Noir first found them, except ones changed there since.</summary>
+    public Task<StremioRestoreSummary> RestoreStremio(params string[] imdbIds) =>
+        Stremio.Restore(imdbIds, lifetime.Token);
+
     bool busy,
         disposed,
         wakeAgain;
@@ -66,20 +97,33 @@ public sealed class CommunitySync : IDisposable
     }
 
     /// <summary>Stop the past-history send and remove its unsent jobs; anything already sent stays sent.</summary>
-    public int CancelPrevious()
+    public int CancelPrevious(string? provider = null)
     {
-        var removed = CommunityQueue.CancelBacklog(store.State);
+        var removed = CommunityQueue.CancelBacklog(store.State, backoff, provider);
         store.Save();
         changed();
         return removed;
     }
 
-    public void QueuePrevious()
+    public int QueuePrevious(string? provider = null)
     {
-        CommunityQueue.QueueBacklog(store.State);
+        var queued = CommunityQueue.QueueBacklog(store.State, provider);
         Paused = false;
+        foreach (var name in CommunityQueue.Providers.Where(p => provider == null || p == provider))
+            backoff.SetBacklogPaused(name, false);
         store.Save();
         Retry();
+        changed();
+        return queued;
+    }
+
+    /// <summary>Pause or resume only the past-history send; newer watches keep going.</summary>
+    public void PausePrevious(string provider, bool paused)
+    {
+        backoff.SetBacklogPaused(provider, paused);
+        store.Save();
+        if (!paused)
+            Wake();
         changed();
     }
 
@@ -158,15 +202,45 @@ public sealed class CommunitySync : IDisposable
         busy = true;
         try
         {
-            await CommunityQueue.Pass(store.State, backoff, Clock, TitleKey, Current, Send, () =>
+            Task Pass() =>
+                CommunityQueue.Pass(
+                    store.State,
+                    backoff,
+                    Clock,
+                    TitleKey,
+                    Current,
+                    Send,
+                    () =>
+                    {
+                        if (disposed)
+                            return;
+                        store.SaveDeferred();
+                        changed();
+                    },
+                    persisted: async () => await store.FlushPendingAsync(),
+                    log: store.Log
+                );
+            await Pass();
+            if (
+                RefreshIds is { } refresh
+                && !disposed
+                && await CommunityQueue.RetryIds(store.State, backoff, Clock(), refresh)
+            )
             {
-                if (disposed)
-                    return;
-                store.Save();
-                changed();
-            });
+                store.SaveDeferred();
+                await Pass();
+            }
         }
         catch (OperationCanceledException) { }
+        // Run is fired and forgotten: a failed save must not escape unobserved. The next wake tries again.
+        catch (Exception e)
+        {
+            try
+            {
+                store.Log(e);
+            }
+            catch (Exception e2) when (e2 is IOException or UnauthorizedAccessException) { }
+        }
         finally
         {
             busy = false;
@@ -179,12 +253,13 @@ public sealed class CommunitySync : IDisposable
     async Task<bool> Send(WatchSyncJob job)
     {
         var item = store.State.Catalog[job.ItemId].Item;
+        // Stremio is an API call, no page: never opens the browser.
+        if (job.Provider == CommunityQueue.Stremio)
+            return await StremioSync.Send(Stremio, store.State, item, job, Loc.Arabic, lifetime.Token, stremioVideos);
         if (item.Season == 0 && !item.IsMovie && job.Provider == "Trakt")
-            throw new SyncTitleException(
-                "Specials need a confirmed Trakt match. Mark the correct special on its website; your Noir history remains saved."
-            );
+            throw new SyncTitleException(CommunityQueue.SpecialMessage);
         if (job.Provider == "Trakt" && !System.Text.RegularExpressions.Regex.IsMatch(item.ImdbId, @"^tt\d+$"))
-            throw new SyncTitleException("Waiting for a verified title ID. Refresh information in Settings.");
+            throw new SyncTitleException(CommunityQueue.NoIdMessage);
         var browser = await Browser();
         var url =
             job.Provider == "Serializd"

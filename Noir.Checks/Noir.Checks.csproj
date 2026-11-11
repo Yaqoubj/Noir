@@ -11,5 +11,6 @@
 <ItemGroup><Compile Include="../Noir/HomeDiscovery.cs"/></ItemGroup>
 <ItemGroup><PackageReference Include="MonoTorrent" Version="3.0.2"/><Compile Include="../Noir/PcDownloadsHooks.cs"/><Compile Include="../Noir/Torrent*.cs"/><Compile Include="../Noir/PcDownloadsManage*.cs"/></ItemGroup>
 <ItemGroup><Compile Include="../Noir/NuvioPush.cs" Link="NuvioPush.cs"/></ItemGroup>
+<ItemGroup><Compile Include="../Noir/StremioLibrary.cs"/><Compile Include="../Noir/StremioWatchedBitField.cs"/></ItemGroup>
 </Project>
 

@@ -75,6 +75,7 @@ public sealed partial class LibraryStore
                 var entry = Remember(e.Item);
                 SeedViewing(entry);
                 var item = entry.Item;
+                var asGiven = e.At;
                 if (!e.DateUnknown)
                     e = e with { At = NotBeforeAiring(item, e.At) };
                 var label = e.Source.Length > 0 ? e.Source : source;
@@ -85,9 +86,11 @@ public sealed partial class LibraryStore
                     State.PersonalReviews[item.Id] = new() { Rating = e.Rating };
                     record?.RatedItemIds.Add(item.Id);
                 }
-                bool Same(ViewingRecord v) =>
-                    !v.DateUnknown
-                    && Math.Abs((v.WatchedAt - e.At).TotalMinutes) < (exact && v.Source == label ? 1 : 720);
+                // S6: a stored viewing may predate the air date (older data, other imports); restoring it
+                // moves the date, so compare with the date as given too, or every merge adds a copy.
+                bool Near(DateTimeOffset at, ViewingRecord v) =>
+                    Math.Abs((v.WatchedAt - at).TotalMinutes) < (exact && v.Source == label ? 1 : 720);
+                bool Same(ViewingRecord v) => !v.DateUnknown && (Near(e.At, v) || Near(asGiven, v));
                 if (e.DateUnknown ? list.Count > 0 : list.Any(Same))
                     continue;
                 // A dated record replaces a guess logged earlier for the same item.

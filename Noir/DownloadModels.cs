@@ -274,6 +274,13 @@ public sealed class DownloadPlan
     public string Message { get; set; } = "";
 }
 
+// Two switches shared by new downloads and the organizer. Defaults keep today's names.
+public sealed class NamingOptions
+{
+    public bool EpisodeTitle { get; set; }
+    public bool MovieFolder { get; set; } = true;
+}
+
 public static class DownloadNaming
 {
     public static bool Video(string name) =>
@@ -309,15 +316,42 @@ public static class DownloadNaming
         return s;
     }
 
-    public static string Destination(string root, VideoItem item, string remoteName)
+    // The one naming function for new downloads and the organizer. Episode title and movie folder are the only choices.
+    public static (string Folder, string Stem) Target(string root, VideoItem item, NamingOptions? options = null)
+    {
+        options ??= new();
+        var title = Clean(item.Title) + (item.Year > 0 ? $" ({item.Year})" : "");
+        if (item.IsMovie)
+            return (options.MovieFolder ? Path.Combine(root, title) : root, title);
+        var folder = Path.Combine(root, title, $"Season {item.Season:00}");
+        var stem = $"{title} S{item.Season:00}E{item.Episode:00}";
+        // No episode title known: the plain name, never a dangling dash.
+        var name = options.EpisodeTitle ? EpisodeName(item.EpisodeTitle) : "";
+        return (folder, name.Length > 0 ? stem + " - " + name : stem);
+    }
+
+    static string EpisodeName(string value)
+    {
+        var s = Regex
+            .Replace(
+                new string(value.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? ' ' : c).ToArray()),
+                @"\s+",
+                " "
+            )
+            .Trim()
+            .TrimEnd('.', ' ');
+        if (s.Length > 80)
+            s = s[..80].TrimEnd('.', ' ');
+        return s;
+    }
+
+    public static string Destination(string root, VideoItem item, string remoteName, NamingOptions? options = null)
     {
         if (!Video(remoteName))
             throw new IOException("Choose a video file.");
         if (!item.IsMovie && item.Episode < 1)
             throw new IOException("This file's episode number could not be verified.");
-        var title = Clean(item.Title) + (item.Year > 0 ? $" ({item.Year})" : "");
-        var folder = item.IsMovie ? Path.Combine(root, title) : Path.Combine(root, title, $"Season {item.Season:00}");
-        var stem = item.IsMovie ? title : $"{title} S{item.Season:00}E{item.Episode:00}";
+        var (folder, stem) = Target(root, item, options);
         var path = Path.GetFullPath(Path.Combine(folder, stem + Path.GetExtension(remoteName).ToLowerInvariant()));
         Validate(root, path);
         return path;
@@ -340,6 +374,7 @@ public static class DownloadNaming
 
     public static string Size(long bytes) =>
         bytes >= 1073741824 ? $"{bytes / 1073741824d:0.00} GB"
-        : bytes > 0 ? $"{bytes / 1048576d:0.0} MB"
+        : bytes >= 104858 ? $"{bytes / 1048576d:0.0} MB"
+        : bytes > 0 ? $"{bytes / 1024d:0.0} KB"
         : "Size unknown";
 }

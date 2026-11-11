@@ -31,21 +31,28 @@ public partial class MainWindow
             report["sync-jobs"] = store.State.WatchSync.Count;
             async Task<long> Time(string name, Action show)
             {
-                var runs = new List<(long Total, long Build)>();
+                var runs = new List<(long Total, long Build, long Idle)>();
                 for (var i = 0; i < 3; i++)
                 {
                     var clock = Stopwatch.StartNew();
                     show();
                     var build = clock.ElapsedMilliseconds;
                     UpdateLayout();
-                    runs.Add((clock.ElapsedMilliseconds, build));
+                    var layout = clock.ElapsedMilliseconds;
+                    // S5: until the window is idle again (render, deferred loads), i.e. what a user waits for.
+                    await Dispatcher.InvokeAsync(
+                        () => { },
+                        System.Windows.Threading.DispatcherPriority.ApplicationIdle
+                    );
+                    runs.Add((layout, build, clock.ElapsedMilliseconds));
                     await Task.Delay(120);
                 }
                 var median = runs.OrderBy(r => r.Total).ElementAt(1);
                 report["render:" + name] = median.Total;
                 report["build:" + name] = median.Build;
+                report["idle:" + name] = runs.OrderBy(r => r.Idle).ElementAt(1).Idle;
                 results.Add(
-                    $"{name}: {median.Total} ms (build {median.Build}; {string.Join("/", runs.Select(r => r.Total))})"
+                    $"{name}: {median.Total} ms (build {median.Build}; idle {runs.OrderBy(r => r.Idle).ElementAt(1).Idle}; {string.Join("/", runs.Select(r => r.Total))})"
                 );
                 return median.Total;
             }
@@ -63,7 +70,7 @@ public partial class MainWindow
             librarySort = "A–Z";
             collectionFilter = "My List";
             await Time("My List", () => Page("My List"));
-            foreach (var tab in TrackerTabs.Where(t => t != "Import"))
+            foreach (var tab in TrackerTabs.Append("Upcoming").Append("Import"))
             {
                 await Time("History " + tab, () =>
                 {
@@ -93,6 +100,16 @@ public partial class MainWindow
                     detailKey = detail;
                     Render();
                 });
+            // S5: Downloads with the profile's download list (no worker, no network) and the Organizer preview sheet.
+            downloads ??= new PcDownloads(store, start: false);
+            await Time("Downloads", () => Page("Downloads"));
+            await Time("Organizer preview", () =>
+            {
+                CloseAllSheets();
+                Navigate("Settings");
+                OpenOrganizer();
+            });
+            CloseAllSheets();
             await Time("Rail footer", BuildRailFooter);
             await Time("Phone snapshot", () => JsonSerializer.Serialize(store.MobileSnapshot()));
             await Time("Save", store.Save);

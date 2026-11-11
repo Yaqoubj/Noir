@@ -35,6 +35,7 @@ final class Loc {
    {"Paste a subtitle addon link first.","الصق رابط إضافة الترجمة أولًا."},
    {"This addon does not provide subtitles.","هذه الإضافة لا توفر ترجمة."},
    {"Subtitle addon manifest is too large.","ملف تعريف إضافة الترجمة كبير جدًا."},
+   {"Your library is too large for the phone in this version. Nothing was changed here, and your history on the PC is not affected.","مكتبتك أكبر من أن يحملها الهاتف في هذا الإصدار. لم يتغير شيء هنا، وسجلك على الكمبيوتر لم يتأثر."},
    {"Couldn't check the subtitle addon. Check the link and connection.","تعذر التحقق من إضافة الترجمة. تحقق من الرابط والاتصال."},
    {"The subtitle addon returned an invalid manifest.","أعادت إضافة الترجمة ملف تعريف غير صالح."},
    {"Subtitle addon check timed out. Try again.","انتهت مهلة التحقق من إضافة الترجمة. حاول مجددًا."},
@@ -57,12 +58,14 @@ final class Loc {
    {"TOP 10","أفضل 10"},{"✎ Manage","✎ إدارة"},{"Date unknown","تاريخ غير معروف"},{"Yesterday","أمس"},{"Your collections","مجموعاتك"},{"Rename","إعادة تسمية"},{"Delete the collection \"%s\"? Titles stay in your library.","حذف المجموعة \"%s\"؟ تبقى العناوين في مكتبتك."},{"Details · hold to edit date or delete","التفاصيل · اضغط مطولًا لتعديل التاريخ أو الحذف"},{"Only on this phone · tap to switch or add profiles","على هذا الهاتف فقط · اضغط للتبديل أو إضافة ملفات"},{"Linked to %s on your PC · tap to manage","مرتبط بـ %s على جهازك · اضغط للإدارة"},{"min left","د متبقية"},
    {"Stream","بث"},{"▶ Stream","▶ بث"},{"▶ Stream now","▶ بث الآن"},{"▶  STREAM","▶  بث"},{"Choose a stream…","اختر بثًا…"},{"Finding a stream…","جارٍ البحث عن بث…"},
    {"Add your AIOStreams link in phone Download settings to stream.","أضف رابط AIOStreams في إعدادات التنزيل على الهاتف للبث."},{"AIOStreams has no playable stream for this right now.","لا يوجد بث متاح لهذا الآن على AIOStreams."},
+   {"Streaming & phone downloads","البث والتنزيل على الهاتف"},{"Download straight to this phone with your own TorBox, Real-Debrid or AIOStreams.","نزّل مباشرة على هذا الهاتف بحسابك في TorBox أو Real-Debrid أو AIOStreams."},{"Import files","استيراد ملفات"},{"Import an export file, or paste a list of titles. You review everything before it's added.","استورد ملف تصدير، أو الصق قائمة عناوين. تراجع كل شيء قبل إضافته."},{"Import watched history directly from Plex or HTTPS Jellyfin / Emby. Kodi and PC-configured servers are also available when paired.","استورد سجل المشاهدة مباشرة من Plex أو من Jellyfin / Emby عبر HTTPS. وتتوفر Kodi والخوادم المضبوطة على الكمبيوتر أيضًا عند الاقتران."},{"Connect on this phone","اتصل على هذا الهاتف"},
   };
   for(String[] p:phone)AR.put(p[0],p[1]);
  }
  static String t(String english){if(!arabic||english==null||english.isEmpty())return english;String v=AR.get(english);return v==null?english:v;}
  static String f(String pattern,Object... values){return String.format(Locale.getDefault(),t(pattern),values);}
  static CharSequence t(CharSequence s){return s instanceof String?t((String)s):s;}
+ static java.util.Locale locale(){return arabic?new Locale("ar"):Locale.getDefault();}
  static void use(DataStore data){String chosen=data.prefs().optString("language","");arabic=chosen.isEmpty()?"ar".equals(Locale.getDefault().getLanguage()):chosen.equals("ar");}
  static void apply(Activity activity){activity.getWindow().getDecorView().setLayoutDirection(arabic?View.LAYOUT_DIRECTION_RTL:View.LAYOUT_DIRECTION_LTR);}
  /** Count + noun with the Arabic plural forms (one/two/3-10/11+): English uses `one`/`many` patterns with %d; Arabic reads keys "many|one", "many|two", "many|few", "many|many". */

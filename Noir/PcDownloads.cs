@@ -707,7 +707,7 @@ public sealed partial class PcDownloads : IDisposable
                         item.Path = "";
                         item.Available = false;
                     }
-                    var path = DownloadNaming.Destination(root, item, c.Name);
+                    var path = DownloadNaming.Destination(root, item, c.Name, ManagementPreferences.Naming);
                     if (
                         OnPc(item)
                         || IsQueued(item)
@@ -1397,6 +1397,7 @@ public sealed partial class LibraryStore
             entry.Item.Available = true;
             if (!entry.Paths.Contains(path, StringComparer.OrdinalIgnoreCase))
                 entry.Paths.Add(path);
+            CatalogChanged();
             RegisterDownloadLocked?.Invoke();
         }
         Scan(out _);

@@ -66,4 +66,32 @@ public final class PhoneUiDecisionsTest {
    a.page="History";a.premium.historyView="Up next";a.render();assertEquals(0,containing(a.body,"Watch next").size());});
   f.ui(()->{Loc.arabic=true;try{assertEquals("متابعة المشاهدة",Loc.t("Continue watching"));assertEquals("التالي",Loc.t("Up next"));assertEquals("ليس على هذا الهاتف",Loc.t("Not on this phone"));assertEquals("التالي · ليس على هذا الحاسوب",Loc.t("UP NEXT · NOT ON THIS PC"));}finally{Loc.arabic=false;}});
  }
+ /* Round 2 (U101-U105): Connections cards on the phone. */
+ static View cardOf(MainActivity a,String title){View t=AuditPhoneFixture.find(a.body,v->v instanceof TextView&&((TextView)v).getText().toString().equals(title));assertNotNull("card title "+title,t);View c=t;while(c.getParent()!=a.body)c=(View)c.getParent();return c;}
+ static int dotColor(View card){View dot=AuditPhoneFixture.find(card,v->"dot".equals(v.getTag()));if(dot==null)return 0;return ((android.graphics.drawable.GradientDrawable)dot.getBackground()).getColor().getDefaultColor();}
+ @Test public void u101to104BlockedAndFailingSitesOneStremioCardNoLooseNotes()throws Exception{
+  MainActivity a=f.launch(MainActivity.class);long now=System.currentTimeMillis();DataStore d=f.data;
+  d.stateObject("stremio",new JSONObject().put("key","round2-fake-key"));for(String p:WatchSync.PROVIDERS)WatchSync.enable(d,p,true);
+  WatchSync.editProvider(d,"Trakt",pr->{DataStore.put(pr,"failures",3);DataStore.put(pr,"failingSince",now-30*3600000L);DataStore.put(pr,"lastSuccess",now-31*3600000L);});
+  WatchSync.editProvider(d,"Serializd",pr->{DataStore.put(pr,"failures",WatchSync.BACKOFF.length);DataStore.put(pr,"failingSince",now-3*86400000L);});
+  f.ui(()->{a.page="Connections";a.render();
+   View sd=cardOf(a,"Serializd"),tr=cardOf(a,"Trakt");
+   assertEquals("Serializd status line",1,texts(sd,"Syncs through your PC").size());assertEquals("blocked dot is grey",PhoneHarbor.GREY,dotColor(sd));assertEquals("no Sign in on a blocked site",0,texts(sd,"Sign in").size());assertEquals("no Retry on a blocked site",0,texts(sd,"Retry").size());assertEquals("Turn off stays",1,texts(sd,"Turn off").size());
+   assertEquals("one-day notice is amber",PhoneHarbor.AMBER,dotColor(tr));assertEquals(1,containing(tr,"hasn't accepted marks for a day").size());assertEquals("Trakt keeps Sign in",1,texts(tr,"Sign in").size());
+   View st=cardOf(a,"Stremio");assertEquals("one Stremio card",1,texts(a.body,"Stremio").size());assertEquals("no separate Stremio marks card",0,texts(a.body,"Stremio marks").size());
+   assertEquals("both switches live in the Stremio card",2,AuditPhoneFixture.all(st,v->v instanceof Switch).size());assertEquals(1,texts(st,"New: try it on one title first, then check it in Stremio.").size());assertEquals("old note is gone",0,containing(a.body,"new · check one title first").size());
+   assertEquals("green when healthy",PhoneHarbor.GREEN,dotColor(st));assertTrue("counts line in the Stremio card",containing(st,"synced").size()>0);
+   assertEquals("no loose Nuvio note",0,containing(a.body,"Nuvio syncs through your PC").size());assertEquals("no loose Google note",0,containing(a.body,"Google sign-in").size());
+   });
+  d.stateObject("stremio",new JSONObject());f.ui(()->{a.render();assertEquals("Not connected shows a plain Stremio card and the PC note",1,containing(a.body,"Stremio marks go through your PC").size());assertEquals(0,AuditPhoneFixture.all(a.body,v->v instanceof Switch).size());});
+ }
+ @Test public void u104HeaderTextNeverUnderTheIconInArabicAndSecondSwitchIndentsOnTheStartSide()throws Exception{
+  MainActivity a=f.launch(MainActivity.class);DataStore d=f.data;d.stateObject("stremio",new JSONObject().put("key","round2-fake-key"));WatchSync.enable(d,WatchSync.STREMIO,true);
+  f.ui(()->{Loc.arabic=true;try{a.page="Connections";a.render();View st=cardOf(a,"Stremio");View title=AuditPhoneFixture.find(st,v->v instanceof TextView&&((TextView)v).getText().toString().equals("Stremio"));LinearLayout names=(LinearLayout)title.getParent();LinearLayout.LayoutParams lp=(LinearLayout.LayoutParams)names.getLayoutParams();assertTrue("start-side margin keeps the text off the icon",lp.getMarginStart()>0&&lp.getMarginEnd()>0);
+   Switch add=(Switch)AuditPhoneFixture.find(st,v->v instanceof Switch&&((Switch)v).getText().toString().equals(Loc.t("Add watched titles to my Stremio library")));assertTrue("second switch indented on the start side",add.getPaddingStart()>0&&add.getPaddingEnd()==0);
+  }finally{Loc.arabic=false;}});
+ }
+ @Test public void u105SharedChipIsCentredWithSidePadding()throws Exception{
+  MainActivity a=f.launch(MainActivity.class);f.ui(()->{TextView chip=a.ui.chip("مشاهد",()->{},false);assertTrue(chip.getPaddingLeft()>0&&chip.getPaddingRight()>0);assertEquals(View.TEXT_ALIGNMENT_CENTER,chip.getTextAlignment());assertEquals(Gravity.CENTER,chip.getGravity());});
+ }
 }

@@ -76,7 +76,7 @@ public final class WatchSyncTest {
   public void close()throws InterruptedException{try{if(host!=null){Activity a=host;test.runOnMainSync(a::finish);}data.network.shutdown();data.images.shutdown();DataStore.flushWrites();delete(root);}finally{WatchSyncSender.holdForTest(false);}}
  }
  static void delete(File f){File[] children=f.listFiles();if(children!=null)for(File child:children)delete(child);f.delete();}
- @After public void reset(){WatchSyncSender.testStep=null;WatchSync.clock=WatchSync.SYSTEM;WatchSync.tv=TvUi::isTv;WatchSyncSender.testPages=null;}
+ @After public void reset(){StremioWriter.testTransport=null;StremioWriter.testVideos=null;WatchSyncSender.testStep=null;WatchSync.clock=WatchSync.SYSTEM;WatchSync.tv=TvUi::isTv;WatchSyncSender.testPages=null;}
 
  static JSONObject goldenItem(JSONObject i)throws JSONException{return new JSONObject().put("imdb",i.getString("imdb")).put("movie",i.getBoolean("movie")).put("season",i.getInt("season")).put("episode",i.getInt("episode")).put("title",i.getString("title")).put("reviewTitle",i.getString("reviewTitle"));}
 
@@ -146,6 +146,17 @@ public final class WatchSyncTest {
   }
  }
 
+ /* Like the PC: a mark counts toward the pace only after a confirmed send or a per-title failure, not for a site failure (the backoff covers that). */
+ @Test public void aMarkCountsTowardThePaceOnlyAfterAConfirmedSendOrATitleFailure()throws Exception{
+  try(Case c=new Case()){c.on("Trakt");c.episode("p","tt7000020","Pace Show",1,1);c.episode("q","","Missing Show",1,2);c.watch("p");
+   c.sites.down.add("app.trakt.tv");c.pass();assertEquals("a site failure is not counted",0,WatchSync.sent(c.data,"Trakt",c.clock.now,WatchSync.DAY));
+   c.sites.down.clear();WatchSync.retry(c.data,null);c.pass();assertTrue("the confirmed send is done",c.job("Trakt","p").has("syncedAt"));
+   assertEquals("a confirmed send is counted",1,WatchSync.sent(c.data,"Trakt",c.clock.now,WatchSync.DAY));
+   c.watch("q");c.pass();assertTrue("the unmatched title is held",c.job("Trakt","q").optBoolean("held"));
+   assertEquals("a title failure is counted too",2,WatchSync.sent(c.data,"Trakt",c.clock.now,WatchSync.DAY));
+  }
+ }
+
  @Test public void perTitleFailureWaitsForRetryAndDoesNotBlockOthers()throws Exception{
   try(Case c=new Case()){c.on("Trakt");c.on("Serializd");c.episode("a","","Missing Show",1,1);c.episode("b","tt7000009","Fake Show",1,9);c.watch("a");c.watch("b");
    c.pass();
@@ -200,7 +211,7 @@ public final class WatchSyncTest {
 
  @Test public void signInRowsOpenEachSitesOwnSignInPage()throws Exception{
   Sites sites=new Sites();WatchSyncSender.testPages=sites::page;
-  for(String p:WatchSync.PROVIDERS){WatchSignInActivity a=(WatchSignInActivity)test.startActivitySync(WatchSignInActivity.intent(test.getTargetContext(),p).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+  for(String p:WatchSync.SITES){WatchSignInActivity a=(WatchSignInActivity)test.startActivitySync(WatchSignInActivity.intent(test.getTargetContext(),p).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
    try{Uri u=Uri.parse(a.opened);if(p.equals("Trakt")){assertEquals("app.trakt.tv",u.getHost());assertEquals("/",u.getPath());}else{assertEquals("www.serializd.com",u.getHost());assertEquals("/login",u.getPath());}
     long end=System.currentTimeMillis()+10000;while(System.currentTimeMillis()<end&&!sites.requested.contains(a.opened))Thread.sleep(100);assertTrue("the visible view loaded "+a.opened,sites.requested.contains(a.opened));
     String[] ua={null,null};test.runOnMainSync(()->{ua[0]=a.web.getSettings().getUserAgentString();ua[1]=WebSettings.getDefaultUserAgent(a);});assertEquals("the WebView's own user agent",ua[1],ua[0]);
@@ -235,8 +246,80 @@ public final class WatchSyncTest {
   }
  }
 
+ /* S6: a pass looks items up in one id map, not a scan of the library per job under the lock (5,000 items x 5,000 jobs). */
+ @Test public void bigQueuePassLooksItemsUpOnce()throws Exception{
+  try(Case c=new Case()){c.on("Trakt");JSONArray library=new JSONArray();JSONObject jobs=new JSONObject();
+   for(int n=0;n<5000;n++){String id="look"+n;JSONObject v=new JSONObject().put("id","v"+n).put("watchedAt","2023-01-01T00:00:00Z");if(n%2==0)v.put("synced",new JSONObject().put("Trakt","2023-01-02T00:00:00Z"));JSONObject item=new JSONObject().put("id",id).put("imdb","tt9"+String.format(Locale.ROOT,"%06d",n)).put("movie",true).put("title","Look "+n).put("group","look-"+n).put("viewings",new JSONArray().put(v));library.put(item);
+    JSONObject j=new JSONObject().put("provider","Trakt").put("itemId",id).put("viewingId","v"+n).put("watchedAt",1_700_000_000_000L+n).put("retryAt",0).put("attempts",0).put("message","Waiting to sync");if(n%2==1)j.put("held",n%4==1).put("titleKey",WatchSync.titleKey(item));jobs.put("Trakt:"+id,j);}
+   c.data.stateObject("library",new JSONObject().put("items",library));c.data.stateObject("watchSync",new JSONObject().put("jobs",jobs));
+   long t0=System.nanoTime();int absorbed=WatchSync.absorb(c.data);List<JSONObject> due=WatchSync.due(c.data,c.clock.now);long ms=(System.nanoTime()-t0)/1_000_000;
+   assertEquals("the PC-synced half is absorbed",2500,absorbed);assertEquals("held jobs with an unchanged title wait; the rest are due",1250,due.size());for(JSONObject j:due)assertFalse(j.optBoolean("held"));
+   assertTrue("absorb + due over 5,000 jobs took "+ms+" ms",ms<1500);assertFalse(WatchSync.stuck(c.data,"Serializd",c.clock.now));assertTrue(WatchSync.stuck(c.data,"Trakt",c.clock.now));
+   android.util.Log.i("NoirS6","absorb+due 5000 jobs: "+ms+" ms");
+  }
+ }
+
  @Test public void newLabelsHaveArabic()throws Exception{Class.forName("app.noir.mobile.PhoneHarbor");Class.forName("app.noir.mobile.WatchSync");
-  for(String s:new String[]{"Waiting to sync","Syncing…","Watched ✓",WatchSync.GOOGLE,"Serializd does not allow this from the phone · it syncs through your PC","Nuvio syncs through your PC.","%d synced · %d waiting","last success %s","%s hasn't accepted marks for a day. Sign in again or tap Retry.","Sign in to %s","‹ Connections","If the site shows a security check, complete it yourself here.","Your website session has expired. Sign in once under More → Connections; Noir resumes syncing automatically.","The website could not load. Noir will retry later.","Turn on","Turn off","Retry","next try %s","Marks what you finish on this phone as watched on %s, using your sign-in here."}){
+  for(String s:new String[]{"Waiting to sync","Syncing…","Watched ✓",WatchSync.GOOGLE,"Serializd does not allow this from the phone · it syncs through your PC","Syncs through your PC","%d synced · %d waiting","last success %s","%s hasn't accepted marks for a day. Sign in again or tap Retry.","Sign in to %s","‹ Connections","If the site shows a security check, complete it yourself here.","Your website session has expired. Sign in once under More → Connections; Noir resumes syncing automatically.","The website could not load. Noir will retry later.","Turn on","Turn off","Retry","next try %s","Marks what you finish on this phone as watched on %s, using your sign-in here."}){
    assertTrue(s,Loc.AR.containsKey(s));assertTrue(s,Loc.AR.get(s).matches("(?s).*[\\u0600-\\u06FF].*"));}
+ }
+
+ /* The third provider: the phone's own Stremio account over a fake HTTP layer (no live calls, no WebView). */
+ StremioWriterTest.Fake stremio(Case c,boolean key)throws Exception{StremioWriterTest.Fake fake=new StremioWriterTest.Fake();StremioWriter.testTransport=fake;StremioWriter.testVideos=id->StremioWriterTest.videos(id,1);
+  if(key)c.data.stateObject("stremio",new JSONObject().put("key","phone-key-1234"));return fake;}
+ static String movieItem(String imdb,int times){return "{\"_id\":\""+imdb+"\",\"type\":\"movie\",\"removed\":false,\"temp\":false,\"extra\":7,\"state\":{\"timesWatched\":"+times+"}}";}
+
+ @Test public void stremioIsOffByDefaultNeedsThePhonesOwnKeyAndQueuesOnlyNewWatches()throws Exception{
+  try(Case c=new Case()){StremioWriterTest.Fake fake=stremio(c,false);c.movie("s0","tt7200000","Old Film");c.watch("s0");
+   assertFalse("off by default",WatchSync.enabled(c.data,"Stremio"));assertFalse(WatchSync.stremioAdd(c.data));assertNull(c.job("Stremio","s0"));
+   c.on("Stremio");assertFalse("no phone key: marks go through the PC",WatchSync.enabled(c.data,"Stremio"));c.movie("s1","tt7200001","Keyless Film");c.watch("s1");assertNull(c.job("Stremio","s1"));
+   c.data.stateObject("stremio",new JSONObject().put("key","phone-key-1234"));assertTrue(WatchSync.enabled(c.data,"Stremio"));
+   assertNull("switching on queues nothing from the past",c.job("Stremio","s0"));assertNull(c.job("Stremio","s1"));
+   c.movie("s2","tt7200002","New Film");c.watch("s2");assertNotNull("new watches are queued",c.job("Stremio","s2"));
+   c.data.mark("s2",false,0,false);assertNull("un-watching cancels the unsent job",c.job("Stremio","s2"));
+   WatchSyncSender.runForTest(c.data,null,c.context);assertTrue("un-watching is never sent",fake.calls.isEmpty());
+  }
+ }
+ @Test public void stremioMarksThroughTheQueueWithoutAPageAndTellsThePc()throws Exception{
+  try(Case c=new Case()){StremioWriterTest.Fake fake=stremio(c,true);c.on("Stremio");c.movie("sm","tt7200010","Fake Film");c.movie("sw","tt7200011","Seen Film");c.episode("se","tt2934286","Fixture Show",1,7);
+   fake.items.put("tt7200010",movieItem("tt7200010",0));fake.items.put("tt7200011",movieItem("tt7200011",2));
+   fake.items.put("tt2934286","{\"_id\":\"tt2934286\",\"type\":\"series\",\"removed\":false,\"temp\":false,\"state\":{\"watched\":\"tt2934286:1:5:5:eJyTZwAAAEAAIA==\"}}");
+   String viewing=c.watch("sm");c.watch("sw");c.watch("se");
+   WatchSyncSender.runForTest(c.data,null,c.context);
+   assertTrue(c.job("Stremio","sm").optString("message"),c.job("Stremio","sm").has("syncedAt"));assertTrue(c.job("Stremio","sw").has("syncedAt"));assertTrue(c.job("Stremio","se").has("syncedAt"));
+   assertEquals("already watched in Stremio: done with no write; the movie and the episode are written",2,fake.puts());
+   assertEquals(7,new JSONObject(fake.items.get("tt7200010")).getInt("extra"));assertTrue(StremioWriterBits.parse(new JSONObject(fake.items.get("tt2934286")).getJSONObject("state").getString("watched"),StremioWriterTest.range("tt2934286:1:",1,9)).watched("tt2934286:1:7"));
+   assertTrue("originals under the profile's files dir",new File(c.root,"stremio-originals/tt7200010.json").isFile());assertFalse(new File(c.root,"stremio-originals/tt7200011.json").exists());
+   assertEquals("no page loads",0,c.sites.loads("app.trakt.tv")+c.sites.loads("www.serializd.com"));assertEquals("counted toward the pace",3,WatchSync.sent(c.data,"Stremio",c.clock.now,WatchSync.DAY));
+   boolean told=false;for(JSONObject op:DataStore.objects(c.data.backupState().optJSONArray("pending")))if(op.optString("kind").equals("synced")&&op.optString("viewingId").equals(viewing)){assertFalse(op.getJSONObject("synced").optString("Stremio").isEmpty());told=true;}
+   assertTrue("P4: the PC hears synced.Stremio",told);
+  }
+ }
+ @Test public void stremioTitleFailureWaitsSiteFailureBacksOffAndAsksToConnectAgain()throws Exception{
+  try(Case c=new Case()){StremioWriterTest.Fake fake=stremio(c,true);c.on("Stremio");c.movie("sa","tt7200020","Absent Film");c.movie("sb","tt7200021","Present Film");fake.items.put("tt7200021",movieItem("tt7200021",0));
+   c.watch("sb");c.watch("sa");
+   WatchSyncSender.runForTest(c.data,null,c.context);
+   assertTrue(c.job("Stremio","sa").optBoolean("held"));assertEquals("Not in your Stremio library",c.job("Stremio","sa").optString("message"));assertTrue("the other title still goes",c.job("Stremio","sb").has("syncedAt"));
+   assertEquals("no backoff for a title problem",0,WatchSync.provider(c.data,"Stremio").optInt("failures"));assertFalse(fake.items.containsKey("tt7200020"));
+   c.data.phoneSetting("stremioAddTitles",true);WatchSync.retry(c.data,"Stremio");WatchSyncSender.runForTest(c.data,null,c.context);
+   assertTrue("with the add option on it is added",c.job("Stremio","sa").has("syncedAt"));assertTrue(fake.items.containsKey("tt7200020"));
+   c.movie("sc","tt7200022","Later Film");c.movie("sd","tt7200023","Latest Film");c.watch("sc");c.watch("sd");fake.calls.clear();
+   fake.override=m->new StremioWriter.Response(401,"");WatchSyncSender.runForTest(c.data,null,c.context);fake.override=null;
+   JSONObject pr=WatchSync.provider(c.data,"Stremio");assertEquals(1,pr.optInt("failures"));assertEquals(c.clock.now+5*60000L,pr.optLong("retryAt"));assertTrue(StremioWriter.reconnect(pr.optString("message")));
+   assertEquals("the pass stopped at the first site failure",1,fake.calls.size());
+   c.clock.now+=5*60000L;fake.items.put("tt7200022",movieItem("tt7200022",0));fake.items.put("tt7200023",movieItem("tt7200023",0));WatchSyncSender.runForTest(c.data,null,c.context);
+   assertTrue(c.job("Stremio","sc").has("syncedAt"));assertTrue(c.job("Stremio","sd").has("syncedAt"));assertEquals(0,WatchSync.provider(c.data,"Stremio").optInt("failures"));
+  }
+ }
+ @Test public void aStremioMarkThePcConfirmedIsNotQueuedOrIsDoneWithoutACall()throws Exception{
+  try(Case c=new Case()){StremioWriterTest.Fake fake=stremio(c,true);c.on("Stremio");
+   JSONObject pc=new JSONObject().put("id","sp").put("imdb","tt7200030").put("movie",true).put("title","PC Film").put("group","g30").put("year",2020)
+    .put("viewings",new JSONArray().put(new JSONObject().put("id",UUID.randomUUID().toString()).put("watchedAt","2026-11-10T20:00:00Z").put("synced",new JSONObject().put("Stremio","2026-11-10T20:05:00.0000000Z"))));
+   c.data.stateObject("library",new JSONObject().put("items",new JSONArray().put(pc)));c.watch("sp");assertNull("synced.Stremio from the PC: no Stremio job",c.job("Stremio","sp"));
+   c.movie("sq","tt7200031","Phone Film");c.watch("sq");assertNotNull(c.job("Stremio","sq"));
+   JSONObject later=new JSONObject(pc.toString()).put("id","sq").put("imdb","tt7200031");later.getJSONArray("viewings").getJSONObject(0).put("synced",new JSONObject().put("Stremio","2026-11-11T09:00:00Z"));
+   c.data.stateObject("library",new JSONObject().put("items",new JSONArray().put(pc).put(later)));WatchSyncSender.runForTest(c.data,null,c.context);
+   assertTrue(c.job("Stremio","sq").has("syncedAt"));assertEquals("PC",c.job("Stremio","sq").optString("by"));assertTrue("no call for a PC-confirmed mark",fake.calls.isEmpty());
+  }
  }
 }

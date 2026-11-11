@@ -74,12 +74,14 @@ public partial class MainWindow : Window
         PreviewHost.Configure(store.DataDirectory, store.GetProgress, store.EverWatched, TmdbKey());
         StartupTrace.Mark("Preview configuration ended");
         StartupTrace.Mark("Constructor tail started");
-        var people = new Dictionary<string, IReadOnlyList<string>>();
+        // S6: concurrent, because Stats warms it off the UI thread; one group lookup instead of an
+        // archive copy per title (3,000 titles took six seconds on Stats' first open).
+        var people = new System.Collections.Concurrent.ConcurrentDictionary<string, IReadOnlyList<string>>();
         PeopleFor = key =>
         {
             if (people.TryGetValue(key, out var known))
                 return known;
-            var item = store.Archive.FirstOrDefault(i => i.GroupKey == key && i.ImdbId.Length > 0);
+            var item = store.FirstWithImdb(key);
             return people[key] =
                 item == null ? [] : CreditsClient.CachedPeople(store.DataDirectory, item.ImdbId, item.IsMovie);
         };
@@ -190,7 +192,7 @@ public partial class MainWindow : Window
                 if (!closing && item != null)
                     play = PlayVideo(item);
             }
-            var scan = ScanLibrary();
+            var scan = ScanLibraryAndOrganize();
 #if NOIR_VALIDATE
             if (validate && Environment.GetCommandLineArgs().Contains("--startup-audit-only"))
             {
@@ -364,6 +366,12 @@ public partial class MainWindow : Window
                 RenderQuiet();
                 StartupTrace.Mark("Changed scan rendered");
             }
+            else if (renderAfterScan)
+            {
+                // Nothing in the catalog changed: the render a service asked for during the scan.
+                renderAfterScan = false;
+                QueueMetadataRender();
+            }
             if (!validationMode)
                 WatchLibraryFolders();
             if (!validationMode && refreshMetadata)
@@ -404,7 +412,7 @@ public partial class MainWindow : Window
 
     void Settings_Click(object sender, RoutedEventArgs e) => Navigate("Settings");
 
-    async void Scan_Click(object sender, RoutedEventArgs e) => await ScanLibrary();
+    async void Scan_Click(object sender, RoutedEventArgs e) => await ScanLibraryAndOrganize();
 
     DispatcherTimer? searchDebounce;
 
@@ -470,6 +478,10 @@ public partial class MainWindow : Window
             StartupTrace.Mark("Page build started: " + page);
         CancelLogSearch();
         metadataRender?.Stop();
+        renderAfterScan = false;
+        homeArchive = null;
+        homeCardNames = null;
+        homeTitles = null;
         pageEditInProgress = false;
         if (hiddenInTray)
         {
@@ -954,6 +966,8 @@ public partial class MainWindow : Window
         }
     }
 
+    bool renderAfterScan;
+
     void QueueMetadataRender()
     {
         if (closing)
@@ -964,7 +978,10 @@ public partial class MainWindow : Window
             metadataRender.Tick += (_, _) =>
             {
                 metadataRender.Stop();
-                if (CanRenderMetadata)
+                // S6: while the startup scan runs, wait for it: it renders once at its end.
+                if (scanning)
+                    renderAfterScan = true;
+                else if (CanRenderMetadata)
                     RenderQuiet();
             };
         }
@@ -1181,7 +1198,7 @@ public partial class MainWindow : Window
     }
 
     // Uncached artwork decodes off the UI thread and fades in, so long pages render at once.
-    FrameworkElement Art(string path, string title, double height, bool portrait = false)
+    FrameworkElement Art(string path, string title, double height, bool portrait = false, bool name = true)
     {
         var width = portrait ? 384 : 640;
         if (File.Exists(path))
@@ -1208,10 +1225,14 @@ public partial class MainWindow : Window
             Height = height,
             Background = new LinearGradientBrush(Brush("#36312B").Color, Brush("#131315").Color, 35),
         };
-        var text = Text(title, portrait ? 25 : 21, weight: FontWeights.SemiBold);
-        text.Margin = new(20);
-        text.VerticalAlignment = VerticalAlignment.Center;
-        grid.Children.Add(text);
+        // U99: a tile whose own title is drawn over the artwork leaves the placeholder without a name.
+        if (name)
+        {
+            var text = Text(title, portrait ? 25 : 21, weight: FontWeights.SemiBold);
+            text.Margin = new(20);
+            text.VerticalAlignment = VerticalAlignment.Center;
+            grid.Children.Add(text);
+        }
         return grid;
     }
 

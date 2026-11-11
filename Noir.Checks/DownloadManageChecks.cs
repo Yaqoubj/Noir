@@ -5,6 +5,62 @@ static class DownloadManageChecks
 {
     public static async Task Run(string parent, Action<bool, string> check)
     {
+        DownloadSpaceItem Item(string kind, long bytes, bool listOnly = false) =>
+            new(Guid.NewGuid().ToString("N"), kind, "x", bytes, "x", ListOnly: listOnly);
+        check(
+            DownloadNaming.Size(2048) == "2.0 KB"
+                && DownloadNaming.Size(104857) == "102.4 KB"
+                && DownloadNaming.Size(104858) == "0.1 MB"
+                && DownloadNaming.Size(570L * 1048576) == "570.0 MB"
+                && !DownloadNaming.Size(300).Contains("0.0 MB"),
+            "U92 files under 0.1 MB show KB, not 0.0 MB"
+        );
+        var folders = new[] { Item(PcDownloads.KindEmptyFolders, 0), Item(PcDownloads.KindEmptyFolders, 0) };
+        check(
+            FreeSpaceText.GroupFigure(PcDownloads.KindEmptyFolders, folders, false) == "2 folders"
+                && FreeSpaceText.GroupFigure(PcDownloads.KindEmptyFolders, folders.Take(1), false) == "1 folder"
+                && FreeSpaceText.GroupFigure(PcDownloads.KindEmptyFolders, folders, true) == "مجلدان"
+                && !FreeSpaceText.GroupFigure(PcDownloads.KindEmptyFolders, folders, false).Contains("unknown"),
+            "U92 empty folders show a count, not Size unknown"
+        );
+        // U93: the group figures are what the ticked files free, and the button is their sum.
+        long mb = 1048576;
+        var dupes = new[]
+        {
+            Item(PcDownloads.KindDuplicates, 300 * mb),
+            Item(PcDownloads.KindDuplicates, 900 * mb),
+            Item(PcDownloads.KindDuplicates, 270 * mb),
+        };
+        var ticked = dupes.Where(d => d.Bytes != 900 * mb).ToList();
+        var loose = new[] { Item(PcDownloads.KindLoose, 500), Item(PcDownloads.KindLoose, 40 * mb, true) };
+        var tickedLoose = loose.Where(l => !l.ListOnly).ToList();
+        var sum = ticked.Sum(i => i.Bytes) + tickedLoose.Sum(i => i.Bytes);
+        check(
+            FreeSpaceText.GroupFigure(PcDownloads.KindDuplicates, ticked, false) == "570.0 MB"
+                && FreeSpaceText.GroupFigure(PcDownloads.KindDuplicates, dupes, false) != "570.0 MB"
+                && FreeSpaceText.GroupFigure(PcDownloads.KindLoose, tickedLoose, false) == "0.5 KB"
+                && FreeSpaceText.Button(DownloadDeleteChoice.Recycle, sum, false)
+                    == "Move " + DownloadNaming.Size(sum) + " to Recycle Bin"
+                && FreeSpaceText.GroupFigure(PcDownloads.KindDuplicates, [], false) == "0 KB",
+            "U93 group sizes are what their ticked files free (only the ticked duplicate copies, the program file never) and the button is the sum"
+        );
+        check(
+            FreeSpaceText.Button(DownloadDeleteChoice.Ask, 570 * mb, false) == "Remove 570.0 MB…"
+                && FreeSpaceText.Button(DownloadDeleteChoice.Recycle, 570 * mb, false) == "Move 570.0 MB to Recycle Bin"
+                && FreeSpaceText.Button(DownloadDeleteChoice.Permanent, 570 * mb, false) == "Delete 570.0 MB"
+                && FreeSpaceText.Button(DownloadDeleteChoice.Ask, 570 * mb, true).EndsWith("…"),
+            "U94 the Free up space button names what will really happen for each delete option (Ask says Remove and an ellipsis)"
+        );
+        check(
+            FreeSpaceText.MiddleTrim("Night Signal", 34) == "Night Signal"
+                && FreeSpaceText.MiddleTrim(new string('a', 20) + new string('b', 30) + new string('c', 20), 34)
+                    is var cut
+                && cut.Length == 34
+                && cut.StartsWith("aaaa")
+                && cut.EndsWith("cccc")
+                && cut.Contains('…'),
+            "U95 long library-relative paths are trimmed in the middle, start and end both kept"
+        );
         using (var f = new Fixture(parent))
         {
             var m = f.Manager;
@@ -258,6 +314,249 @@ static class DownloadManageChecks
                     && passed.Preferences.Resolution == "720p"
                     && passed.Entries.Count == 0,
                 "The phone plan request passes scope, seasons, specific episodes, preferences and total cap to the real planner"
+            );
+        }
+        await Sharpen(parent, check);
+    }
+
+    // O2 (switches shared with new downloads), O4 (leftovers inside the library only) and O5 (duplicates).
+    static async Task Sharpen(string parent, Action<bool, string> check)
+    {
+        using (var f = new Fixture(parent))
+        {
+            var m = f.Manager;
+            f.Store.State.Catalog["a2"].Item.EpisodeTitle = "Second";
+            m.SetNaming(new() { EpisodeTitle = true, MovieFolder = true });
+            m.SetAutoOrganize(true);
+            var reopened = m.ManagementPreferences;
+            check(
+                reopened.Naming.EpisodeTitle && reopened.Naming.MovieFolder && reopened.AutoOrganize,
+                "O2/O3 the naming switches and automatic organizing persist in the download settings"
+            );
+            var file = m.LocalLibrary().Single(g => g.Key == "alpha").Files.Single(x => x.Item.Id == "a2");
+            var move = await m.MoveLocal([file], f.Other);
+            check(
+                move.Files == 1 && f.Store.Archive.Single(i => i.Id == "a2").Path.EndsWith("Alpha S01E02 - Second.mkv"),
+                "O2 moving a download uses the same naming switches as the organizer"
+            );
+        }
+        using (var f = new Fixture(parent))
+        {
+            var m = f.Manager;
+            var outside = Path.Combine(Path.GetDirectoryName(f.Root)!, "outside");
+            Directory.CreateDirectory(Path.Combine(outside, "Empty"));
+            File.WriteAllBytes(Path.Combine(outside, "Big.Movie.mkv"), new byte[300]);
+            File.WriteAllBytes(Path.Combine(outside, "big.movie.sample.mkv"), new byte[10]);
+            File.WriteAllText(Path.Combine(outside, "RARBG.txt"), "ad");
+            Directory.CreateDirectory(Path.Combine(f.Root, "Ghost Show", "Season 01"));
+            Directory.CreateDirectory(Path.Combine(f.Root, "Only Thumbs"));
+            File.WriteAllText(Path.Combine(f.Root, "Only Thumbs", "Thumbs.db"), "x");
+            var pack = Path.Combine(f.Root, "Pack");
+            Directory.CreateDirectory(pack);
+            File.WriteAllBytes(Path.Combine(pack, "Movie.Name.2020.mkv"), new byte[300]);
+            File.WriteAllText(Path.Combine(pack, "Movie.Name.2020.nfo"), "matches the video");
+            File.WriteAllBytes(Path.Combine(pack, "movie.name.sample.mkv"), new byte[40]);
+            File.WriteAllText(Path.Combine(pack, "RARBG.txt"), "advert");
+            File.WriteAllText(Path.Combine(pack, "info.nfo"), "no video");
+            File.WriteAllText(Path.Combine(pack, "tvshow.nfo"), "kodi");
+            File.WriteAllText(Path.Combine(pack, "setup.exe"), "program");
+            var lone = Path.Combine(f.Root, "Lone");
+            Directory.CreateDirectory(lone);
+            File.WriteAllBytes(Path.Combine(lone, "sample.mkv"), new byte[20]);
+            var flat = m.SpaceSuggestions().SelectMany(g => g.Items).ToList();
+            string Rel(DownloadSpaceItem i) => Path.GetRelativePath(f.Root, i.Path);
+            check(
+                flat.Where(i => i.Kind == PcDownloads.KindEmptyFolders)
+                    .Select(Rel)
+                    .OrderBy(x => x)
+                    .SequenceEqual(new[] { "Ghost Show", "Only Thumbs" }),
+                "O4 empty folders are listed outermost only, and a folder holding only Thumbs.db counts as empty"
+            );
+            check(
+                flat.Where(i => i.Kind == PcDownloads.KindSamples)
+                    .Select(Rel)
+                    .SequenceEqual(new[] { Path.Combine("Pack", "movie.name.sample.mkv") })
+                    && flat.Where(i => i.Kind == PcDownloads.KindLoose)
+                        .Select(Rel)
+                        .OrderBy(x => x)
+                        .SequenceEqual(
+                            new[]
+                            {
+                                Path.Combine("Pack", "info.nfo"),
+                                Path.Combine("Pack", "RARBG.txt"),
+                                Path.Combine("Pack", "setup.exe"),
+                            }
+                        )
+                    && !flat.Single(i => i.Path.EndsWith("setup.exe")).Preselect
+                    && flat.Single(i => i.Path.EndsWith("setup.exe")).ListOnly
+                    && flat.Where(i => i.Kind == PcDownloads.KindLoose && !i.ListOnly)
+                        .All(i => !i.Path.EndsWith(".exe"))
+                    && flat.Single(i => i.Path.EndsWith("RARBG.txt")).Preselect,
+                "O4 samples next to a bigger video and loose .nfo/.txt/.url/.exe that match no video are listed; a lone sample, a matching .nfo and tvshow.nfo are not; a program is never ticked"
+            );
+            check(
+                flat.All(i => !i.Path.StartsWith(outside, StringComparison.OrdinalIgnoreCase))
+                    && !flat.Any(i => i.Path.Contains(".noir-incoming") && i.Kind != "Leftover partial downloads"),
+                "O4 nothing outside the library folders (or inside Noir's own incoming folder) is ever listed"
+            );
+            bool recycled = false;
+            m.ManageDeleter = (path, recycle) =>
+            {
+                recycled |= recycle;
+                if (Directory.Exists(path))
+                    Directory.Delete(path, true);
+                else
+                    File.Delete(path);
+            };
+            var leftovers = flat.Where(i =>
+                    i.Kind is PcDownloads.KindEmptyFolders or PcDownloads.KindSamples or PcDownloads.KindLoose
+                )
+                .ToList();
+            // A forged item outside the library, and an empty folder that gained a file after the review, are skipped.
+            File.WriteAllText(Path.Combine(f.Root, "Ghost Show", "Season 01", "late.txt"), "arrived after the review");
+            var forged = new DownloadSpaceItem(
+                Path.Combine(outside, "RARBG.txt"),
+                PcDownloads.KindLoose,
+                "x",
+                2,
+                Path.Combine(outside, "RARBG.txt")
+            );
+            var freed = await m.FreeSpace(leftovers.Append(forged), DownloadDeleteChoice.Recycle);
+            check(
+                recycled
+                    && !File.Exists(Path.Combine(pack, "RARBG.txt"))
+                    && File.Exists(Path.Combine(pack, "setup.exe"))
+                    && freed.Errors.Any(e => e.Contains("Program file"))
+                    && !File.Exists(Path.Combine(pack, "movie.name.sample.mkv"))
+                    && !Directory.Exists(Path.Combine(f.Root, "Only Thumbs"))
+                    && File.Exists(Path.Combine(pack, "Movie.Name.2020.mkv"))
+                    && File.Exists(Path.Combine(pack, "Movie.Name.2020.nfo"))
+                    && File.Exists(Path.Combine(pack, "tvshow.nfo"))
+                    && File.Exists(Path.Combine(lone, "sample.mkv")),
+                "O4 cleanup uses the chosen delete method (Recycle Bin here), leaves videos, matching files and lone samples, and refuses a program file even when handed it directly"
+            );
+            check(
+                File.Exists(Path.Combine(outside, "RARBG.txt"))
+                    && File.Exists(Path.Combine(outside, "big.movie.sample.mkv"))
+                    && Directory.Exists(Path.Combine(outside, "Empty"))
+                    && File.Exists(Path.Combine(f.Root, "Ghost Show", "Season 01", "late.txt")),
+                "O4 never touches anything outside the library folders, nor a folder that is no longer empty"
+            );
+            m.ManageDeleter = null;
+            Directory.CreateDirectory(Path.Combine(f.Root, "Real Empty", "Season 01"));
+            var real = m.SpaceSuggestions().SelectMany(g => g.Items).Single(i => i.Path.EndsWith("Real Empty"));
+            Directory.CreateDirectory(Path.Combine(f.Root, "Real Empty", "Season 02"));
+            await m.FreeSpace([real], DownloadDeleteChoice.Permanent);
+            check(
+                !Directory.Exists(Path.Combine(f.Root, "Real Empty")),
+                "O4 empty folders are removed with the plain delete, nested ones first"
+            );
+            // A top folder that is a junction (made without admin rights) is refused, and nothing behind it is touched.
+            var target = Path.Combine(Path.GetDirectoryName(f.Root)!, "junction-target");
+            Directory.CreateDirectory(target);
+            File.WriteAllText(Path.Combine(target, "Thumbs.db"), "x");
+            var linked = Path.Combine(f.Root, "Linked Empty");
+            using (
+                var mk = System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{linked}\" \"{target}\"")
+                    {
+                        CreateNoWindow = true,
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                    }
+                )!
+            )
+                mk.WaitForExit();
+            var isJunction =
+                Directory.Exists(linked) && (File.GetAttributes(linked) & FileAttributes.ReparsePoint) != 0;
+            var forgedFolder = new DownloadSpaceItem(linked, PcDownloads.KindEmptyFolders, "x", 0, linked);
+            await m.FreeSpace([forgedFolder], DownloadDeleteChoice.Permanent);
+            // The scan never lists a junction, so FreeSpace skips it; the delete itself must refuse it too, for a
+            // folder swapped for a link between the rescan and the delete (reached directly here).
+            string? guard = null;
+            try
+            {
+                typeof(PcDownloads)
+                    .GetMethod(
+                        "RemoveLeftover",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance
+                    )!
+                    .Invoke(m, [forgedFolder, false]);
+            }
+            catch (System.Reflection.TargetInvocationException e) when (e.InnerException is IOException io)
+            {
+                guard = io.Message;
+            }
+            check(
+                isJunction
+                    && Directory.Exists(linked)
+                    && File.Exists(Path.Combine(target, "Thumbs.db"))
+                    && guard != null
+                    && guard.Contains("redirected"),
+                "O4 an empty-folder item whose top folder is a junction is never deleted, nor anything behind it"
+            );
+            if (Directory.Exists(linked))
+                Directory.Delete(linked);
+        }
+        using (var f = new Fixture(parent))
+        {
+            var m = f.Manager;
+            var movies = Path.Combine(Path.GetDirectoryName(f.Root)!, "movies");
+            var a2 = f.Store.State.Catalog["a2"];
+            var smallPath = a2.Item.Path;
+            var bigPath = Path.Combine(f.Root, "extra", "Alpha.S01E02.1080p.BluRay.mkv");
+            Directory.CreateDirectory(Path.GetDirectoryName(bigPath)!);
+            File.WriteAllBytes(bigPath, new byte[350]);
+            a2.Paths.Add(bigPath);
+            f.Store.Record(f.Store.Archive.Single(i => i.Id == "a2"), 42.5, 120);
+            f.Store.State.Intros[smallPath] = new() { Start = 5, End = 65 };
+            f.Store.State.Outros[smallPath] = new() { Start = 100, End = 120 };
+            var m1 = f.Store.State.Catalog["m1"];
+            var movieBig = Path.Combine(movies, "m1-remux.mkv");
+            File.WriteAllBytes(movieBig, new byte[900]);
+            var movieSmall = m1.Item.Path;
+            m1.Paths.Add(movieBig);
+            var items = m.SpaceSuggestions()
+                .SelectMany(g => g.Items)
+                .Where(i => i.Kind == PcDownloads.KindDuplicates)
+                .ToList();
+            check(
+                items.Count == 4
+                    && items.Single(i => i.Path == smallPath).Preselect
+                    && !items.Single(i => i.Path == bigPath).Preselect
+                    && items.Single(i => i.Path == bigPath).Label.Contains("1080p")
+                    && items.Single(i => i.Path == bigPath).Label.Contains("bluray", StringComparison.OrdinalIgnoreCase)
+                    && items.Single(i => i.Path == movieBig).KeepPath == movieBig
+                    && items.Single(i => i.Path == movieSmall).Preselect
+                    && !items.Any(i => i.Label.Contains(f.Root, StringComparison.OrdinalIgnoreCase))
+                    && !items.Any(i => i.Label.Contains(movies, StringComparison.OrdinalIgnoreCase)),
+                "O5 duplicates are the same movie or episode on 2 paths, show quality from the name and size, and pre-select the smaller copy"
+            );
+            // Even with every copy ticked, one stays.
+            var result = await m.FreeSpace(items, DownloadDeleteChoice.Permanent);
+            var kept = f.Store.Archive.Single(i => i.Id == "a2");
+            check(
+                result.Errors.Count == 0
+                    && !File.Exists(smallPath)
+                    && File.Exists(bigPath)
+                    && File.Exists(movieBig)
+                    && !File.Exists(movieSmall)
+                    && kept.Path == bigPath
+                    && kept.Available,
+                "O5 confirming deletes the smaller copies, never every copy, and the catalog points at the kept file"
+            );
+            check(
+                f.Store.State.Progress.TryGetValue(bigPath, out var moved)
+                    && moved.Position == 42.5
+                    && f.Store.State.Intros.TryGetValue(bigPath, out var intro)
+                    && intro.End == 65
+                    && f.Store.State.Outros.TryGetValue(bigPath, out var outro)
+                    && outro.Start == 100,
+                "O5 progress and intro/outro marks are copied to the kept path"
+            );
+            check(
+                !m.SpaceSuggestions().SelectMany(g => g.Items).Any(i => i.Kind == PcDownloads.KindDuplicates),
+                "O5 after cleaning there is nothing left to list as a duplicate"
             );
         }
     }

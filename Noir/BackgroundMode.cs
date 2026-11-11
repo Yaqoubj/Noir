@@ -146,15 +146,8 @@ public partial class MainWindow
             _ = downloads.PrepareReady("New episode");
         try
         {
-            var followed = store
-                .Archive.GroupBy(i => i.GroupKey)
-                .Where(g =>
-                    !g.First().IsMovie
-                    && store.TitleStatus(g) != "Dropped"
-                    && !store.State.HiddenContinue.Contains(g.Key)
-                    && !store.State.HiddenTitles.Contains(g.Key)
-                )
-                .ToList();
+            // The same followed shows Keep ready means by "Shows I am watching" (LibraryStore.WatchingShow).
+            var followed = store.FollowedShows();
             var next = followed
                 .Select(g => store.UpNextFor(store.EpisodesFor(g.Key)))
                 .OfType<UpNext>()
@@ -163,13 +156,7 @@ public partial class MainWindow
             var automatic = followed
                 .Where(g => store.State.ShowDownloads.GetValueOrDefault(g.Key)?.AutoDownload == true)
                 .SelectMany(g => store.EpisodesFor(g.Key));
-            bool Following(VideoItem episode)
-            {
-                var group = store.EpisodesFor(episode.GroupKey);
-                return group.Max(store.LastActivity) > DateTimeOffset.UtcNow.AddDays(-180)
-                    || store.EarlierUnwatched(episode).Count == 0;
-            }
-            var fresh = next.Where(Following)
+            var fresh = next.Where(e => store.FollowingEpisode(e, DateTimeOffset.UtcNow))
                 .Concat(automatic)
                 .DistinctBy(i => (i.GroupKey, i.Season, i.Episode))
                 .Where(i =>

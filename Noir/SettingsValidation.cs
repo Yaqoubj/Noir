@@ -145,8 +145,19 @@ public partial class MainWindow
                 Check(names.Contains(card), $"Connections has a {card} card");
             var queue = Descendants(ContentPanel)
                 .OfType<Expander>()
-                .FirstOrDefault(e => e.Header is TextBlock t && t.Text.StartsWith($"{waiting} waiting"));
-            Check(queue != null && !queue.IsExpanded, "The Trakt queue is one folded line with its count");
+                .FirstOrDefault(e => e.Header is TextBlock t && t.Text == "Show waiting");
+            Check(
+                queue != null && !queue.IsExpanded,
+                "The Trakt queue is one folded line that reads Show waiting (U85)"
+            );
+            var traktCard = Descendants(ContentPanel).OfType<Border>().First(b => Name(b) == "Trakt");
+            var traktTexts = Descendants(traktCard).OfType<TextBlock>().Select(t => t.Text).ToList();
+            Check(
+                !traktTexts.Any(t => t.StartsWith("Sending ·"))
+                    && traktTexts.Contains("Sending")
+                    && traktTexts.Count(t => System.Text.RegularExpressions.Regex.IsMatch(t, @"\d+ waiting")) <= 1,
+                "U84/U85 the Trakt card header reads the state only (no counts) and at most one line carries the waiting count"
+            );
             Check(
                 Descendants(ContentPanel)
                     .OfType<TextBlock>()
@@ -184,7 +195,7 @@ public partial class MainWindow
             await Settle();
             queue = Descendants(ContentPanel)
                 .OfType<Expander>()
-                .First(e => e.Header is TextBlock t && t.Text.StartsWith($"{waiting} waiting"));
+                .First(e => e.Header is TextBlock t && t.Text == "Show waiting");
             queue.IsExpanded = true;
             await Settle();
             var listed = Descendants((DependencyObject)queue.Content).OfType<TextBlock>().Select(t => t.Text).ToList();
@@ -208,7 +219,7 @@ public partial class MainWindow
             Check(
                 Descendants(ContentPanel)
                     .OfType<Expander>()
-                    .Any(e => e.IsExpanded && e.Header is TextBlock t && t.Text.StartsWith($"{waiting - 1} waiting")),
+                    .Any(e => e.IsExpanded && e.Header is TextBlock t && t.Text == "Show waiting"),
                 "The queue stays open after a change"
             );
             ContentScroll.ScrollToVerticalOffset(900);
@@ -228,6 +239,87 @@ public partial class MainWindow
                 "Arabic Settings shows the translated section title"
             );
             Shot("connections-ar");
+            // U87/U100: the Arabic coverage check. Every string on Connections and Import has an Arabic entry,
+            // and no English is left on either page.
+            string[] needArabic =
+            [
+                "Details",
+                "Auto-next, subtitles, after watching",
+                "Not connected",
+                "Check Stremio automatically",
+                "Mark my watches on ",
+                "Waiting to sync",
+                "The website could not load.",
+                "Two-way: Nuvio's watches come into Noir every few hours, and what you finish or check off in Noir is marked watched in Nuvio.",
+                "Link with a code — no password. Watches flow both ways.",
+                "Link with a code at nuvio.tv/link. Noir pulls Nuvio's watches and marks yours watched in Nuvio.",
+                "New watches in Stremio come into Noir every few hours. Stremio can't receive watches from other apps.",
+                "Each movie or episode you finish or check off is marked watched on trakt.tv, through your website sign-in.",
+                "Each episode you finish or check off is marked watched on Serializd (TV only).",
+            ];
+            var missingArabic = needArabic.Where(s => Loc.T(s) == s).ToList();
+            Check(
+                missingArabic.Count == 0,
+                "Arabic has every Connections / Import string (U87, U100) · missing: "
+                    + string.Join(" | ", missingArabic)
+            );
+            string[] englishLeft =
+            [
+                "Connected · checked",
+                "Check Stremio automatically",
+                "Import now",
+                "Not connected",
+                "Mark watched on",
+                "Sending ·",
+                "Waiting to sync",
+                "The website could not load.",
+                "Link with a code",
+                "Two-way: Nuvio",
+                "Harbor syncs through",
+                "New: try it on one title",
+                "Each movie or episode",
+                "Each episode you finish",
+                "Auto-next, subtitles",
+            ];
+            List<string> PageTexts() =>
+                Descendants(ContentPanel)
+                    .SelectMany(d =>
+                        d switch
+                        {
+                            TextBlock t => new[] { t.Text },
+                            CheckBox c => new[] { c.Content as string ?? "" },
+                            Button b => new[] { b.Content as string ?? "" },
+                            _ => [],
+                        }
+                    )
+                    .ToList();
+            var leftEnglish = PageTexts().Where(t => englishLeft.Any(e => t.Contains(e))).ToList();
+            Check(
+                leftEnglish.Count == 0,
+                "Arabic Connections shows none of the English strings · left: " + string.Join(" | ", leftEnglish)
+            );
+            historyType = "All";
+            trackerTab = "Import";
+            Navigate("History");
+            await Settle();
+            var importTexts = PageTexts();
+            leftEnglish = importTexts.Where(t => englishLeft.Any(e => t.Contains(e))).ToList();
+            Check(
+                importTexts.Any(t => t.Contains("Stremio")) && leftEnglish.Count == 0,
+                "Arabic Import shows none of the English strings · left: " + string.Join(" | ", leftEnglish)
+            );
+            Shot("import-ar");
+            // U90: a popup is its own window; it takes the app's flow direction.
+            ConfirmPastHistory("Trakt");
+            Check(
+                smartPopup is { FlowDirection: FlowDirection.RightToLeft }
+                    && smartPopup.Child is FrameworkElement { } popupBody
+                    && Descendants(popupBody)
+                        .OfType<TextBlock>()
+                        .Any(t => t.Text.Contains("Trakt") && t.Text != "Trakt"),
+                "U90 the past-history popup reads right to left in Arabic"
+            );
+            CloseSmart();
             settingsSection = "Appearance & language";
             Navigate("Settings");
             await Settle();

@@ -68,6 +68,40 @@ public partial class MainWindow
             .ToList();
     }
 
+    void BeginStatsWork()
+    {
+        var working = Text(T("Working out your stats…", "جارٍ حساب إحصاءاتك…"), 14, "#9F9A93");
+        working.Margin = new(0, 18, 0, 0);
+        ContentPanel.Children.Add(working);
+        var request = ++statsRequest;
+        StartupTrace.Mark("Stats: work started");
+        _ = Task.Run(() =>
+            {
+#if NOIR_VALIDATE
+                statsGate?.Wait(); // capture-only: holds the work so the "Working out your stats…" line can be captured
+#endif
+                var views = AllViewings();
+                WarmPeople(views);
+                return views;
+            })
+            .ContinueWith(work =>
+                Dispatcher.InvokeAsync(() =>
+                {
+                    StartupTrace.Mark("Stats: work ended");
+                    if (work.Exception is { } error)
+                    {
+                        store.Log(error.GetBaseException());
+                        working.Text = T("Your stats could not be worked out.", "تعذر حساب إحصاءاتك.");
+                        return;
+                    }
+                    if (closing || request != statsRequest || page != "History" || trackerTab != "Stats")
+                        return;
+                    statsViews = work.Result;
+                    RenderQuiet();
+                })
+            );
+    }
+
     static string Duration(double seconds, bool compact = false)
     {
         var span = TimeSpan.FromSeconds(seconds);
@@ -306,9 +340,19 @@ public partial class MainWindow
             }
     }
 
+    // S6: the viewings and the people behind them are worked out off the UI thread; the tab shows a
+    // short line first and fills in when they are ready (each open works them out again, so it is current).
+    List<Watched>? statsViews;
+    int statsRequest;
+
     void RenderHistoryStats()
     {
-        var views = AllViewings();
+        if (statsViews is not { } views)
+        {
+            BeginStatsWork();
+            return;
+        }
+        statsViews = null;
         var story = ActionButton(
             T("Your {0} story [[chevron]]", "حكايتك في {0} [[chevron]]", historyReviewYear),
             () => OpenYearStory(historyReviewYear),

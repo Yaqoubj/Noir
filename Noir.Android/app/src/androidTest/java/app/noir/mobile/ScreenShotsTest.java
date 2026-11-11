@@ -193,13 +193,59 @@ public final class ScreenShotsTest {
    try{pickItems();}catch(Throwable t){missing("choosing fixture items",t);}
    try{prepareDiscover();}catch(Throwable t){missing("preparing fake Discover caches",t);}
    JSONArray picks=fakeTitles("Fixture pick","movie",9100401,24);DiscoveryClient.genreOverride=(genre,top)->picks;
-   for(String l:langs()){lang=l;try{phoneLang();}catch(Throwable t){missing("phone "+l+" run",t);}closeActivities();}
+   for(String l:langs()){lang=l;try{if(b2only())phoneBatch2();else phoneLang();}catch(Throwable t){missing("phone "+l+" run",t);}closeActivities();}
   }finally{
    DiscoveryClient.genreOverride=oldGenre;
    try{lang="en";DataStore now=NoirApp.data;now.pref("language","en");Loc.use(now);now.phoneSetting("historyOnly",oldHistoryOnly);now.pref("tipPlayerGestures",oldGesture);if(!oldPreview.isEmpty())now.pref(PhonePreview.PREF,oldPreview);}catch(Throwable t){missing("restoring English and settings",t);}
    finishRun();
   }
  }
+
+ // ---------------------------------------------------------------- batch 2 (opt-in: -e shotsOnly b2 runs only these)
+ // Seeds sync state for the Connections page, in the emulator's app data only (the run installs a fresh app, so nothing outlives it).
+ void seedB2()throws Exception{
+  DataStore d=NoirApp.data;long now=System.currentTimeMillis();
+  d.stateObject("stremio",new JSONObject().put("key","shots-fake-stremio-key"));
+  for(String p:WatchSync.PROVIDERS)WatchSync.enable(d,p,true);
+  synchronized(d){
+   JSONObject jobs=WatchSync.section(WatchSync.state(d),"jobs");
+   String[] who={"Trakt","Serializd",WatchSync.STREMIO};int[] done={12,6,5},wait={4,9,1};
+   for(int k=0;k<3;k++){
+    for(int n=0;n<done[k];n++)DataStore.put(jobs,who[k]+":shots-s"+n,new JSONObject().put("provider",who[k]).put("itemId","shots-s"+n).put("viewingId","v"+n).put("watchedAt",now-(n+2)*DAYMS).put("syncedAt",now-(n+1)*3600000L*5).put("message","Watched ✓"));
+    for(int n=0;n<wait[k];n++)DataStore.put(jobs,who[k]+":shots-w"+n,new JSONObject().put("provider",who[k]).put("itemId","shots-w"+n).put("viewingId","w"+n).put("watchedAt",now-n*3600000L).put("retryAt",now+3*3600000L).put("message","Waiting to sync"));
+   }
+  }
+  WatchSync.editProvider(d,"Trakt",pr->{DataStore.put(pr,"failures",3);DataStore.put(pr,"failingSince",now-30*3600000L);DataStore.put(pr,"retryAt",now+3*3600000L);DataStore.put(pr,"message","The website could not load.");DataStore.put(pr,"lastSuccess",now-31*3600000L);});
+  WatchSync.editProvider(d,"Serializd",pr->{DataStore.put(pr,"failures",WatchSync.BACKOFF.length);DataStore.put(pr,"failingSince",now-3*DAYMS);DataStore.put(pr,"retryAt",now+24*3600000L);DataStore.put(pr,"message","The website could not load.");DataStore.put(pr,"lastSuccess",now-4*DAYMS);});
+  WatchSync.editProvider(d,WatchSync.STREMIO,pr->{DataStore.put(pr,"lastSuccess",now-20*60000L);DataStore.put(pr,"retryAt",0);});
+  d.phoneSetting("stremioAddTitles",true);
+ }
+ static final long DAYMS=24*3600000L;
+ void scrollToView(ScrollView s,View v,int offsetDp)throws Exception{ui(()->{android.graphics.Rect r=new android.graphics.Rect();v.getDrawingRect(r);s.offsetDescendantRectToMyCoords(v,r);s.scrollTo(0,Math.max(0,r.top-dp(offsetDp)));});settle(500);}
+ View textView(View root,String english){String want=Loc.t(english);return AuditPhoneFixture.find(root,v->v instanceof TextView&&want.contentEquals(((TextView)v).getText()));}
+ void connectionsAt(String name,String english,int offsetDp){step(name,()->{go("Connections",null);settle(900);View[] t={null};ui(()->t[0]=textView(a.body,english));assertNotNull("text not found: "+english,t[0]);scrollToView(a.scroller,t[0],offsetDp);shot(600);});}
+ JSONObject savedDownload(String id,String group,String title,int episode,long watchedAt)throws Exception{DataStore data=NoirApp.data;JSONObject item=data.rememberPhoneItem(new JSONObject().put("id",id).put("group",group).put("imdb",group.equals("b2-night")?"tt9300001":"tt9300002").put("title",title).put("movie",false).put("season",1).put("episode",episode).put("episodeTitle","Episode "+episode).put("progress",watchedAt>0?new JSONObject().put("completed",true).put("updatedAt",java.time.Instant.ofEpochMilli(watchedAt).toString()):new JSONObject()));DownloadStore store=NoirApp.downloads;store.enqueue(item);java.nio.file.Files.write(store.file(id,false).toPath(),new byte[4096]);store.update(id,"complete",4096,4096,"","");return item;}
+ void hubStep(String name,Act body){step(name,()->{Activity x=start(in(DownloadHubActivity.class));DownloadHubActivity h=(DownloadHubActivity)waitFor(DownloadHubActivity.class,10000);opened.add(h);try{ui(h::update);settle(900);hub=h;body.run();}finally{hub=null;end(h);}});}
+ DownloadHubActivity hub;
+ ScrollView scrollOf(Activity act)throws Exception{View[] s={null};ui(()->s[0]=AuditPhoneFixture.find(act.getWindow().getDecorView(),v->v instanceof ScrollView));assertNotNull("no ScrollView",s[0]);return (ScrollView)s[0];}
+ void batch2()throws Exception{
+  step("b2-seed",()->{seedB2();expected.remove(current);});
+  step("b2-connections-pc-sync",()->{go("Connections",null);settle(900);ui(()->a.scroller.scrollTo(0,0));shot(600);});
+  step("b2-connections-too-large",()->{String before=NoirApp.data.connection;NoirApp.data.connection=Loc.t(DataStore.LIBRARY_TOO_LARGE);try{go("Connections",null);settle(900);shot(600);}finally{NoirApp.data.connection=before;}});
+  connectionsAt("b2-connections-trakt-serializd","Trakt",24);
+  connectionsAt("b2-connections-serializd","Serializd",24);
+  connectionsAt("b2-connections-stremio-marks","Stremio",24);
+  step("b2-connections-bottom",()->{go("Connections",null);settle(900);ui(()->{ScrollView s=a.scroller;s.scrollTo(0,Math.max(0,s.getChildAt(0).getHeight()-s.getHeight()));});shot(600);});
+  step("b2-downloads-seed",()->{long now=System.currentTimeMillis();savedDownload("b2-ns1","b2-night","Night Signal",1,now-2*DAYMS);savedDownload("b2-ns2","b2-night","Night Signal",2,now-DAYMS);savedDownload("b2-ns3","b2-night","Night Signal",3,0);savedDownload("b2-pl1","b2-paper","Paper Lanterns",1,0);savedDownload("b2-pl2","b2-paper","Paper Lanterns",2,0);NoirApp.data.pref("downloadsFilter","All");expected.remove(current);});
+  hubStep("b2-downloads-filter-all",()->{View[] f={null};ui(()->f[0]=DownloadHubTest.tagged(hub.body,"saved-filter"));assertNotNull("filter row",f[0]);scrollToView(scrollOf(hub),f[0],160);shot(600);});
+  hubStep("b2-downloads-filter-unwatched",()->{ui(()->{View p=DownloadHubTest.tagged(hub.body,"saved-filter:2");assertNotNull("Unwatched pill",p);assertTrue(p.performClick());});settle(900);View[] f={null};ui(()->f[0]=DownloadHubTest.tagged(hub.body,"saved-filter"));scrollToView(scrollOf(hub),f[0],160);shot(600);ui(()->{View p=DownloadHubTest.tagged(hub.body,"saved-filter:0");if(p!=null)p.performClick();});});
+  hubStep("b2-downloads-auto-rules",()->{View[] c={null};ui(()->c[0]=DownloadHubTest.tagged(hub.body,"auto-rules-card"));assertNotNull("automatic rules card",c[0]);scrollToView(scrollOf(hub),c[0],30);shot(600);});
+  hubStep("b2-downloads-auto-rules-end",()->{ScrollView s=scrollOf(hub);ui(()->s.scrollTo(0,Math.max(0,s.getChildAt(0).getHeight()-s.getHeight())));shot(600);});
+  hubStep("b2-keep-ready-show-sheet",()->{ui(()->DownloadHubActivity.openKeepReady(hub,"b2-night"));shot(1800);});
+  step("b2-restore",()->{for(String p:WatchSync.PROVIDERS)try{WatchSync.enable(NoirApp.data,p,false);}catch(Throwable ignored){}expected.remove(current);});
+ }
+ static boolean b2only(){return "b2".equals(TestRunner.arguments.getString("shotsOnly"));}
+ void phoneBatch2()throws Exception{seq=0;setLang();a=null;batch2();end(a);a=null;}
 
  // ---------------------------------------------------------------- TV
  void key2(int code,int times)throws Exception{for(int n=0;n<times;n++)key(code);}

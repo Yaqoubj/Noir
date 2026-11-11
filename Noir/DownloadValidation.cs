@@ -771,9 +771,35 @@ public partial class MainWindow
         Check(
             Descendants(free.Overlay)
                 .OfType<CheckBox>()
-                .Any(c => c.Content is string label && label.StartsWith("Leftover partial downloads"))
+                .Any(c => c.Content is TextBlock label && Plain(label).StartsWith("Leftover partial downloads"))
                 && Descendants(free.Overlay).OfType<ComboBox>().Any(),
             "Free up space offers ticked partial-file suggestions and the deletion preference"
+        );
+        // U93/U94: the group figure follows the ticks and the button names what the chosen option will do.
+        var freeChoice = Descendants(free.Overlay).OfType<ComboBox>().First();
+        var freeButton = Descendants(free.FooterButtons).OfType<Button>().Last();
+        var firstChoice = freeChoice.SelectedIndex;
+        var buttonTexts = new List<string>();
+        for (var n = 0; n < 3; n++)
+        {
+            freeChoice.SelectedIndex = n;
+            await Task.Delay(30);
+            buttonTexts.Add(freeButton.Content as string ?? "");
+        }
+        freeChoice.SelectedIndex = firstChoice;
+        var partialBox = Descendants(free.Overlay)
+            .OfType<CheckBox>()
+            .First(c => c.Content is TextBlock label && Plain(label).StartsWith("Leftover partial downloads"));
+        Check(
+            buttonTexts[0].StartsWith("Remove ")
+                && buttonTexts[0].EndsWith("…")
+                && buttonTexts[1].StartsWith("Move ")
+                && buttonTexts[1].EndsWith("to Recycle Bin")
+                && buttonTexts[2].StartsWith("Delete ")
+                && !buttonTexts[2].Contains("…")
+                && Plain((TextBlock)partialBox.Content).EndsWith(" · " + buttonTexts[2]["Delete ".Length..]),
+            "U93/U94 Free up space button reads Remove …, Move … to Recycle Bin or Delete … by option, and its size equals the ticked group · "
+                + string.Join(" | ", buttonTexts)
         );
         HostPicture("download-free-space-en.png");
         free.Close(false);
@@ -817,6 +843,18 @@ public partial class MainWindow
         await Task.Delay(200);
         HostPicture("download-free-space-ar.png");
         OpenSheets.Last().Close(false);
+        var looseLabel = FreeSpaceGroupLabel(
+            T("Leftover files from releases (.nfo, .txt, .url)", "ملفات متبقية من الإصدارات (.nfo, .txt, .url)"),
+            "3.0 MB"
+        );
+        Check(
+            Plain(looseLabel).Contains(".nfo, .txt, .url")
+                && !Plain(looseLabel).Contains(".exe")
+                && looseLabel
+                    .Inlines.OfType<System.Windows.Documents.Run>()
+                    .Any(r => r.Text == ".nfo, .txt, .url" && r.FlowDirection == FlowDirection.LeftToRight),
+            "U92/U96 the leftover group title has no .exe and its extension list is its own left-to-right run in Arabic"
+        );
         SetLanguage("en");
         downloadsTab = "Queue";
         Navigate("Downloads");

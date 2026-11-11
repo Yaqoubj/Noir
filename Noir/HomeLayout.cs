@@ -205,7 +205,9 @@ public partial class MainWindow
             .ToList();
         homeRowBuilders = new();
         homeRowNames.Clear();
+        StartupTrace.Mark("Home rows prepared");
         RegisterSmartRows(groups);
+        StartupTrace.Mark("Home smart rows registered");
         homeRowNames["ready"] = T("Keep ready", "إبقاء الحلقات جاهزة");
         HomeRow("ready", () =>
         {
@@ -218,7 +220,7 @@ public partial class MainWindow
                 )
                 {
                     var title = ((StackPanel)card.Child).Children.OfType<TextBlock>().First().Text;
-                    var item = store.Archive.FirstOrDefault(i => i.Title == title);
+                    var item = HomeItemTitled(title);
                     if (item != null)
                         FollowHomeHero(card, () => item);
                 }
@@ -228,6 +230,7 @@ public partial class MainWindow
         HomeRow("services", RenderServices);
         HomeRow("top10", RenderTopTen);
         RenderHomeExtras(groups);
+        StartupTrace.Mark("Home extras registered");
         HomeRow("list", () =>
             RailCatalog(groups.Where(g => store.State.Watchlist.Contains(g[0].GroupKey)).ToList(), "My List", "", () =>
                 Navigate("My List")
@@ -294,9 +297,13 @@ public partial class MainWindow
         homeRowBuilders = null;
         var saved = HomeLayout.Load(store.DataDirectory);
         var rows = saved.Resolve(builders.Keys);
+        StartupTrace.Mark("Home rows registered");
         foreach (var row in rows.Where(r => r.Id != "continue" && r.Visible))
             if (builders.TryGetValue(row.Id, out var build))
+            {
                 build();
+                StartupTrace.Mark("Home row built: " + row.Id);
+            }
         var edit = ActionButton(T("Edit Home", "تعديل الرئيسية"), () => HomeLayoutEditor(builders.Keys));
         edit.Margin = new(0, 36, 0, 24);
         System.Windows.Automation.AutomationProperties.SetName(edit, "Edit Home");

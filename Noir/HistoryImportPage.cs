@@ -113,130 +113,13 @@ public partial class MainWindow
         foreach (var service in ImportServices)
             grid.Children.Add(ServiceTile(service));
         ContentPanel.Children.Add(Heading("Keep in sync", "What's possible differs by service."));
-        var sync = new WrapPanel();
-        ContentPanel.Children.Add(sync);
-        sync.Children.Add(
-            SyncTile(
-                "Stremio",
-                "S",
-                "#7B5BF5",
-                "#FFFFFF",
-                StremioKey() != null
-                    ? "Connected · "
-                        + (store.State.StremioImportedAt is { } at ? "checked " + Ago(at) : "not checked yet")
-                    : "Not connected",
-                StremioKey() != null
-                    ? "New watches in Stremio are pulled into Noir every few hours while Noir runs."
-                    : "Connect to pull Stremio's watched movies and episodes into Noir.",
-                panel =>
-                {
-                    if (StremioKey() == null)
-                    {
-                        panel.Children.Add(ActionButton("Connect Stremio", () => ConnectStremio(), true));
-                        return;
-                    }
-                    var auto = new CheckBox
-                    {
-                        Content = "Check Stremio automatically",
-                        IsChecked = store.State.StremioAutoImport,
-                        Margin = new(0, 4, 0, 8),
-                    };
-                    auto.Click += (_, _) =>
-                    {
-                        store.State.StremioAutoImport = auto.IsChecked == true;
-                        store.Save();
-                    };
-                    panel.Children.Add(auto);
-                    var row = new WrapPanel();
-                    row.Children.Add(ActionButton("Import now", () => _ = ImportStremio(false), true));
-                    var off = ActionButton("Disconnect", () =>
-                    {
-                        try
-                        {
-                            File.Delete(StremioKeyPath);
-                        }
-                        catch { }
-                        Render();
-                    });
-                    off.Margin = new(8, 0, 0, 0);
-                    row.Children.Add(off);
-                    panel.Children.Add(row);
-                }
-            )
-        );
-        sync.Children.Add(NuvioTile());
-        foreach (
-            var (name, mark, color, ink, enabled, set) in new[]
-            {
-                (
-                    "Trakt",
-                    "T",
-                    "#ED2224",
-                    "#FFFFFF",
-                    store.State.SyncTrakt,
-                    (Action<bool>)(v => store.State.SyncTrakt = v)
-                ),
-                (
-                    "Serializd",
-                    "Sz",
-                    "#1E9BE9",
-                    "#FFFFFF",
-                    store.State.SyncSerializd,
-                    (Action<bool>)(v => store.State.SyncSerializd = v)
-                ),
-            }
-        )
-        {
-            var jobs = store.State.WatchSync.Values.Where(j => j.Provider == name).ToList();
-            var waiting = jobs.Count(j => j.SyncedAt == null);
-            sync.Children.Add(
-                SyncTile(
-                    name,
-                    mark,
-                    color,
-                    ink,
-                    enabled
-                        ? $"Sending · {jobs.Count - waiting} confirmed{(waiting > 0 ? $" · {waiting} waiting" : "")}"
-                        : "Off",
-                    name == "Trakt"
-                        ? "Each episode or movie you finish or check off in Noir is marked watched on your Trakt account."
-                        : "Each episode you finish or check off is marked watched on Serializd (TV only).",
-                    panel =>
-                    {
-                        var check = new CheckBox
-                        {
-                            Content = "Mark watched on " + name,
-                            IsChecked = enabled,
-                            Margin = new(0, 4, 0, 8),
-                        };
-                        check.Click += (_, _) =>
-                        {
-                            set(check.IsChecked == true);
-                            store.Save();
-                            watchSync?.Retry();
-                            Render();
-                        };
-                        panel.Children.Add(check);
-                        var row = new WrapPanel();
-                        var reviews = ActionButton("Sign in", () => OpenAccountSignIn(name));
-                        row.Children.Add(reviews);
-                        if (enabled)
-                        {
-                            var earlier = ActionButton("Send earlier history", () =>
-                            {
-                                watchSync?.QueuePrevious();
-                                Render();
-                            });
-                            earlier.Margin = new(8, 0, 0, 0);
-                            row.Children.Add(earlier);
-                        }
-                        panel.Children.Add(row);
-                        if (jobs.LastOrDefault(j => j.SyncedAt == null) is { } last)
-                            panel.Children.Add(Body(last.Message, 11));
-                    }
-                )
-            );
-        }
+        // U86: the same cards, built by the same code, as Settings > Connections.
+        var sync = Cards();
+        sync.Children.Add(StremioCard());
+        sync.Children.Add(NuvioCard());
+        sync.Children.Add(HarborCard());
+        sync.Children.Add(SyncSiteCard("Trakt"));
+        sync.Children.Add(SyncSiteCard("Serializd"));
         sync.Children.Add(
             SyncTile(
                 "Netflix",
@@ -299,10 +182,10 @@ public partial class MainWindow
         head.Children.Add(mono);
         var names = new StackPanel { Margin = new(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         names.Children.Add(Text(s.Name, 17, weight: FontWeights.SemiBold));
-        names.Children.Add(Text(s.What, 12, "#AAA6A0"));
+        names.Children.Add(Text(T(s.What), 12, "#AAA6A0"));
         head.Children.Add(names);
         stack.Children.Add(head);
-        var how = Text(s.How, 12.5, "#8F8A83");
+        var how = Text(T(s.How), 12.5, "#8F8A83");
         how.Margin = new(0, 12, 0, 14);
         how.LineHeight = 18;
         stack.Children.Add(how);
@@ -387,11 +270,11 @@ public partial class MainWindow
         var names = new StackPanel { Margin = new(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         names.Children.Add(Text(name, 15.5, weight: FontWeights.SemiBold));
         names.Children.Add(
-            Text(state, 11.5, state.StartsWith("Off") || state.StartsWith("Not") ? "#8F8A83" : "#E4C084")
+            Text(T(state), 11.5, state.StartsWith("Off") || state.StartsWith("Not") ? "#8F8A83" : "#E4C084")
         );
         head.Children.Add(names);
         stack.Children.Add(head);
-        var text = Text(what, 12.5, "#8F8A83");
+        var text = Text(T(what), 12.5, "#8F8A83");
         text.Margin = new(0, 10, 0, 8);
         text.LineHeight = 18;
         stack.Children.Add(text);
@@ -882,6 +765,8 @@ public partial class MainWindow
                     );
                     window.Close();
                     Status.Text = "Stremio connected. Reading your library…";
+                    // A new key lets Stremio marks waiting on "Connect Stremio again" go at once.
+                    watchSync?.Retry();
                     _ = ImportStremio(false);
                 };
                 timer.Start();
@@ -983,6 +868,8 @@ public partial class MainWindow
     {
         if (validationMode)
             return;
+        if (watchSync != null)
+            watchSync.RefreshIds = () => RefreshMetadata();
         stremioTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
         stremioTimer.Tick += (_, _) =>
         {
