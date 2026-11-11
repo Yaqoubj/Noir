@@ -144,8 +144,13 @@ public final class HistoryToolsActivity extends Activity {
         TextView t=text("Stremio"+(connected?" · connected":" · not connected"),15,connected?MainActivity.GOLD:MainActivity.WHITE);t.setTypeface(null,Typeface.BOLD);body.addView(t);
         if(!connected){button("Connect Stremio",this::connectStremio,false);return;}
         button("Import from Stremio",()->run("Reading your Stremio library…",()->match("Stremio",io.stremio(data.stateObject("stremio").optString("key")),false)),false);
-        button("Disconnect Stremio",()->{data.stateObject("stremio",null);CookieManager.getInstance().removeAllCookies(null);render();},false);
+        button("Disconnect Stremio",()->{data.stateObject("stremio",null);forgetStremio();render();},false);
     }
+    // Signs out of Stremio only: expires Stremio's own cookies and site storage. Trakt and Serializd sign-ins in the same WebView profile stay.
+    static final String[] STREMIO_SITES={"https://web.stremio.com","https://www.stremio.com","https://stremio.com","https://api.strem.io","https://www.strem.io","https://strem.io"};
+    static void forgetStremio(){CookieManager cookies=CookieManager.getInstance();for(String site:STREMIO_SITES){String all=cookies.getCookie(site);String host=android.net.Uri.parse(site).getHost(),parent=host.startsWith("www.")||host.startsWith("web.")||host.startsWith("api.")?host.substring(host.indexOf('.')+1):host;
+        if(all!=null)for(String pair:all.split(";")){String name=pair.split("=",2)[0].trim();if(name.isEmpty())continue;String gone=name+"=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/";cookies.setCookie(site,gone);cookies.setCookie(site,gone+"; Domain="+host);cookies.setCookie(site,gone+"; Domain=."+parent);}
+        WebStorage.getInstance().deleteOrigin(site);}cookies.flush();}
     @android.annotation.SuppressLint("SetJavaScriptEnabled")
     void connectStremio(){
         WebView web=new WebView(this);web.getSettings().setJavaScriptEnabled(true);web.getSettings().setDomStorageEnabled(true);web.setWebViewClient(new WebViewClient());

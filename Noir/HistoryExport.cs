@@ -8,6 +8,13 @@ namespace Noir;
 
 public static class HistoryExport
 {
+    // Letterboxd takes half stars (0.5-5) and the day the viewer saw it, not the UTC day.
+    public static string LetterboxdRating(int rating10) =>
+        rating10 <= 0 ? "" : (rating10 / 2.0).ToString("0.0", CultureInfo.InvariantCulture);
+
+    public static string LetterboxdDate(DateTimeOffset at, TimeZoneInfo zone) =>
+        TimeZoneInfo.ConvertTime(at, zone).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
     public static int Write(LibraryStore store, string path, string format) => Write(store, path, format, out _);
 
     public static int Write(LibraryStore store, string path, string format, out int skipped)
@@ -26,7 +33,8 @@ public static class HistoryExport
                         (
                             Item: item,
                             View: view,
-                            Rating: store.State.PersonalReviews.GetValueOrDefault(item.Id)?.Rating ?? 0
+                            Rating: store.State.PersonalReviews.GetValueOrDefault(item.Id)?.Rating ?? 0,
+                            Rating10: store.State.PersonalReviews.GetValueOrDefault(item.Id)?.Rating10 ?? 0
                         )
                     )
             )
@@ -46,7 +54,7 @@ public static class HistoryExport
                     : "Title,Year,imdbID,WatchedDate,Rating,Rewatch\r\n"
             );
             var seen = new HashSet<string>();
-            foreach (var (item, view, rating) in views)
+            foreach (var (item, view, rating, rating10) in views)
             {
                 var rewatch = !seen.Add(item.Id);
                 var fields =
@@ -71,10 +79,8 @@ public static class HistoryExport
                             item.Title,
                             item.Year == 0 ? "" : item.Year.ToString(CultureInfo.InvariantCulture),
                             item.ImdbId,
-                            view.DateUnknown
-                                ? ""
-                                : view.WatchedAt.ToUniversalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                            rating == 0 ? "" : rating.ToString(CultureInfo.InvariantCulture),
+                            view.DateUnknown ? "" : LetterboxdDate(view.WatchedAt, TimeZoneInfo.Local),
+                            LetterboxdRating(rating10),
                             rewatch ? "true" : "false",
                         };
                 csv.AppendJoin(',', fields.Select(HistoryData.CsvField));

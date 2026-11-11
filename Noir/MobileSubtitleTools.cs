@@ -59,14 +59,22 @@ public sealed class MobileSubtitleTools(LibraryStore store)
             var subtitle = Path.Combine(folder, "phone" + input.Extension);
             await File.WriteAllTextAsync(subtitle, input.Text, new UTF8Encoding(false), token);
             var engine = new SubtitleDownloads(folder);
-            var message = await engine.Sync(item.Path, subtitle, token);
-            var accepted = message.StartsWith("auto-synced", StringComparison.Ordinal);
-            return new
+            var result = await engine.SyncDetailed(item.Path, subtitle, token);
+            var accepted = result.Text.StartsWith("auto-synced", StringComparison.Ordinal);
+            var reply = new Dictionary<string, object>
             {
-                accepted,
-                message,
-                text = accepted ? await File.ReadAllTextAsync(subtitle, token) : "",
+                ["accepted"] = accepted,
+                ["message"] = result.Text,
+                ["text"] = accepted ? await File.ReadAllTextAsync(subtitle, token) : "",
             };
+            // F6: on a refusal the phone gets the tool's raw offset and scale, so it can tell a wrong subtitle
+            // from a merely uncertain one. Left out when the tool gave none.
+            if (!accepted && result.RawOffset is { } offset)
+            {
+                reply["offset"] = offset;
+                reply["scale"] = result.RawScale;
+            }
+            return reply;
         }
         finally
         {

@@ -73,14 +73,19 @@ public sealed partial class PcDownloads : IDisposable
             SaveCredentials();
         if (File.Exists(jobsPath))
             jobs = JsonSerializer.Deserialize<List<PcDownloadJob>>(File.ReadAllText(jobsPath), Json) ?? [];
+        // Work cut off by closing (or a crash) continues by itself; a download the user paused stays paused.
         foreach (
             var j in jobs.Where(j =>
-                j.Status == "Downloading" || j.Service == "Torrents" && j.Status is "Preparing" or "Subtitles"
+                j.Status == "Downloading"
+                || j.Service == "Torrents" && j.Status is "Preparing" or "Subtitles"
+                || j.Status == "Paused" && j.Interrupted
             )
         )
         {
-            j.Status = "Paused";
-            j.Message = "Interrupted · resume to continue";
+            j.Status = "Queued";
+            j.Interrupted = false;
+            j.Message = "";
+            j.NextAttempt = null;
         }
         this.provider = provider ?? new DownloadProviders(() => Config, torrentRuntime: () => TorrentRuntime);
         this.transfer = transfer ?? DownloadSecurity.Client(Timeout.InfiniteTimeSpan);
@@ -291,6 +296,7 @@ public sealed partial class PcDownloads : IDisposable
             credentials.SubtitleAddonUrl = s.AddonUrl;
             credentials.SubtitleAddonAuth = s.AddonAuth;
             credentials.SubtitleAddonOnly = s.Only;
+            credentials.SubtitleUploader = s.Uploader;
             SaveCredentials();
         }
         Changed?.Invoke();
@@ -726,6 +732,7 @@ public sealed partial class PcDownloads : IDisposable
                             Name = item.Label,
                             Target = item,
                             Hash = r.Release.Hash,
+                            Trackers = r.Service == "Torrents" ? TorrentReleases.TrackersFor(r.Release.Hash) : [],
                             Service = r.Service,
                             ProtectedDirectSource = f.Direct == null ? "" : DownloadSecurity.Protect(f.Direct),
                             RemoteName = c.Name,
@@ -776,6 +783,7 @@ public sealed partial class PcDownloads : IDisposable
             if (action == "pause" || action == "cancel")
             {
                 j.Status = action == "pause" ? "Paused" : "Cancelled";
+                j.Interrupted = false;
                 j.Speed = 0;
                 j.EtaSeconds = -1;
                 running.GetValueOrDefault(id)?.Cancel();
@@ -788,6 +796,7 @@ public sealed partial class PcDownloads : IDisposable
                 j.Status = "Queued";
                 j.Message = "";
                 j.NextAttempt = null;
+                j.Interrupted = false;
             }
             else
                 throw new IOException("Unknown download action.");
@@ -955,7 +964,10 @@ public sealed partial class PcDownloads : IDisposable
                         job.Status is "Downloading" or "Preparing"
                         || stop.IsCancellationRequested && job.Status == "Queued"
                     )
+                    {
                         job.Status = "Paused";
+                        job.Interrupted = stop.IsCancellationRequested;
+                    }
                     Save();
                 }
             }
@@ -1060,7 +1072,7 @@ public sealed partial class PcDownloads : IDisposable
                 return;
             }
             catch (Exception e)
-                when (attempt < 2
+                when (attempt < RetryWaits.Length
                     && !ct.IsCancellationRequested
                     && (
                         e is TimeoutException or TransferReadException
@@ -1073,9 +1085,28 @@ public sealed partial class PcDownloads : IDisposable
                     )
                 )
             {
-                await Task.Delay(TimeSpan.FromSeconds(2 * (attempt + 1)), ct);
+                var wait = RetryWaits[attempt];
+                lock (gate)
+                {
+                    job.Speed = 0;
+                    job.EtaSeconds = -1;
+                    job.Message =
+                        store.State.Language == "ar"
+                            ? $"انقطع الاتصال · إعادة المحاولة بعد {wait.TotalSeconds:0} ث"
+                            : $"Connection lost · retrying in {wait.TotalSeconds:0} s";
+                }
+                Changed?.Invoke();
+                await Pause(wait, ct);
             }
     }
+
+    // Growing waits ride out a Wi-Fi drop: 5, 15, 30, 60, 120, then 120 s again.
+    internal static readonly TimeSpan[] RetryWaits = new[] { 5, 15, 30, 60, 120, 120 }
+        .Select(s => TimeSpan.FromSeconds(s))
+        .ToArray();
+
+    // Replaceable in checks, so a retry does not really sleep.
+    internal Func<TimeSpan, CancellationToken, Task> Pause { get; set; } = (t, ct) => Task.Delay(t, ct);
 
     sealed class TransferReadException(string message, Exception? inner = null) : IOException(message, inner);
 
@@ -1101,9 +1132,11 @@ public sealed partial class PcDownloads : IDisposable
         var drive = new DriveInfo(Path.GetPathRoot(job.Destination)!);
         if (job.Size > 0 && drive.AvailableFreeSpace < Math.Max(0, job.Size - start) + 64 * 1024 * 1024)
             throw new IOException("Not enough free space.");
-        if (start > 0 && job.ETag.Length == 0)
+        // Last-Modified stands in for a missing ETag; with neither there is nothing to prove the file is unchanged.
+        var validator = job.ETag.Length > 0 ? job.ETag : job.LastModified;
+        if (start > 0 && validator.Length == 0)
             start = 0;
-        using var response = await Request(link, start, job.ETag, headers, server?.BaseUrl, ct);
+        using var response = await Request(link, start, validator, headers, server?.BaseUrl, ct);
         response.EnsureSuccessStatusCode();
         var range = response.Content.Headers.ContentRange;
         if (response.StatusCode == HttpStatusCode.PartialContent)
@@ -1117,6 +1150,8 @@ public sealed partial class PcDownloads : IDisposable
             )
                 throw new IOException("Invalid download range.");
             if (job.ETag.Length > 0 && response.Headers.ETag?.ToString() != job.ETag)
+                throw new IOException("Download identity changed.");
+            if (job.ETag.Length == 0 && job.LastModified.Length > 0 && Modified(response) != job.LastModified)
                 throw new IOException("Download identity changed.");
         }
         else if (response.StatusCode == HttpStatusCode.OK)
@@ -1143,6 +1178,7 @@ public sealed partial class PcDownloads : IDisposable
             ) == etag
                 ? etag
                 : "";
+        job.LastModified = Modified(response);
         job.Bytes = start;
         await using (
             var output = new FileStream(
@@ -1222,6 +1258,12 @@ public sealed partial class PcDownloads : IDisposable
         File.Move(part, job.Destination, false);
         store.RegisterDownload(job.Target, job.Destination);
     }
+
+    static string Modified(HttpResponseMessage response) =>
+        response.Content.Headers.LastModified?.UtcDateTime.ToString(
+            "R",
+            System.Globalization.CultureInfo.InvariantCulture
+        ) ?? "";
 
     async Task<HttpResponseMessage> Request(
         string link,

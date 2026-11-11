@@ -154,6 +154,9 @@ final class PhoneHistory {
     // ---- Export: the PC's formats, from what the phone knows ----
     static String field(String s){return s.indexOf(',')>=0||s.indexOf('"')>=0||s.indexOf('\r')>=0||s.indexOf('\n')>=0?"\""+s.replace("\"","\"\"")+"\"":s;}
     static String iso(long ms){return Instant.ofEpochMilli(ms).toString();}
+    /* F10: Letterboxd takes half stars (7/10 is 3.5, not 4) and the date the viewer saw it on, in their own time zone. */
+    static String letterboxdRating(int rating10){return rating10<=0?"":String.format(java.util.Locale.ROOT,"%.1f",Math.min(10,rating10)/2.0);}
+    static String letterboxdDate(long ms,java.time.ZoneId zone){return Instant.ofEpochMilli(ms).atZone(zone).toLocalDate().toString();}
     static final class View {JSONObject item,viewing;int rating;}
     static List<View> views(List<JSONObject> items){
         List<View> list=new ArrayList<>();
@@ -170,7 +173,7 @@ final class PhoneHistory {
             out.append(format.equals("noir-csv")?"type,title,year,imdb_id,season,episode,episode_title,watched_at,date_unknown,source,rating,approximate\r\n":"Title,Year,imdbID,WatchedDate,Rating,Rewatch\r\n");Set<String> seen=new HashSet<>();
             for(View x:views){JSONObject i=x.item,v=x.viewing;boolean unknown=v.optBoolean("dateUnknown"),movie=i.optBoolean("movie");long at=DataStore.date(v.optString("watchedAt"));String[] f=format.equals("noir-csv")
                 ?new String[]{movie?"movie":"episode",i.optString("title"),String.valueOf(i.optInt("year")),i.optString("imdb"),String.valueOf(movie?0:i.optInt("season")),String.valueOf(movie?0:i.optInt("episode")),i.optString("episodeTitle"),unknown?"":iso(at),unknown?"true":"false",v.optString("source"),String.valueOf(x.rating),v.optBoolean("approximate")?"true":"false"}
-                :new String[]{i.optString("title"),i.optInt("year")==0?"":String.valueOf(i.optInt("year")),i.optString("imdb"),unknown?"":iso(at).substring(0,10),x.rating==0?"":String.valueOf(x.rating),seen.add(i.optString("id"))?"false":"true"};
+                :new String[]{i.optString("title"),i.optInt("year")==0?"":String.valueOf(i.optInt("year")),i.optString("imdb"),unknown?"":letterboxdDate(at,java.time.ZoneId.systemDefault()),letterboxdRating(DataStore.rating10(i)),seen.add(i.optString("id"))?"false":"true"};
                 for(int n=0;n<f.length;n++){if(n>0)out.append(',');out.append(field(f[n]));}out.append("\r\n");}
         }else if(format.equals("noir-json")){
             JSONArray a=new JSONArray();for(View x:views){JSONObject i=x.item,v=x.viewing,o=new JSONObject();boolean movie=i.optBoolean("movie");JSONObject review=i.optJSONObject("review");

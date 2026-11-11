@@ -279,6 +279,20 @@ static class TorrentChecks
         }
         await Stall(Path.Combine(dir, "switch"), true, hash, torrentPath, fixture, check);
         await Stall(Path.Combine(dir, "fail"), false, hash, torrentPath, fixture, check);
+        await StoredTrackers(Path.Combine(dir, "trackers"), hash, torrentPath, port, fixture, check);
+        var progress = new Dictionary<string, long>();
+        var idle = new Dictionary<string, DateTime>();
+        var t0 = DateTime.UtcNow;
+        var stall = TimeSpan.FromMinutes(10);
+        var steady = TorrentStall.Advanced(progress, idle, "j", 100, t0, stall);
+        var seedsButNothing = TorrentStall.Advanced(progress, idle, "j", 100, t0 + TimeSpan.FromMinutes(9), stall);
+        var stalled = !TorrentStall.Advanced(progress, idle, "j", 100, t0 + TimeSpan.FromMinutes(10), stall);
+        var moving = TorrentStall.Advanced(progress, idle, "j", 101, t0 + TimeSpan.FromMinutes(11), stall);
+        var movedOn = TorrentStall.Advanced(progress, idle, "j", 101, t0 + TimeSpan.FromMinutes(20), stall);
+        check(
+            steady && seedsButNothing && stalled && moving && movedOn,
+            "A torrent stalls after DownloadStall without new bytes, whatever the seed count, and progress resets it"
+        );
         await seed.StopAsync(TimeSpan.Zero);
         check(watch.Elapsed < TimeSpan.FromSeconds(60), "Offline torrent checks finish in under 60 seconds");
     }
@@ -346,6 +360,82 @@ static class TorrentChecks
                     !Directory.Exists(Path.Combine(media, ".noir-incoming", hash)),
                     "Abandoned torrent partial directory is removed"
                 );
+        }
+        finally
+        {
+            downloads.Dispose();
+            await downloads.TorrentStopped;
+        }
+    }
+
+    // F1: a job restored from disk reaches its stored tracker; the .torrent itself names none.
+    static async Task StoredTrackers(
+        string dir,
+        string hash,
+        string torrentPath,
+        int seedPort,
+        Fixture fixture,
+        Action<bool, string> check
+    )
+    {
+        var (store, media, item) = Library(dir);
+        var destination = DownloadNaming.Destination(media, item, "Show.S01E01.mkv");
+        var meta = Path.Combine(store.DataDirectory, "torrent-meta");
+        Directory.CreateDirectory(meta);
+        File.Copy(torrentPath, Path.Combine(meta, hash + ".torrent"));
+        using var tracker = new LoopbackTracker(seedPort);
+        var job = new PcDownloadJob
+        {
+            Service = "Torrents",
+            Name = item.Label,
+            Target = item,
+            Root = media,
+            Destination = destination,
+            Hash = hash,
+            FileId = 0,
+            RemoteName = "Show.S01E01.mkv",
+            Size = 3 * 1024 * 1024,
+            Trackers = [tracker.Url, "udp://tracker.example.invalid:6969/announce"],
+        };
+        await File.WriteAllTextAsync(
+            Path.Combine(store.DataDirectory, "pc-downloads.json"),
+            JsonSerializer.Serialize(new[] { job })
+        );
+        var downloads = new PcDownloads(
+            store,
+            fixture,
+            torrentOptions: new()
+            {
+                Network = false,
+                MetadataStall = TimeSpan.FromSeconds(15),
+                DownloadStall = TimeSpan.FromSeconds(20),
+                PollInterval = TimeSpan.FromMilliseconds(50),
+            }
+        );
+        try
+        {
+            await Until(
+                () => downloads.ManagerTrackers(hash).Count > 0,
+                10,
+                "stored tracker reaches the manager",
+                downloads
+            );
+            var added = downloads.ManagerTrackers(hash);
+            check(
+                added.Contains(new Uri(tracker.Url).AbsoluteUri),
+                "A job restored from disk adds its stored tracker to the torrent manager"
+            );
+            check(
+                added.All(t => new Uri(t).IsLoopback),
+                "Offline torrent runs add loopback trackers only, never public ones"
+            );
+            await Until(
+                () => downloads.Jobs().Single().Bytes > 0 || downloads.Jobs().Single().Status == "Completed",
+                20,
+                "stored tracker supplies the seed",
+                downloads
+            );
+            check(true, "The stored tracker announced and supplied the seed for the restored job");
         }
         finally
         {

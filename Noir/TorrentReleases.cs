@@ -7,7 +7,13 @@ using MonoTorrent;
 
 namespace Noir;
 
-public sealed record TorrentAlternative(string Hash, int FileIndex, string Name, long Size);
+public sealed record TorrentAlternative(
+    string Hash,
+    int FileIndex,
+    string Name,
+    long Size,
+    List<string>? Trackers = null
+);
 
 public sealed class TorrentReleases : IDownloadProvider
 {
@@ -84,12 +90,36 @@ public sealed class TorrentReleases : IDownloadProvider
                 .Select(v => v.GetString() ?? "")
                 .Where(v => v.StartsWith("tracker:"))
                 .Select(v => v[8..])
-                .Where(v => Uri.TryCreate(v, UriKind.Absolute, out var u) && u.Scheme is "udp" or "https" or "http")
+                .Where(ValidTracker)
                 .Distinct()
                 .Take(30)
                 .ToList();
             trackers.AddOrUpdate(hash, list, (_, old) => old.Concat(list).Distinct().Take(30).ToList());
         }
+    }
+
+    // Used when neither the source nor the torrent named any tracker.
+    internal static readonly string[] DefaultTrackers =
+    [
+        "udp://tracker.opentrackr.org:1337/announce",
+        "udp://open.stealth.si:80/announce",
+        "udp://tracker.torrent.eu.org:451/announce",
+        "udp://exodus.desync.com:6969/announce",
+        "udp://open.demonii.com:1337/announce",
+    ];
+
+    internal static bool ValidTracker(string v) =>
+        Uri.TryCreate(v, UriKind.Absolute, out var u) && u.Scheme is "udp" or "https" or "http";
+
+    internal static List<string> TrackersFor(string hash) =>
+        trackers.TryGetValue(hash, out var list) ? list.ToList() : [];
+
+    // Trackers stored on a job re-enter the table, so a restart (empty table) still reaches them.
+    internal static void AddTrackers(string hash, IEnumerable<string>? stored)
+    {
+        var list = (stored ?? []).Where(ValidTracker).Distinct().Take(30).ToList();
+        if (list.Count > 0)
+            trackers.AddOrUpdate(hash, list, (_, old) => old.Concat(list).Distinct().Take(30).ToList());
     }
 
     internal static MagnetLink Magnet(string hash, bool network = true) =>

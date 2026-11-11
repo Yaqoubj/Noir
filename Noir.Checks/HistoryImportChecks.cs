@@ -724,6 +724,22 @@ static class HistoryImportChecks
                         && csv.Skip(1).Any(r => r[rewatchIndex] == "true"),
                     "History Letterboxd export includes only movies with unknown dates and rewatch flags"
                 );
+                var eastOfUtc = TimeZoneInfo.CreateCustomTimeZone("plus9", TimeSpan.FromHours(9), "plus9", "plus9");
+                var lateUtc = new DateTimeOffset(2026, 3, 4, 20, 30, 0, TimeSpan.Zero);
+                check(
+                    HistoryExport.LetterboxdDate(lateUtc, eastOfUtc) == "2026-03-05"
+                        && HistoryExport.LetterboxdDate(lateUtc, TimeZoneInfo.Utc) == "2026-03-04"
+                        && HistoryExport.LetterboxdRating(7) == "3.5"
+                        && HistoryExport.LetterboxdRating(10) == "5.0"
+                        && HistoryExport.LetterboxdRating(1) == "0.5"
+                        && HistoryExport.LetterboxdRating(0) == "",
+                    "History Letterboxd export writes half stars and the local watched date"
+                );
+                var written10 = csv.Skip(1).Where(r => r[csv[0].IndexOf("Rating")].Length > 0).ToList();
+                check(
+                    written10.All(r => r[csv[0].IndexOf("Rating")].Contains('.')),
+                    "History Letterboxd export rating cells use one decimal"
+                );
             }
         }
     }

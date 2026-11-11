@@ -80,13 +80,30 @@ final class PhoneHarbor {
   JSONObject stremio=a.data.stateObject("stremio");boolean stremioOn=!stremio.optString("key").isEmpty();
   card("Stremio","S",Color.rgb(123,91,245),stremioOn,stremioOn?Loc.t("Connected"):Loc.t("Not connected"),"Bring in Stremio's library and watched episodes.",new String[]{stremioOn?"Manage":"Connect Stremio"},new Runnable[]{this::tools});
   card("Plex · Jellyfin · Emby","▤",Color.rgb(229,160,13),false,"Connect on this phone","Import watched history directly from Plex or HTTPS Jellyfin / Emby. Kodi and PC-configured servers are also available when paired.",new String[]{"Open"},new Runnable[]{this::tools});
-  card("Trakt · Serializd","T",Color.rgb(237,34,36),a.data.paired(),"Managed on your PC","Watches you finish on this phone reach your PC, which marks them on Trakt and Serializd. Manage them in the PC's Settings → Connections.",new String[0],new Runnable[0]);
+  watchSync("Trakt","T",Color.rgb(237,34,36));watchSync("Serializd","Sd",Color.rgb(44,120,220));
+  a.paragraph(WatchSync.GOOGLE);a.paragraph("Nuvio syncs through your PC.");
   JSONObject phone=phoneSettings();boolean downloads=!phone.optString("manifest").isEmpty()||!phone.optString("torBoxKey").isEmpty()||!phone.optString("realDebridKey").isEmpty();
   List<String> names=new ArrayList<>();if(!phone.optString("torBoxKey").isEmpty())names.add("TorBox");if(!phone.optString("realDebridKey").isEmpty())names.add("Real-Debrid");if(!phone.optString("manifest").isEmpty())names.add("AIOStreams");
   if(!PhoneExperience.trackerOnly(a.data))card("Streaming & phone downloads","↓",Color.rgb(5,165,122),downloads,downloads?String.join(" · ",names):Loc.t("Not connected"),"Download straight to this phone with your own TorBox, Real-Debrid or AIOStreams.",new String[]{downloads?"Manage":"Set up"},new Runnable[]{()->a.startActivity(new Intent(a,PhoneDownloadSettingsActivity.class))});
   card("Netflix · Letterboxd · IMDb · TV Time","⇅",Color.rgb(58,56,51),false,"Import files","Import an export file, or paste a list of titles. You review everything before it's added.",new String[]{"Open"},new Runnable[]{this::tools});
  }
  void tools(){a.startActivity(new Intent(a,HistoryToolsActivity.class));}
+ /* P3: this phone marks what it plays on Trakt / Serializd itself, with its own sign-in. */
+ void watchSync(String p,String mark,int color){DataStore d=a.data;long now=WatchSync.clock.now();boolean on=WatchSync.enabled(d,p);JSONObject pr=WatchSync.provider(d,p);
+  String state=!on?Loc.t("Off"):Loc.f("%d synced · %d waiting",WatchSync.count(d,p,true),WatchSync.count(d,p,false))+(pr.optLong("lastSuccess")>0?" · "+Loc.f("last success %s",NoirUi.ago(pr.optLong("lastSuccess"))):"");
+  int left=WatchSync.count(d,p,false);if(on&&left>WatchSync.PER_HOUR)state+=" · "+(left<=WatchSync.PER_DAY?Loc.f("about %d h at 30 an hour",(left+WatchSync.PER_HOUR-1)/WatchSync.PER_HOUR):Loc.f("about %d days at 200 a day",(left+WatchSync.PER_DAY-1)/WatchSync.PER_DAY));
+  StringBuilder what=new StringBuilder(Loc.f("Marks what you finish on this phone as watched on %s, using your sign-in here.",p));
+  if(on&&WatchSync.refused(d,p))what.append("\n").append(Loc.t("Serializd does not allow this from the phone · it syncs through your PC"));
+  else if(on&&WatchSync.failingForADay(d,p,now))what.append("\n").append(Loc.f("%s hasn't accepted marks for a day. Sign in again or tap Retry.",p));
+  else if(on&&pr.optLong("retryAt")>now&&!pr.optString("message").isEmpty())what.append("\n").append(Loc.t(pr.optString("message"))).append(" · ").append(Loc.f("next try %s",java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(new java.util.Date(pr.optLong("retryAt")))));
+  boolean stuck=false;for(JSONObject j:WatchSync.jobs(d))if(j.optString("provider").equals(p)&&!j.has("syncedAt")&&(j.optBoolean("held")||j.optLong("retryAt")>now))stuck=true;
+  boolean retry=on&&(stuck||WatchSync.waiting(d,p,now));
+  List<String> labels=new ArrayList<>(Arrays.asList("Sign in",on?"Turn off":"Turn on"));List<Runnable> actions=new ArrayList<>(Arrays.asList(()->a.startActivity(WatchSignInActivity.intent(a,p)),()->{WatchSync.enable(d,p,!WatchSync.enabled(d,p));WatchSyncSender.wake();a.render();}));
+  if(retry){labels.add("Retry");actions.add(()->{WatchSync.retry(d,p);WatchSyncSender.wake();a.render();});}
+  card(p,mark,color,on,state,what.toString(),labels.toArray(new String[0]),actions.toArray(new Runnable[0]));}
+ static {String[][] words={{"%d synced · %d waiting","%d تمت مزامنتها · %d بالانتظار"},{"last success %s","آخر نجاح %s"},{"Marks what you finish on this phone as watched on %s, using your sign-in here.","يضع علامة المشاهدة على %s لما تنهيه على هذا الهاتف، بتسجيل دخولك هنا."},
+  {"Serializd does not allow this from the phone · it syncs through your PC","لا يسمح Serializd بذلك من الهاتف · تتم المزامنة عبر الكمبيوتر"},{"%s hasn't accepted marks for a day. Sign in again or tap Retry.","لم يقبل %s العلامات منذ يوم. سجّل الدخول مجددًا أو اضغط إعادة المحاولة."},
+  {"next try %s","المحاولة التالية %s"},{"about %d h at 30 an hour","نحو %d ساعة بمعدل 30 في الساعة"},{"about %d days at 200 a day","نحو %d يوم بمعدل 200 في اليوم"},{"Nuvio syncs through your PC.","تتم مزامنة Nuvio عبر الكمبيوتر."},{"Turn on","تشغيل"},{"Turn off","إيقاف"},{"Retry","إعادة المحاولة"}};for(String[] w:words)Loc.AR.put(w[0],w[1]);}
  void card(String name,String mark,int color,boolean on,String state,String what,String[] labels,Runnable[] actions){
   LinearLayout card=a.column();card.setPadding(a.dp(16),a.dp(14),a.dp(16),a.dp(12));GradientDrawable b=MainActivity.bg(Color.rgb(21,21,23),a.dp(16));b.setStroke(a.dp(1),on?Color.argb(70,228,192,132):Color.argb(26,255,255,255));card.setBackground(b);
   LinearLayout head=new LinearLayout(a);head.setGravity(Gravity.CENTER_VERTICAL);TextView m=a.text(mark,mark.length()>2?12:15,Color.WHITE);m.setTypeface(null,Typeface.BOLD);m.setGravity(Gravity.CENTER);m.setBackground(MainActivity.bg(color,a.dp(10)));head.addView(m,new LinearLayout.LayoutParams(a.dp(40),a.dp(40)));

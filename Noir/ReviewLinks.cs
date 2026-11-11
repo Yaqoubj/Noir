@@ -65,6 +65,19 @@ public static class ReviewLinks
         return "https://www.reddit.com/search/?q=" + Uri.EscapeDataString(query) + "&type=posts";
     }
 
+    public const string SerializdSignIn = "https://www.serializd.com/login";
+
+    // F15: where "Sign in" for a site opens. Serializd has pages for episodes only, so a movie's Reviews window
+    // has no Serializd tab: pick an episode, or open Serializd's own sign-in page when the library has none.
+    public static (VideoItem? Item, string? Url) AccountSignIn(IReadOnlyList<VideoItem> archive, string provider)
+    {
+        IEnumerable<VideoItem> fit = provider == "Serializd" ? archive.Where(i => !i.IsMovie && i.Season > 0) : archive;
+        var item = fit.FirstOrDefault(i => i.ImdbId.StartsWith("tt")) ?? fit.FirstOrDefault();
+        if (item != null)
+            return (item, null);
+        return (null, provider == "Serializd" ? SerializdSignIn : null);
+    }
+
     public static Dictionary<string, string> Sources(VideoItem item, PlayerState? state = null)
     {
         var sources = new Dictionary<string, string>

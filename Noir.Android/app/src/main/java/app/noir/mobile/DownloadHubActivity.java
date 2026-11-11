@@ -178,6 +178,6 @@ public final class DownloadHubActivity extends Activity {
    a.runOnUiThread(()->{if(a.isFinishing()||data!=NoirApp.data)return;preview.removeAllViews();preview.addView(text(a,Loc.f("Quality: %s",quality),13,SOFT));preview.addView(text(a,Loc.f("Phone budget: %s",size(p.budget())),13,SOFT));preview.addView(text(a,impact,13,SOFT));if(pending)preview.addView(text(a,Loc.t("Size will be checked before downloading"),12,MainActivity.MUTED));for(int n=0;n<Math.min(8,plan.size());n++){TextView line=text(a,MainActivity.episode(plan.get(n))+" · "+plan.get(n).optString("episodeTitle"),13,MainActivity.MUTED);line.setTextDirection(View.TEXT_DIRECTION_LTR);preview.addView(line);}});});};
   refresh[0].run();
   sheet.footer("Save",()->{int selected=choice[0];p.keep(group,enabled.isChecked()?(selected==3?-1:selected+1):0);p.setting("cleanup",cleanup.isChecked());boolean turnedOn=enabled.isChecked()&&!p.enabled();if(turnedOn)p.setting("enabled",true);PhoneReadyJob.refill(a);if(turnedOn)Toast.makeText(a,Loc.t("Keep ready is on"),Toast.LENGTH_SHORT).show();},"Not now",null);sheet.show();}
- @Override protected void onResume(){super.onResume();ui.post(tick);ui.post(fast);PhoneReadyJob.schedule(this);PhonePickupJob.schedule(this);}
+ @Override protected void onResume(){super.onResume();DownloadService.resumeQueued(this);ui.post(tick);ui.post(fast);PhoneReadyJob.schedule(this);PhonePickupJob.schedule(this);}
  @Override protected void onPause(){ui.removeCallbacks(tick);ui.removeCallbacks(fast);super.onPause();}
 }

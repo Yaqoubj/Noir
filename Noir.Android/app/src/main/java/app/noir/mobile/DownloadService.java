@@ -7,6 +7,8 @@ import org.json.JSONObject;
 import java.util.concurrent.*;
 
 public final class DownloadService extends Service {
+    /* F3: downloads cut off when the app or service was killed come back queued; start the service once when the app opens so they continue by themselves. Only after such a start: other queued jobs are started by whoever queued them. */
+    static void resumeQueued(Context context){DownloadStore store=NoirApp.downloads;if(store==null||!store.resumedOnStart)return;try{if(store.next()!=null)context.startForegroundService(new Intent(context,DownloadService.class));store.resumedOnStart=false;}catch(IllegalStateException|SecurityException refused){android.util.Log.w("Noir","Download service not started: "+refused.getMessage());}}
  final ExecutorService worker=Executors.newSingleThreadExecutor();final ScheduledExecutorService timer=Executors.newSingleThreadScheduledExecutor();volatile boolean running,stopped;volatile String serviceActive="";int lastStart;PowerManager.WakeLock wake;DownloadStore store;final Handler main=new Handler(Looper.getMainLooper());ConnectivityManager networks;
  final ConnectivityManager.NetworkCallback network=new ConnectivityManager.NetworkCallback(){@Override public void onLost(Network n){pauseNetwork();}@Override public void onCapabilitiesChanged(Network n,NetworkCapabilities c){if(!c.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED))pauseNetwork();}};
  void pauseNetwork(){DownloadStore s=store;if(s!=null)for(JSONObject j:DataStore.objects(s.jobs()))if(s.torrents.isTorrent(j))s.torrents.requestPause(j.optString("id"));}
@@ -16,7 +18,7 @@ public final class DownloadService extends Service {
  boolean scheduled;
  void tick(){if(stopped)return;if(store!=NoirApp.downloads){main.post(this::stopSelf);return;}store.torrents.tick();synchronized(this){if(!running&&store.activeId.isEmpty()){String next=store.next();if(next!=null){running=true;serviceActive=next;worker.execute(()->{try{store.transfer(next,j->{if(!stopped)getSystemService(NotificationManager.class).notify(704,notice(j));});}finally{serviceActive="";running=false;}});}}}JSONObject job=store.job(serviceActive);if(job==null)for(JSONObject candidate:DataStore.objects(store.jobs()))if(store.torrents.contains(candidate.optString("id"))){job=candidate;break;}if(!stopped)getSystemService(NotificationManager.class).notify(704,notice(job));if(!running&&store.next()==null&&!store.torrents.busy())main.post(()->{synchronized(DownloadService.this){if(!stopped&&!running&&store.next()==null&&!store.torrents.busy()){releaseWake();stopForeground(STOP_FOREGROUND_REMOVE);stopSelfResult(lastStart);}}});}
  void releaseWake(){if(wake!=null&&wake.isHeld())wake.release();}
- @Override public void onTimeout(int id,int type){stopped=true;if(!serviceActive.isEmpty())store.pause(serviceActive);store.torrents.stopAll();stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();}
- @Override public void onDestroy(){stopped=true;if(networks!=null)networks.unregisterNetworkCallback(network);if(!serviceActive.isEmpty())store.pause(serviceActive);store.torrents.stopAll();releaseWake();timer.shutdownNow();worker.shutdownNow();super.onDestroy();}
+ @Override public void onTimeout(int id,int type){stopped=true;if(!serviceActive.isEmpty())store.pauseInterrupted(serviceActive);store.torrents.stopAll(true);stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();}
+ @Override public void onDestroy(){stopped=true;if(networks!=null)networks.unregisterNetworkCallback(network);if(!serviceActive.isEmpty())store.pauseInterrupted(serviceActive);store.torrents.stopAll(true);releaseWake();timer.shutdownNow();worker.shutdownNow();super.onDestroy();}
  @Override public IBinder onBind(Intent i){return null;}
 }

@@ -52,6 +52,12 @@ final class SubtitleSources {
     SubtitleSources(SubtitleTransport transport){this.transport=transport;}
     static String keyPage(String source){switch(source){case "opensubtitles":return "https://www.opensubtitles.com/consumers";case "subdl":return "https://subdl.com/panel/api";case "subsource":return "https://subsource.net/api-docs";case "wyzie":return "https://docs.wyzie.io/subs/usage/api-keys";default:return "";}}
 
+    /** SubSource's field name is not confirmed, so several shapes are tried: uploader, uploaderName, uploadedBy, contributors[0].displayname/.name. */
+    static String subSourceUploader(Object row){
+        for(String key:new String[]{"uploader","uploaderName","uploadedBy"}){Object v=get(row,key);if(v instanceof JSONObject){String n=text(v,"displayname");if(n.isEmpty())n=text(v,"name");if(n.isEmpty())n=text(v,"username");if(!n.isEmpty())return n;}else{String n=text(row,key);if(!n.isEmpty())return n;}}
+        JSONArray contributors=array(get(row,"contributors"));if(contributors!=null&&contributors.length()>0){Object first=contributors.opt(0);String n=text(first,"displayname");if(n.isEmpty())n=text(first,"name");if(!n.isEmpty())return n;}
+        return "";
+    }
     static Object get(Object e,String key){Object v=e instanceof JSONObject?((JSONObject)e).opt(key):null;return v==JSONObject.NULL?null:v;}
     static String text(Object e,String key){Object v=get(e,key);if(v instanceof String)return (String)v;if(v instanceof Double||v instanceof Float){double d=((Number)v).doubleValue();return d==Math.rint(d)&&Math.abs(d)<1e15?Long.toString((long)d):v.toString();}return v instanceof Number?v.toString():"";}
     static JSONArray array(Object e){return e instanceof JSONArray?(JSONArray)e:null;}
@@ -104,11 +110,12 @@ final class SubtitleSources {
     final class Found {
         final List<JSONObject> list=new ArrayList<>();final Selection s;final boolean movie;final int season,episode;final String release,lang;
         Found(Selection s,boolean movie,int season,int episode,String release,String lang){this.s=s;this.movie=movie;this.season=season;this.episode=episode;this.release=release;this.lang=lang;}
-        void add(String id,String language,String name,String rel,String url,boolean exact){
+        void add(String id,String language,String name,String rel,String url,boolean exact){add(id,language,name,rel,url,exact,"");}
+        void add(String id,String language,String name,String rel,String url,boolean exact,String uploader){
             if(list.size()>=500||!lang.equals(language))return;
             if(!url.isEmpty()&&(!SubtitleTransport.validUrl(url)||containsSecret(url,s)))return;
             if(!movie&&SubtitleArchive.hasEpisodeName(name+" "+rel)&&!SubtitleArchive.episodeMatches(name+" "+rel,season,episode))return;
-            JSONObject c=new JSONObject();DataStore.put(c,"id",id);DataStore.put(c,"language",language);DataStore.put(c,"subtitleFileName",name);DataStore.put(c,"movieReleaseName",rel);DataStore.put(c,"url",url);DataStore.put(c,"m",exact?"h":"");DataStore.put(c,"score",(exact?1000:0)+SubtitleClient.releaseScore(name+" "+rel,release));DataStore.put(c,"provider",s.source);DataStore.put(c,"ref",id);list.add(c);
+            JSONObject c=new JSONObject();DataStore.put(c,"id",id);DataStore.put(c,"language",language);DataStore.put(c,"subtitleFileName",name);DataStore.put(c,"movieReleaseName",rel);DataStore.put(c,"url",url);DataStore.put(c,"m",exact?"h":"");DataStore.put(c,"score",(exact?1000:0)+SubtitleClient.releaseScore(name+" "+rel,release));DataStore.put(c,"provider",s.source);DataStore.put(c,"ref",id);if(uploader!=null&&!uploader.trim().isEmpty())DataStore.put(c,"uploader",uploader.trim());list.add(c);
         }
         List<JSONObject> result(){
             List<JSONObject> sorted=new ArrayList<>(list);sorted.sort(Comparator.comparingInt((JSONObject c)->c.optInt("score")).reversed());
@@ -127,7 +134,7 @@ final class SubtitleSources {
                 Map<String,String> p=params("languages",lang,movie?"imdb_id":"parent_imdb_id",digits);if(!movie){p.put("season_number",Integer.toString(season));p.put("episode_number",Integer.toString(episode));}if(!hash.isEmpty())p.put("moviehash",hash);
                 Object doc=open(s,"subtitles?"+query(p),null,deadline);JSONArray data=array(get(doc,"data"));if(data==null)throw unavailable(s);
                 for(int i=0;i<Math.min(500,data.length());i++){Object row=data.opt(i),a=get(row,"attributes"),details=get(a,"feature_details");if(!movie&&(mismatch(details,"season_number",season)||mismatch(details,"episode_number",episode)))continue;
-                    JSONArray files=array(get(a,"files"));if(files!=null)for(int k=0;k<Math.min(100,files.length());k++){Object file=files.opt(k);String id=text(file,"file_id");long n;try{n=Long.parseLong(id);}catch(NumberFormatException x){continue;}if(n<=0)continue;found.add(id,text(a,"language"),text(file,"file_name"),text(a,"release"),"",Boolean.TRUE.equals(get(a,"moviehash_match")));}}
+                    JSONArray files=array(get(a,"files"));if(files!=null)for(int k=0;k<Math.min(100,files.length());k++){Object file=files.opt(k);String id=text(file,"file_id");long n;try{n=Long.parseLong(id);}catch(NumberFormatException x){continue;}if(n<=0)continue;found.add(id,text(a,"language"),text(file,"file_name"),text(a,"release"),"",Boolean.TRUE.equals(get(a,"moviehash_match")),text(get(a,"uploader"),"name"));}}
                 break;}
             case "subdl":{
                 Map<String,String> p=params("api_key",s.apiKey,"imdb_id",imdb,"type",movie?"movie":"tv","languages",lang.toUpperCase(Locale.ROOT),"subs_per_page","30","releases","1");if(!movie){p.put("season_number",Integer.toString(season));p.put("episode_number",Integer.toString(episode));}if(!release.isEmpty())p.put("file_name",basename(release));
@@ -137,7 +144,7 @@ final class SubtitleSources {
                 for(int i=0;i<Math.min(500,rows.length());i++){Object row=rows.opt(i);
                     if(!movie){if(mismatch(row,"season",season))continue;if(!Boolean.TRUE.equals(get(row,"full_season"))&&mismatch(row,"episode",episode))continue;try{if(Integer.parseInt(text(row,"episode_from"))>episode)continue;}catch(NumberFormatException x){}try{if(Integer.parseInt(text(row,"episode_end"))<episode)continue;}catch(NumberFormatException x){}}
                     String path=text(row,"url");if(!path.startsWith("/")||path.startsWith("//"))continue;String link="https://dl.subdl.com"+path;URI uri;try{uri=new URI(link);}catch(URISyntaxException x){continue;}if(!"dl.subdl.com".equalsIgnoreCase(uri.getHost()))continue;
-                    String code=text(row,"lang");if(code.isEmpty())code=text(row,"language");code=code.toLowerCase(Locale.ROOT);found.add("",code.equals("en")||code.equals("english")?"en":code.equals("ar")||code.equals("arabic")?"ar":"",text(row,"name"),text(row,"release_name")+" "+joined(get(row,"releases")),uri.toASCIIString(),false);}
+                    String code=text(row,"lang");if(code.isEmpty())code=text(row,"language");code=code.toLowerCase(Locale.ROOT);found.add("",code.equals("en")||code.equals("english")?"en":code.equals("ar")||code.equals("arabic")?"ar":"",text(row,"name"),text(row,"release_name")+" "+joined(get(row,"releases")),uri.toASCIIString(),false,text(row,"author"));}
                 break;}
             case "subsource":{
                 Map<String,String> p=params("searchType","imdb","imdb",imdb);if(!movie)p.put("season",Integer.toString(season));
@@ -145,7 +152,7 @@ final class SubtitleSources {
                 String movieId="";for(int i=0;i<data.length();i++){Object r=data.opt(i);if(text(r,"imdbId").equals(imdb)&&(movie||text(r,"season").equals(Integer.toString(season)))){movieId=text(r,"movieId");break;}}if(movieId.isEmpty())break;
                 p=params("movieId",movieId,"language",lang.equals("en")?"english":"arabic","limit","100");if(!movie){p.put("seasonNumber",Integer.toString(season));p.put("episodeNumber",Integer.toString(episode));}
                 Object doc=json(s,"https://api.subsource.net/api/v1/subtitles?"+query(p),"GET",null,true,"",deadline);data=doc instanceof JSONArray?(JSONArray)doc:array(get(doc,"data"));if(data==null)throw unavailable(s);
-                for(int i=0;i<Math.min(500,data.length());i++){Object row=data.opt(i);String id=text(row,"subtitleId");String returned=text(row,"movieId");if(id.isEmpty()||!returned.isEmpty()&&!returned.equals(movieId))continue;String l=text(row,"language").toLowerCase(Locale.ROOT);found.add(id,l.equals("english")?"en":l.equals("arabic")?"ar":"","subtitle.srt",joined(get(row,"releaseInfo")),"",false);}
+                for(int i=0;i<Math.min(500,data.length());i++){Object row=data.opt(i);String id=text(row,"subtitleId");String returned=text(row,"movieId");if(id.isEmpty()||!returned.isEmpty()&&!returned.equals(movieId))continue;String l=text(row,"language").toLowerCase(Locale.ROOT);found.add(id,l.equals("english")?"en":l.equals("arabic")?"ar":"","subtitle.srt",joined(get(row,"releaseInfo")),"",false,subSourceUploader(row));}
                 break;}
             case "wyzie":{
                 Map<String,String> p=params("id",imdb,"language",lang,"key",s.apiKey,"limit","200");if(!movie){p.put("season",Integer.toString(season));p.put("episode",Integer.toString(episode));}if(!hash.isEmpty())p.put("hash",hash);if(!release.isEmpty())p.put("video",basename(release));

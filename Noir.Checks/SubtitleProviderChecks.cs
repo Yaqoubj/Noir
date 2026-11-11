@@ -1213,6 +1213,14 @@ static class SubtitleProviderChecks
                 downloads.Config.SubtitleSiteKeys["subdl"] == Key,
                 "Per-site subtitle keys survive encrypted settings reopen"
             );
+        using (var downloads = new PcDownloads(store, start: false))
+            downloads.ConfigureSubtitleSource(Selection("subdl") with { Uploader = "Alice" });
+        using (var downloads = new PcDownloads(store, start: false))
+            check(
+                SubtitleSelection.From(downloads.Config).Uploader == "Alice"
+                    && !downloads.Config.SubtitleSiteKeys.ContainsKey("uploader"),
+                "F8 the preferred uploader is saved, survives reopen and is kept apart from the site keys"
+            );
         foreach (var source in new[] { "opensubtitles", "subdl", "subsource", "wyzie", "addon" })
         {
             bool blank = false;
@@ -1292,5 +1300,485 @@ static class SubtitleProviderChecks
             !safe.Contains("FAKE_") && !safe.Contains("https://"),
             "Subtitle redaction removes active/stored keys, password, authorization and query links from log text"
         );
+        await Sharpen(check);
+        await PhoneRefusal(check);
+    }
+
+    // F5-F8: where a subtitle came from, a wrong video, Replace, and the preferred uploader. Fake providers and temp folders only.
+    static string Mark(string marker) => "1\n00:00:01,000 --> 00:00:04,000\nMARK=" + marker;
+
+    sealed record SubdlRow(string Marker, string Author = "");
+
+    static Handler SubdlHandler(params SubdlRow[] rows)
+    {
+        var handler = new Handler();
+        handler.Reply = r =>
+        {
+            if (r.Uri.Host == "api.subdl.com")
+                return Response(
+                    JsonSerializer.Serialize(
+                        new
+                        {
+                            status = true,
+                            subtitles = rows.Select(
+                                    (row, i) =>
+                                        new
+                                        {
+                                            lang = "EN",
+                                            release_name = "Release.WEB",
+                                            name = "Release.zip",
+                                            url = "/subtitle/" + i + ".zip",
+                                            author = row.Author,
+                                        }
+                                )
+                                .ToArray(),
+                        }
+                    )
+                );
+            if (r.Uri.Host == "dl.subdl.com")
+            {
+                var index = int.Parse(Path.GetFileNameWithoutExtension(r.Uri.AbsolutePath));
+                return Binary(Zip(("Release.srt", Encoding.UTF8.GetBytes(Mark(rows[index].Marker)))));
+            }
+            if (r.Uri.Host == "opensubtitles-v3.strem.io")
+                return Response(SearchBody("addon", "en", true));
+            return Response(Subtitle);
+        };
+        return handler;
+    }
+
+    static int SubdlDownloads(Handler handler) => handler.Requests.Count(r => r.Uri.Host == "dl.subdl.com");
+
+    static string OpenSubtitlesRows(params (int Id, string Uploader)[] rows) =>
+        JsonSerializer.Serialize(
+            new
+            {
+                data = rows.Select(r => new
+                    {
+                        id = "s" + r.Id,
+                        attributes = new
+                        {
+                            language = "en",
+                            release = "Release.WEB",
+                            moviehash_match = false,
+                            uploader = r.Uploader.Length == 0 ? null : new { name = r.Uploader },
+                            files = new[] { new { file_id = r.Id, file_name = "Release.srt" } },
+                        },
+                    })
+                    .ToArray(),
+            }
+        );
+
+    // F6 on the phone: the PC's timing reply carries the tool's raw offset and scale on a refusal, and nothing extra
+    // when it accepts, so the phone can tell a subtitle for another video from an uncertain one.
+    static async Task PhoneRefusal(Action<bool, string> check)
+    {
+        var temp = Path.Combine(Path.GetTempPath(), "noir-phone-refusal-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temp);
+        var previousTool = SubtitleDownloads.ToolOverride;
+        SubtitleDownloads.ToolOverride = async (args, ct) =>
+        {
+            var text = await File.ReadAllTextAsync(args[1], ct);
+            if (!text.Contains("MARK=GOOD"))
+                return (0, "{\"accepted\":false,\"offset\":42.5,\"scale\":1.0,\"reason\":\"no-match\"}");
+            await File.WriteAllTextAsync(args[2], text.Replace("MARK=GOOD", "MARK=SYNCED"), ct);
+            return (0, "{\"accepted\":true,\"offset\":-2.5,\"scale\":1.0}");
+        };
+        try
+        {
+            var store = new LibraryStore(Path.Combine(temp, "data")) { };
+            store.State.Roots = [];
+            var video = Path.Combine(temp, "video.mkv");
+            File.WriteAllBytes(video, new byte[256 * 1024]);
+            var item = new VideoItem
+            {
+                Title = "Heat",
+                IsMovie = true,
+                Year = 1995,
+                ImdbId = "tt0113277",
+                Path = video,
+            };
+            store.LogWatched([new(item, DateTimeOffset.UtcNow)], "Playback");
+            var id = store.Archive.Single(i => i.Path == video).Id;
+            var tools = new MobileSubtitleTools(store);
+            var hash = await SubtitleDownloads.VideoHash(video, CancellationToken.None);
+            JsonElement Reply(object o) => JsonSerializer.SerializeToElement(o);
+            var cue = "1\n00:00:01,000 --> 00:00:02,000\n";
+            var refused = Reply(
+                await tools.Sync(
+                    id,
+                    new()
+                    {
+                        Hash = hash,
+                        Text = cue + "MARK=OTHER\n",
+                        Extension = ".srt",
+                    },
+                    default
+                )
+            );
+            var accepted = Reply(
+                await tools.Sync(
+                    id,
+                    new()
+                    {
+                        Hash = hash,
+                        Text = cue + "MARK=GOOD\n",
+                        Extension = ".srt",
+                    },
+                    default
+                )
+            );
+            check(
+                !refused.GetProperty("accepted").GetBoolean()
+                    && refused.GetProperty("offset").GetDouble() == 42.5
+                    && refused.GetProperty("scale").GetDouble() == 1.0
+                    && accepted.GetProperty("accepted").GetBoolean()
+                    && !accepted.TryGetProperty("offset", out _)
+                    && accepted.GetProperty("text").GetString()!.Contains("MARK=SYNCED"),
+                "Phone timing reply carries the raw offset and scale on a refusal only"
+            );
+        }
+        finally
+        {
+            SubtitleDownloads.ToolOverride = previousTool;
+            try
+            {
+                Directory.Delete(temp, true);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    static async Task Sharpen(Action<bool, string> check)
+    {
+        var temp = Path.Combine(Path.GetTempPath(), "noir-sharpen-sub-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temp);
+        var toolCalls = 0;
+        var previousTool = SubtitleDownloads.ToolOverride;
+        SubtitleDownloads.ToolOverride = async (args, ct) =>
+        {
+            toolCalls++;
+            var text = await File.ReadAllTextAsync(args[1], ct);
+            if (text.Contains("MARK=GOOD"))
+            {
+                await File.WriteAllTextAsync(args[2], text.Replace("MARK=GOOD", "MARK=SYNCED"), ct);
+                return (0, "{\"accepted\":true,\"offset\":-2.5,\"scale\":1.0}");
+            }
+            if (text.Contains("MARK=NEAR"))
+                return (0, "{\"accepted\":false,\"offset\":0.4,\"scale\":1.0001,\"reason\":\"unsure\"}");
+            if (text.Contains("MARK=STRETCHED"))
+                return (0, "{\"accepted\":false,\"offset\":0.2,\"scale\":1.02,\"reason\":\"unsure\"}");
+            return (0, "{\"accepted\":false,\"offset\":42.5,\"scale\":1.0,\"reason\":\"no-match\"}");
+        };
+        try
+        {
+            var movie = Item(true);
+            VideoItem Local(string name)
+            {
+                var folder = Path.Combine(temp, name);
+                Directory.CreateDirectory(folder);
+                var video = Path.Combine(folder, "video.mkv");
+                File.WriteAllBytes(video, [0, 1, 2, 3]);
+                return new VideoItem
+                {
+                    Id = name,
+                    ImdbId = movie.ImdbId,
+                    IsMovie = true,
+                    Path = video,
+                };
+            }
+            string Saved(VideoItem v) => File.ReadAllText(Path.ChangeExtension(v.Path, ".en.srt"));
+            SubtitleDownloads Engine(string profile, Handler handler, SubtitleSelection selection) =>
+                new(Path.Combine(temp, profile), new HttpClient(handler), () => selection);
+
+            // F5: the source named in the result line.
+            using (var handler = SubdlHandler(new SubdlRow("GOOD", "Alice")))
+            {
+                var video = Local("f5-chosen");
+                var message = await Engine("p-f5a", handler, Selection("subdl"))
+                    .Fetch(video, "Release", ["en"], true, CancellationToken.None);
+                check(
+                    message.StartsWith("English saved from SubDL by Alice · auto-synced")
+                        && Saved(video).Contains("MARK=SYNCED"),
+                    "F5 result line names the chosen source and its uploader · " + message
+                );
+            }
+            using (var handler = SubdlHandler())
+            {
+                var video = Local("f5-default");
+                var message = await Engine("p-f5b", handler, new())
+                    .Fetch(video, "Release", ["en"], false, CancellationToken.None);
+                check(
+                    message == "English saved from the free default · release matched",
+                    "F5 result line says the free default when no source is chosen · " + message
+                );
+            }
+            using (var handler = SubdlHandler())
+            {
+                var video = Local("f5-fallback");
+                handler.Reply = r =>
+                    r.Uri.Host == "api.subdl.com" ? Response(Empty("subdl"))
+                    : r.Uri.Host == "opensubtitles-v3.strem.io" ? Response(SearchBody("addon", "en", true))
+                    : Response(Subtitle);
+                var message = await Engine("p-f5c", handler, Selection("subdl", only: false))
+                    .Fetch(video, "Release", ["en"], false, CancellationToken.None);
+                check(
+                    message.StartsWith("SubDL had no English · saved from the free default · "),
+                    "F5 result line says the chosen source had nothing and the fallback filled in · " + message
+                );
+            }
+            using (var handler = SubdlHandler())
+            {
+                var video = Local("f5-pack");
+                var message = await Engine("p-f5d", handler, new())
+                    .Fetch(
+                        video,
+                        "Release",
+                        ["en"],
+                        false,
+                        CancellationToken.None,
+                        [new("en", "pack.srt", "https://pack.example/file")]
+                    );
+                check(
+                    message.StartsWith("English saved from the release · ") && handler.Requests.Count == 1,
+                    "F5 result line says the release for a pack subtitle · " + message
+                );
+            }
+
+            // F6: a refused check that is far off tries the next candidate once; two downloads at most.
+            using (var handler = SubdlHandler(new SubdlRow("WRONG"), new SubdlRow("GOOD"), new SubdlRow("GOOD")))
+            {
+                var video = Local("f6-second");
+                var message = await Engine("p-f6a", handler, Selection("subdl"))
+                    .Fetch(video, "Release", ["en"], true, CancellationToken.None);
+                check(
+                    SubdlDownloads(handler) == 2
+                        && Saved(video).Contains("MARK=SYNCED")
+                        && message.Contains("auto-synced")
+                        && !message.Contains("try Replace")
+                        && Directory.GetFiles(Path.GetDirectoryName(video.Path)!).Length == 2
+                        && Directory.GetFiles(Path.Combine(temp, "p-f6a", "subtitle-originals")).Length == 1,
+                    "F6 a far-off refusal keeps the next candidate that is accepted · " + message
+                );
+            }
+            using (var handler = SubdlHandler(new SubdlRow("WRONG"), new SubdlRow("WRONG"), new SubdlRow("GOOD")))
+            {
+                var video = Local("f6-both");
+                var message = await Engine("p-f6b", handler, Selection("subdl"))
+                    .Fetch(video, "Release", ["en"], true, CancellationToken.None);
+                check(
+                    SubdlDownloads(handler) == 2
+                        && Saved(video).Contains("MARK=WRONG")
+                        && message.EndsWith("may not match this video · try Replace")
+                        && Directory.GetFiles(Path.GetDirectoryName(video.Path)!).Length == 2,
+                    "F6 when both are far off the first is kept with a warning, and never a third download · " + message
+                );
+            }
+            foreach (var near in new[] { "NEAR", "STRETCHED" })
+                using (var handler = SubdlHandler(new SubdlRow(near), new SubdlRow("GOOD")))
+                {
+                    var video = Local("f6-" + near);
+                    var message = await Engine("p-f6-" + near, handler, Selection("subdl"))
+                        .Fetch(video, "Release", ["en"], true, CancellationToken.None);
+                    var expectRetry = near == "STRETCHED";
+                    check(
+                        SubdlDownloads(handler) == (expectRetry ? 2 : 1)
+                            && (Saved(video).Contains("MARK=SYNCED") == expectRetry),
+                        "F6 far means offset above 10 s or scale off by more than 0.003: " + near + " · " + message
+                    );
+                }
+            toolCalls = 0;
+            using (var handler = SubdlHandler(new SubdlRow("WRONG"), new SubdlRow("GOOD")))
+            {
+                var target = new VideoItem
+                {
+                    Id = "f6-stream",
+                    ImdbId = movie.ImdbId,
+                    IsMovie = true,
+                    Path = Path.Combine(temp, "f6-stream", "video.mkv"),
+                };
+                await Engine("p-f6c", handler, Selection("subdl"))
+                    .Fetch(movie, "Release", ["en"], true, CancellationToken.None, streamTarget: target);
+                check(
+                    SubdlDownloads(handler) == 1 && toolCalls == 0,
+                    "F6 streams get no timing check and no second download"
+                );
+            }
+
+            // F7: Replace moves the saved subtitle to the backup folder, then fetches again.
+            foreach (var stream in new[] { false, true })
+                using (var handler = SubdlHandler(new SubdlRow("FRESH", "Bob")))
+                {
+                    var video = Local("f7-" + stream);
+                    var target = stream
+                        ? new VideoItem
+                        {
+                            Id = "f7",
+                            ImdbId = movie.ImdbId,
+                            IsMovie = true,
+                            Path = Path.Combine(temp, "f7-stream", "video.mkv"),
+                        }
+                        : video;
+                    Directory.CreateDirectory(Path.GetDirectoryName(target.Path)!);
+                    var sidecar = Path.ChangeExtension(target.Path, ".en.srt");
+                    File.WriteAllText(sidecar, Mark("OLD"));
+                    var engine = Engine("p-f7" + stream, handler, Selection("subdl"));
+                    var same = await engine.Fetch(
+                        video,
+                        "Release",
+                        ["en"],
+                        false,
+                        CancellationToken.None,
+                        streamTarget: stream ? target : null
+                    );
+                    var untouched = handler.Requests.Count == 0 && File.ReadAllText(sidecar).Contains("MARK=OLD");
+                    var message = await engine.Fetch(
+                        video,
+                        "Release",
+                        ["en"],
+                        false,
+                        CancellationToken.None,
+                        streamTarget: stream ? target : null,
+                        replace: true
+                    );
+                    var kept = Directory
+                        .GetFiles(Path.Combine(temp, "p-f7" + stream, "subtitle-originals"), "replaced-*")
+                        .Where(f => File.ReadAllText(f).Contains("MARK=OLD"))
+                        .ToList();
+                    check(
+                        same == "English already saved"
+                            && untouched
+                            && message.StartsWith("English saved from SubDL by Bob")
+                            && File.ReadAllText(sidecar).Contains("MARK=FRESH")
+                            && kept.Count == 1,
+                        "F7 Replace is off by default, and when on moves the saved subtitle to subtitle-originals first ("
+                            + (stream ? "stream" : "local")
+                            + ") · "
+                            + message
+                    );
+                }
+
+            // F8: the uploader is a preference that orders candidates, never a filter.
+            using (var handler = SubdlHandler(new SubdlRow("BOB", "Bob"), new SubdlRow("ALICE", "alice")))
+            {
+                var video = Local("f8");
+                var message = await Engine("p-f8", handler, Selection("subdl") with { Uploader = "ALICE" })
+                    .Fetch(video, "Release", ["en"], false, CancellationToken.None);
+                check(
+                    Saved(video).Contains("MARK=ALICE") && message.Contains("by alice"),
+                    "F8 a matching uploader is tried first, ignoring case · " + message
+                );
+            }
+            using (var handler = SubdlHandler(new SubdlRow("BOB", "Bob"), new SubdlRow("ALICE", "alice")))
+            {
+                var video = Local("f8-none");
+                await Engine("p-f8b", handler, Selection("subdl") with { Uploader = "Nobody" })
+                    .Fetch(video, "Release", ["en"], false, CancellationToken.None);
+                check(Saved(video).Contains("MARK=BOB"), "F8 an unmatched uploader never filters or reorders the rest");
+            }
+            using (var handler = new Handler())
+            {
+                var api = new SubtitleProviders(new HttpClient(handler));
+                handler.Reply = _ => Response(OpenSubtitlesRows((1, "Bob"), (2, "Alice"), (3, "")));
+                var found = await api.Search(
+                    Selection("opensubtitles") with
+                    {
+                        Uploader = "alice",
+                    },
+                    movie,
+                    "",
+                    ["en"],
+                    "",
+                    CancellationToken.None
+                );
+                var plain = await api.Search(Selection("opensubtitles"), movie, "", ["en"], "", CancellationToken.None);
+                check(
+                    found.Count == 3
+                        && found[0].Uploader == "Alice"
+                        && found.Select(c => c.Id).OrderBy(i => i).SequenceEqual(["1", "2", "3"])
+                        && plain[0].Id == "1"
+                        && plain[0].Uploader == "Bob"
+                        && plain[2].Uploader == "",
+                    "F8 OpenSubtitles reads attributes.uploader.name and only reorders"
+                );
+            }
+            foreach (
+                var spelling in new[]
+                {
+                    "\"uploader\":\"Zed\"",
+                    "\"uploaderName\":\"Zed\"",
+                    "\"uploadedBy\":\"Zed\"",
+                    "\"uploader\":{\"name\":\"Zed\"}",
+                    "\"contributors\":[{\"displayname\":\"Zed\"}]",
+                    "\"contributors\":[{\"name\":\"Zed\"}]",
+                }
+            )
+                using (var handler = new Handler())
+                {
+                    var api = new SubtitleProviders(new HttpClient(handler));
+                    handler.Reply = r =>
+                        Response(
+                            r.Uri.AbsolutePath.EndsWith("/movies/search")
+                                ? "{\"data\":[{\"movieId\":8,\"imdbId\":\"tt0111161\"}]}"
+                                : "{\"data\":[{\"subtitleId\":1,\"movieId\":8,\"language\":\"english\"},{\"subtitleId\":2,\"movieId\":8,\"language\":\"english\","
+                                    + spelling
+                                    + "}]}"
+                        );
+                    var found = await api.Search(
+                        Selection("subsource") with
+                        {
+                            Uploader = "ZED",
+                        },
+                        movie,
+                        "",
+                        ["en"],
+                        "",
+                        CancellationToken.None
+                    );
+                    check(
+                        found.Count == 2 && found[0].Id == "2" && found[0].Uploader == "Zed",
+                        "F8 SubSource uploader is read tolerantly: " + spelling
+                    );
+                }
+            using (var handler = new Handler())
+            {
+                var api = new SubtitleProviders(new HttpClient(handler));
+                handler.Reply = _ => Response(SearchBody("wyzie", "en", true));
+                var found = await api.Search(Selection("wyzie"), movie, "", ["en"], "", CancellationToken.None);
+                check(found.Count == 1 && found[0].Uploader == "", "F8 Wyzie gives no uploader");
+            }
+            var stored = new DownloadCredentials
+            {
+                SubtitleSource = "subdl",
+                SubtitleApiKey = Key,
+                SubtitleUploader = "  Alice\u0007  ",
+            };
+            var payload = new PhoneDownloadSettingsPayload
+            {
+                SubtitleUploader = SubtitleSelection.From(stored).Uploader,
+            };
+            var wire = JsonSerializer.Serialize(
+                payload,
+                new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }
+            );
+            check(
+                SubtitleSelection.From(stored).Uploader == "Alice"
+                    && SubtitleSelection.From(stored).Validate().Uploader == "Alice"
+                    && wire.Contains("\"subtitleUploader\":\"Alice\"")
+                    && JsonSerializer.Deserialize<PhoneDownloadSettingsPayload>("{}")!.SubtitleUploader == "",
+                "F8 the uploader setting is read from the stored subtitle settings and sent to the phone as subtitleUploader"
+            );
+        }
+        finally
+        {
+            SubtitleDownloads.ToolOverride = previousTool;
+            try
+            {
+                Directory.Delete(temp, true);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
     }
 }

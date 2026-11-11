@@ -37,6 +37,9 @@ public sealed class DownloadCredentials
     public string SubtitlePassword { get; set; } = "";
     public string SubtitleAddonAuth { get; set; } = "";
     public Dictionary<string, string> SubtitleSiteKeys { get; set; } = [];
+
+    // F8: a preferred uploader name; an ordering preference, not a secret, so it is kept apart from the site keys.
+    public string SubtitleUploader { get; set; } = "";
     public string BrowseQuality { get; set; } = "All";
     public string BrowseLanguage { get; set; } = "All";
     public bool BrowseReadyOnly { get; set; }

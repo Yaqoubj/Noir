@@ -37,6 +37,22 @@ public sealed class MobileOperation
     // and when it was first logged; such marks are never sent on to Trakt, Serializd or Nuvio.
     public string Source { get; set; } = "";
     public long LoggedAt { get; set; }
+
+    // Provider ("Trakt", "Serializd") -> ISO-8601 UTC time the phone's own site sender confirmed this viewing.
+    // Carried by "mark" and "progress" ops and by a "synced" op (ViewingId + this) sent when a phone job finishes later.
+    public Dictionary<string, string>? Synced { get; set; }
+}
+
+/// <summary>A viewing as the phone sees it: the PC's record plus the times the PC's sender confirmed it on each site.</summary>
+public sealed class MobileViewing
+{
+    public string Id { get; set; } = "";
+    public DateTimeOffset WatchedAt { get; set; }
+    public string Source { get; set; } = "";
+    public bool DateUnknown { get; set; }
+    public bool Approximate { get; set; }
+    public DateTimeOffset? LoggedAt { get; set; }
+    public Dictionary<string, string>? Synced { get; set; }
 }
 
 public sealed class MobileItem
@@ -57,6 +73,7 @@ public sealed class MobileItem
     public string Group { get; set; } = "";
     public string Title { get; set; } = "";
     public string EpisodeTitle { get; set; } = "";
+    public string ReviewTitle { get; set; } = "";
     public int Year { get; set; }
     public bool Movie { get; set; }
     public int Season { get; set; }
@@ -72,7 +89,7 @@ public sealed class MobileItem
     public string Backdrop { get; set; } = "";
     public double Duration { get; set; }
     public Bookmark? Progress { get; set; }
-    public List<ViewingRecord> Viewings { get; set; } = [];
+    public List<MobileViewing> Viewings { get; set; } = [];
     public PersonalReview? Review { get; set; }
     public bool Listed { get; set; }
     public IntroSegment? Intro { get; set; }
@@ -101,6 +118,10 @@ public sealed class MobileSnapshot
     public bool AutoSkipIntro { get; set; }
     public bool MarkWatchedAtCredits { get; set; }
     public bool HideSpoilers { get; set; }
+
+    // The PC's watch-sync switches; the phone uses them unless its own switch overrides them.
+    public bool SyncTrakt { get; set; }
+    public bool SyncSerializd { get; set; }
 
     // The PC profile this library belongs to; the phone shows it next to the pairing.
     public string ProfileName { get; set; } = "";
@@ -201,6 +222,8 @@ public sealed partial class LibraryStore
                 AutoSkipIntro = State.AutoSkipIntro,
                 MarkWatchedAtCredits = State.MarkWatchedAtCredits,
                 HideSpoilers = State.HideSpoilers,
+                SyncTrakt = State.SyncTrakt,
+                SyncSerializd = State.SyncSerializd,
                 ProfileName = ProfileTitle?.Invoke() ?? "",
                 Collections = State.Collections.Keys.ToList(),
                 ShowRatings = new(State.ShowRatings),
@@ -278,6 +301,7 @@ public sealed partial class LibraryStore
                             Group = i.GroupKey,
                             Title = i.Title,
                             EpisodeTitle = i.EpisodeTitle,
+                            ReviewTitle = i.ReviewTitle,
                             Year = i.Year,
                             Movie = i.IsMovie,
                             Season = i.Season,
@@ -313,7 +337,7 @@ public sealed partial class LibraryStore
                                         UpdatedAt = p.UpdatedAt,
                                     },
                             Viewings = ViewingHistory(i)
-                                .Select(v => new ViewingRecord
+                                .Select(v => new MobileViewing
                                 {
                                     Id = v.Id,
                                     WatchedAt = v.WatchedAt,
@@ -321,6 +345,7 @@ public sealed partial class LibraryStore
                                     DateUnknown = v.DateUnknown,
                                     Approximate = v.Approximate,
                                     LoggedAt = v.LoggedAt,
+                                    Synced = CommunityQueue.SyncedTimes(State, i.Id, v, ViewingHistory(i)),
                                 })
                                 .ToList(),
                             Review = State.PersonalReviews.TryGetValue(i.Id, out var review)
@@ -797,6 +822,8 @@ public sealed partial class LibraryStore
                             CommunityQueue.Enqueue(State, item, when);
                         watched = true;
                     }
+                    if (op.Completed)
+                        CommunityQueue.ApplyPhoneSynced(State, item.Id, op.Synced, when);
                     if (entry.Progress == null || at > entry.Progress.UpdatedAt)
                     {
                         entry.Progress = new()
@@ -986,6 +1013,21 @@ public sealed partial class LibraryStore
                             State.Watchlist.Remove(item.GroupKey);
                         State.MobileFieldTimes[field] = op.At;
                     }
+                }
+                else if (op.Kind == "synced")
+                {
+                    if (!Guid.TryParse(op.ViewingId, out _))
+                        continue;
+                    var known = State.Viewings.GetValueOrDefault(item.Id)?.FirstOrDefault(v => v.Id == op.ViewingId);
+                    CommunityQueue.ApplyPhoneSynced(
+                        State,
+                        item.Id,
+                        op.Synced,
+                        known?.WatchedAt
+                            ?? DateTimeOffset.FromUnixTimeMilliseconds(
+                                op.WatchedAt > 0 && op.WatchedAt <= op.At ? op.WatchedAt : op.At
+                            )
+                    );
                 }
                 else
                     continue;

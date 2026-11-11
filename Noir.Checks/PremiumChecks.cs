@@ -100,6 +100,32 @@ public static class PremiumChecks
                 == "https://www.reddit.com/r/tv/comments/abc123/title/comment42/?sort=top",
             "Top discussion links preserve selected comments and remove tracking parameters"
         );
+        {
+            var film = new VideoItem
+            {
+                Title = "Heat",
+                IsMovie = true,
+                ImdbId = "tt0113277",
+            };
+            var episode = new VideoItem
+            {
+                Title = "Severance",
+                ImdbId = "tt11280740",
+                Season = 1,
+                Episode = 2,
+            };
+            var movieOnly = ReviewLinks.AccountSignIn([film], "Serializd");
+            var mixed = ReviewLinks.AccountSignIn([film, episode], "Serializd");
+            var trakt = ReviewLinks.AccountSignIn([film], "Trakt");
+            check(
+                movieOnly.Item == null
+                    && new Uri(movieOnly.Url!).Host == "www.serializd.com"
+                    && mixed.Item == episode
+                    && new Uri(ReviewLinks.Sources(episode)["Serializd"]).Host == "www.serializd.com"
+                    && trakt.Item == film,
+                "F15 Serializd sign-in lands on serializd.com with a movie-only library and with a mixed one"
+            );
+        }
         var picture = Path.Combine(directory, "cached.jpg");
         File.WriteAllBytes(picture, [1]);
         reopened.State.EpisodeSchedules[key] =

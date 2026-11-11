@@ -14,6 +14,11 @@ public sealed class CommunitySync : IDisposable
     readonly Action changed;
     readonly CancellationTokenSource lifetime = new();
     readonly DispatcherTimer timer;
+    readonly CommunityBackoff backoff;
+    public bool Paused { get; set; }
+
+    /// <summary>Clock seam: tests drive <see cref="CommunityQueue.Pass"/> with their own.</summary>
+    public Func<DateTimeOffset> Clock { get; set; } = () => DateTimeOffset.UtcNow;
     Window? host;
     WebView2? web;
     bool busy,
@@ -28,6 +33,7 @@ public sealed class CommunitySync : IDisposable
     public CommunitySync(LibraryStore library, Dispatcher ui, Action onChanged)
     {
         store = library;
+        backoff = new(library.State.SyncPace);
         dispatcher = ui;
         changed = onChanged;
         timer = new DispatcherTimer(TimeSpan.FromMinutes(5), DispatcherPriority.Background, (_, _) => Wake(), ui);
@@ -37,7 +43,7 @@ public sealed class CommunitySync : IDisposable
 
     public void Wake()
     {
-        if (disposed)
+        if (disposed || Paused)
             return;
         if (!dispatcher.CheckAccess())
         {
@@ -54,16 +60,24 @@ public sealed class CommunitySync : IDisposable
 
     public void Retry()
     {
-        foreach (var job in store.State.WatchSync.Values.Where(j => j.SyncedAt == null))
-            job.RetryAt = DateTimeOffset.MinValue;
+        CommunityQueue.Retry(store.State, backoff);
         store.Save();
         Wake();
     }
 
+    /// <summary>Stop the past-history send and remove its unsent jobs; anything already sent stays sent.</summary>
+    public int CancelPrevious()
+    {
+        var removed = CommunityQueue.CancelBacklog(store.State);
+        store.Save();
+        changed();
+        return removed;
+    }
+
     public void QueuePrevious()
     {
-        foreach (var entry in store.State.Catalog.Values.Where(e => e.Progress?.Completed == true))
-            CommunityQueue.Enqueue(store.State, entry.Item, entry.Progress!.UpdatedAt);
+        CommunityQueue.QueueBacklog(store.State);
+        Paused = false;
         store.Save();
         Retry();
         changed();
@@ -125,6 +139,17 @@ public sealed class CommunitySync : IDisposable
         return core;
     }
 
+    string TitleKey(WatchSyncJob job) =>
+        store.State.Catalog.GetValueOrDefault(job.ItemId) is { } entry
+            ? entry.Item.ImdbId
+                + "|"
+                + entry.Item.Season
+                + "|"
+                + entry.Item.Episode
+                + "|"
+                + CommunityQueue.SerializdEpisode(store.State, entry.Item)
+            : "";
+
     async Task Run()
     {
         if (busy || disposed)
@@ -133,110 +158,15 @@ public sealed class CommunitySync : IDisposable
         busy = true;
         try
         {
-            foreach (
-                var job in store
-                    .State.WatchSync.Values.Where(j =>
-                        j.Provider != "Nuvio"
-                        && j.SyncedAt == null
-                        && j.RetryAt <= DateTimeOffset.UtcNow
-                        && CommunityQueue.Enabled(store.State, j.Provider)
-                    )
-                    .OrderBy(j => j.WatchedAt)
-                    .ToList()
-            )
+            await CommunityQueue.Pass(store.State, backoff, Clock, TitleKey, Current, Send, () =>
             {
-                if (!Current(job))
-                    continue;
-                job.Attempts++;
-                job.Message = "Syncing…";
+                if (disposed)
+                    return;
                 store.Save();
                 changed();
-                try
-                {
-                    var item = store.State.Catalog[job.ItemId].Item;
-                    if (item.Season == 0 && !item.IsMovie && job.Provider == "Trakt")
-                        throw new IOException(
-                            "Specials need a confirmed Trakt match. Mark the correct special on its website; your Noir history remains saved."
-                        );
-                    if (
-                        job.Provider == "Trakt"
-                        && !System.Text.RegularExpressions.Regex.IsMatch(item.ImdbId, @"^tt\d+$")
-                    )
-                        throw new IOException("Waiting for a verified title ID. Refresh information in Settings.");
-                    var browser = await Browser();
-                    var url =
-                        job.Provider == "Serializd"
-                            ? await CommunityPages.ResolveSerializd(browser, item, store, lifetime.Token)
-                            : ReviewLinks.TraktUrl(item);
-                    if (job.Provider == "Trakt")
-                        await CommunityPages.Navigate(browser, url, lifetime.Token);
-                    if (job.Provider == "Serializd" && !await CommunityPages.VerifySerializdEpisode(browser, item))
-                        throw new IOException("Episode match needs checking in Reviews & comments.");
-                    var control = await WaitControl(browser, item, job.Provider);
-                    if (control != "watched")
-                    {
-                        if (control == "signed-out")
-                            throw new IOException(
-                                "Your website session has expired. Sign in once under Reviews & comments; Noir resumes syncing automatically."
-                            );
-                        if (control != "ready")
-                            throw new IOException(
-                                "The website's watched controls are unavailable. Noir will retry automatically."
-                            );
-                        if (!Current(job))
-                            continue;
-                        if (await CommunityPages.Control(browser, item, job.Provider, true) != "clicked")
-                            throw new IOException("The watched control changed. Noir will retry later.");
-                        if (job.Provider == "Trakt")
-                        {
-                            bool clicked = false;
-                            for (int i = 0; i < 30 && !clicked; i++)
-                            {
-                                lifetime.Token.ThrowIfCancellationRequested();
-                                if (!Current(job))
-                                    break;
-                                var result = await browser.ExecuteScriptAsync(CommunityPages.TraktDateControl);
-                                clicked = result == "true";
-                                if (!clicked)
-                                    await Task.Delay(500, lifetime.Token);
-                            }
-                            if (!clicked)
-                                throw new IOException(
-                                    "Trakt's watched-date control is unavailable. Noir will retry automatically."
-                                );
-                        }
-                        // Both sites update their controls optimistically. Reload before calling the job successful.
-                        await Task.Delay(4000, lifetime.Token);
-                        await CommunityPages.Navigate(browser, url, lifetime.Token);
-                        if (await WaitControl(browser, item, job.Provider) != "watched")
-                            throw new IOException(
-                                "The website hasn't confirmed the watched mark. Noir will recheck later."
-                            );
-                    }
-                    if (Current(job))
-                    {
-                        job.SyncedAt = DateTimeOffset.UtcNow;
-                        job.Message = "Watched ✓";
-                        store.Save();
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-                catch (Exception e)
-                {
-                    if (!disposed)
-                    {
-                        job.Message = e is IOException ? e.Message : "Website unavailable. Noir will retry later.";
-                        job.RetryAt = DateTimeOffset.UtcNow.AddMinutes(5);
-                        store.Save();
-                    }
-                }
-                if (!disposed)
-                    changed();
-            }
+            });
         }
+        catch (OperationCanceledException) { }
         finally
         {
             busy = false;
@@ -244,6 +174,66 @@ public sealed class CommunitySync : IDisposable
             if (wakeAgain && !disposed)
                 Wake();
         }
+    }
+
+    async Task<bool> Send(WatchSyncJob job)
+    {
+        var item = store.State.Catalog[job.ItemId].Item;
+        if (item.Season == 0 && !item.IsMovie && job.Provider == "Trakt")
+            throw new SyncTitleException(
+                "Specials need a confirmed Trakt match. Mark the correct special on its website; your Noir history remains saved."
+            );
+        if (job.Provider == "Trakt" && !System.Text.RegularExpressions.Regex.IsMatch(item.ImdbId, @"^tt\d+$"))
+            throw new SyncTitleException("Waiting for a verified title ID. Refresh information in Settings.");
+        var browser = await Browser();
+        var url =
+            job.Provider == "Serializd"
+                ? await CommunityPages.ResolveSerializd(browser, item, store, lifetime.Token)
+                : ReviewLinks.TraktUrl(item);
+        if (job.Provider == "Trakt")
+            await CommunityPages.Navigate(browser, url, lifetime.Token);
+        if (job.Provider == "Serializd" && !await CommunityPages.VerifySerializdEpisode(browser, item))
+            throw new SyncTitleException("Episode match needs checking in Reviews & comments.");
+        var control = await WaitControl(browser, item, job.Provider);
+        if (control != "watched")
+        {
+            if (control == "signed-out")
+                throw new SyncSiteException(
+                    "Your website session has expired. Sign in once under Reviews & comments; Noir resumes syncing automatically."
+                );
+            if (control != "ready")
+                throw new SyncSiteException(
+                    "The website's watched controls are unavailable. Noir will retry automatically."
+                );
+            if (!Current(job))
+                return false;
+            if (await CommunityPages.Control(browser, item, job.Provider, true) != "clicked")
+                throw new SyncSiteException("The watched control changed. Noir will retry later.");
+            if (job.Provider == "Trakt")
+            {
+                bool clicked = false;
+                for (int i = 0; i < 30 && !clicked; i++)
+                {
+                    lifetime.Token.ThrowIfCancellationRequested();
+                    if (!Current(job))
+                        break;
+                    var result = await browser.ExecuteScriptAsync(CommunityPages.TraktDateControl);
+                    clicked = result == "true";
+                    if (!clicked)
+                        await Task.Delay(500, lifetime.Token);
+                }
+                if (!clicked)
+                    throw new SyncSiteException(
+                        "Trakt's watched-date control is unavailable. Noir will retry automatically."
+                    );
+            }
+            // Both sites update their controls optimistically. Reload before calling the job successful.
+            await Task.Delay(4000, lifetime.Token);
+            await CommunityPages.Navigate(browser, url, lifetime.Token);
+            if (await WaitControl(browser, item, job.Provider) != "watched")
+                throw new SyncSiteException("The website hasn't confirmed the watched mark. Noir will recheck later.");
+        }
+        return Current(job);
     }
 
     async Task<string> WaitControl(CoreWebView2 core, VideoItem item, string provider)

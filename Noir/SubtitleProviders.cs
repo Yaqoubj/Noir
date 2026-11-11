@@ -248,7 +248,15 @@ public sealed class SubtitleProviders
         if (langs.Length == 0)
             return [];
         var result = new List<SubtitleCandidate>();
-        void Add(string id, string language, string name, string rel, string url, bool exact = false)
+        void Add(
+            string id,
+            string language,
+            string name,
+            string rel,
+            string url,
+            bool exact = false,
+            string uploader = ""
+        )
         {
             if (
                 result.Count >= 500
@@ -268,7 +276,8 @@ public sealed class SubtitleProviders
                     url,
                     exact,
                     (exact ? 1000 : 0) + SubtitleDownloads.ReleaseScore(name + " " + rel, release),
-                    new(s, id, item, release)
+                    new(s, id, item, release),
+                    SubtitleSelection.CleanUploader(uploader)
                 )
             );
         }
@@ -316,7 +325,8 @@ public sealed class SubtitleProviders
                             Text(file, "file_name"),
                             Text(a, "release"),
                             "",
-                            Get(a, "moviehash_match").ValueKind == JsonValueKind.True
+                            Get(a, "moviehash_match").ValueKind == JsonValueKind.True,
+                            Text(Get(a, "uploader"), "name")
                         );
                     }
                 }
@@ -397,7 +407,8 @@ public sealed class SubtitleProviders
                         },
                         Text(row, "name"),
                         Text(row, "release_name") + " " + Joined(Get(row, "releases")),
-                        url.AbsoluteUri
+                        url.AbsoluteUri,
+                        uploader: Text(row, "author")
                     );
                 }
                 break;
@@ -468,7 +479,7 @@ public sealed class SubtitleProviders
                                 _ => "",
                             };
                             var rel = Joined(Get(row, "releaseInfo"));
-                            Add(id, language, "subtitle.srt", rel, "");
+                            Add(id, language, "subtitle.srt", rel, "", uploader: SubSourceUploader(row));
                         }
                     }
                     catch (SubtitleSourceException e)
@@ -571,10 +582,28 @@ public sealed class SubtitleProviders
             }
         }
         return result
-            .OrderByDescending(r => r.Score)
+            .OrderByDescending(r => SubtitleDownloads.PrefersUploader(r, s.Uploader))
+            .ThenByDescending(r => r.Score)
             .DistinctBy(r => r.Url.Length > 0 ? r.Url : r.Language + ":" + r.Id)
             .Take(500)
             .ToList();
+    }
+
+    // SubSource's uploader field is not confirmed (no key to test with), so every documented spelling is tried.
+    internal static string SubSourceUploader(JsonElement row)
+    {
+        static string Name(JsonElement e) =>
+            e.ValueKind == JsonValueKind.String ? e.GetString() ?? ""
+            : e.ValueKind == JsonValueKind.Object
+                ? new[] { "displayname", "displayName", "name", "username" }
+                    .Select(k => Text(e, k))
+                    .FirstOrDefault(v => v.Length > 0)
+                    ?? ""
+            : "";
+        foreach (var key in new[] { "uploader", "uploaderName", "uploadedBy" })
+            if (Name(Get(row, key)) is { Length: > 0 } found)
+                return found;
+        return Array(Get(row, "contributors")).Select(Name).FirstOrDefault(v => v.Length > 0) ?? "";
     }
 
     static bool ContainsSecret(string url, SubtitleSelection s)

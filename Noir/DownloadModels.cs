@@ -60,6 +60,11 @@ public sealed class PcDownloadJob
     public long Size { get; set; }
     public long Bytes { get; set; }
     public string ETag { get; set; } = "";
+    public string LastModified { get; set; } = "";
+    public List<string> Trackers { get; set; } = [];
+
+    // Set when Noir closed (or crashed) mid-transfer: only these resume by themselves, a user pause stays paused.
+    public bool Interrupted { get; set; }
     public string Status { get; set; } = "Queued";
     public string Message { get; set; } = "";
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;

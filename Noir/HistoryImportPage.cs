@@ -995,12 +995,59 @@ public partial class MainWindow
 
     void OpenAccountSignIn(string provider)
     {
-        var item = store.Archive.FirstOrDefault(i => i.ImdbId.StartsWith("tt")) ?? store.Archive.FirstOrDefault();
-        if (item == null)
-        {
+        var (item, url) = ReviewLinks.AccountSignIn(store.Archive, provider);
+        if (item != null)
+            OpenReviews(item, provider);
+        else if (url != null)
+            OpenSiteSignIn(provider, url);
+        else
             Status.Text = "Add or log a title first, then sign in from its Reviews & comments.";
-            return;
-        }
-        OpenReviews(item, provider);
+    }
+
+    // A site's own sign-in page, in the same browser profile the watch sync uses.
+    void OpenSiteSignIn(string provider, string url)
+    {
+        var web = new WebView2 { DefaultBackgroundColor = System.Drawing.Color.FromArgb(255, 11, 11, 13) };
+        var window = new Window
+        {
+            Title = $"Sign in to {provider} · Noir",
+            Owner = this,
+            Width = 1000,
+            Height = 780,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = web,
+        };
+        window.Loaded += async (_, _) =>
+        {
+            try
+            {
+                var environment = await CoreWebView2Environment.CreateAsync(
+                    userDataFolder: Path.Combine(store.DataDirectory, "review-browser")
+                );
+                await web.EnsureCoreWebView2Async(environment);
+                var core = web.CoreWebView2;
+                core.Profile.PreferredColorScheme = CoreWebView2PreferredColorScheme.Dark;
+                core.PermissionRequested += (_, e) => e.State = CoreWebView2PermissionState.Deny;
+                core.NewWindowRequested += (_, e) =>
+                {
+                    e.Handled = true;
+                    if (Uri.TryCreate(e.Uri, UriKind.Absolute, out var u) && u.Scheme == "https")
+                        core.Navigate(e.Uri);
+                };
+                core.Navigate(url);
+            }
+            catch (Exception e)
+            {
+                store.Log(e);
+                window.Close();
+                Status.Text = "The browser component couldn't start.";
+            }
+        };
+        window.Closed += (_, _) =>
+        {
+            web.Dispose();
+            watchSync?.Retry();
+        };
+        window.Show();
     }
 }

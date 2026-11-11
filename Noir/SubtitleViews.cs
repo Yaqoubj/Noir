@@ -112,6 +112,16 @@ public partial class MainWindow
             IsChecked = true,
             Margin = new(0, 4, 0, 6),
         };
+        var replace = new CheckBox
+        {
+            Content = PL("Replace saved subtitles", "استبدال الترجمة المحفوظة"),
+            IsChecked = false,
+            Margin = new(0, 4, 0, 6),
+        };
+        System.Windows.Automation.AutomationProperties.SetName(
+            replace,
+            PL("Replace saved subtitles", "استبدال الترجمة المحفوظة")
+        );
         body.Children.Add(
             SheetSection(
                 syncOnly ? PL("Check subtitle timing", "فحص توقيت الترجمة") : PL("Download subtitles", "تنزيل الترجمة")
@@ -123,6 +133,16 @@ public partial class MainWindow
             body.Children.Add(arabic);
             if (stream == null)
                 body.Children.Add(auto);
+            body.Children.Add(replace);
+            body.Children.Add(
+                Body(
+                    PL(
+                        "The saved file is kept in the subtitle backup folder, then fetched again from your chosen source.",
+                        "تُحفظ الترجمة الحالية في مجلد النسخ الاحتياطي ثم تُجلب من جديد من المصدر الذي اخترته."
+                    ),
+                    11.5
+                )
+            );
         }
         body.Children.Add(
             Body(
@@ -252,8 +272,27 @@ public partial class MainWindow
                                 .ToList(),
                             auto.IsChecked == true,
                             cancellation.Token,
-                            streamTarget: streamTarget
+                            streamTarget: streamTarget,
+                            replace: replace.IsChecked == true
                         );
+                        // A replaced file keeps its name, which VLC has loaded: reload the fresh copy from a new folder.
+                        if (replace.IsChecked == true)
+                        {
+                            var languages = new[]
+                            {
+                                english.IsChecked == true ? "en" : "",
+                                arabic.IsChecked == true ? "ar" : "",
+                            };
+                            corrected.AddRange(
+                                MobileSubtitles
+                                    .Find(streamTarget ?? item, requireVideo: streamTarget == null)
+                                    .Select(sub => sub.Path)
+                                    .Where(path =>
+                                        !SubtitleDownloads.IsSyncedCopy(Path.GetFileNameWithoutExtension(path))
+                                        && languages.Contains(SubtitleDownloads.SidecarLanguage(path))
+                                    )
+                            );
+                        }
                     }
                     if (cancellation.IsCancellationRequested)
                         return;
@@ -263,7 +302,13 @@ public partial class MainWindow
                     {
                         if (current?.Id == item.Id && serial == playbackSerial && player != null)
                         {
-                            if (stream != null)
+                            if (stream != null && corrected.Count > 0)
+                            {
+                                foreach (var path in corrected)
+                                    attachedStreamSubtitles.Add(path);
+                                ReloadCorrectedSubtitles(corrected);
+                            }
+                            else if (stream != null)
                                 AttachStreamSubtitles();
                             else if (corrected.Count > 0)
                                 ReloadCorrectedSubtitles(corrected);
@@ -532,6 +577,30 @@ public partial class MainWindow
                     _ => $"تعذر تنزيل الترجمة {lang}",
                 };
             }
+            // "English saved from SubDL by Alice", "English saved from the release", "saved from the free default by Alice".
+            static string Source(string name) =>
+                name switch
+                {
+                    "the free default" => "المصدر الافتراضي المجاني",
+                    "the release" => "النسخة",
+                    _ => name,
+                };
+            static string By(string name) => name.Length == 0 ? "" : " بواسطة \u202A" + name + "\u202C";
+            m = System.Text.RegularExpressions.Regex.Match(part, @"^(English|Arabic) saved from (.+?)(?: by (.+))?$");
+            if (m.Success)
+                return $"حُفظت الترجمة {(m.Groups[1].Value == "Arabic" ? "العربية" : "الإنجليزية")} من {Source(m.Groups[2].Value)}"
+                    + By(m.Groups[3].Value);
+            m = System.Text.RegularExpressions.Regex.Match(part, @"^saved from (.+?)(?: by (.+))?$");
+            if (m.Success)
+                return "حُفظت من " + Source(m.Groups[1].Value) + By(m.Groups[2].Value);
+            m = System.Text.RegularExpressions.Regex.Match(part, @"^(.+) (had no|couldn't provide) (English|Arabic)$");
+            if (m.Success)
+            {
+                var lang = m.Groups[3].Value == "Arabic" ? "العربية" : "الإنجليزية";
+                return m.Groups[2].Value == "had no"
+                    ? $"{m.Groups[1].Value} لا يحتوي على الترجمة {lang}"
+                    : $"تعذر على {m.Groups[1].Value} توفير الترجمة {lang}";
+            }
             // LRM keeps "+1.20" in one piece inside right-to-left text.
             m = System.Text.RegularExpressions.Regex.Match(part, @"^auto-synced( copy saved)? \(([+-]?[0-9.,]+)s\)$");
             if (m.Success)
@@ -566,6 +635,8 @@ public partial class MainWindow
                 "timing unchanged" => "لم يتغير التوقيت",
                 "adjust in Subtitles → Timing if needed" => "اضبطه من الترجمة ← التوقيت عند الحاجة",
                 "release matched" => "مطابقة للنسخة",
+                "may not match this video" => "قد لا تطابق هذا الفيديو",
+                "try Replace" => "جرّب الاستبدال",
                 "Correct this title's match before finding subtitles." =>
                     "صحّح مطابقة هذا العنوان قبل البحث عن الترجمة.",
                 "Open a stream or save the video before downloading subtitles." =>

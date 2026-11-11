@@ -893,6 +893,7 @@ public sealed class MobileSyncServer : IAsyncDisposable
                 new()
                 {
                     SubtitleSource = subtitles.Source,
+                    SubtitleUploader = subtitles.Uploader,
                     SubtitleApiKey = subtitles.ApiKey,
                     SubtitleUsername = subtitles.Username,
                     SubtitlePassword = subtitles.Password,
@@ -1236,6 +1237,7 @@ public sealed class PhoneDownloadSettingsPayload
         get => subtitleSource.Length == 0 && SubtitleAddonUrl.Length > 0 ? "addon" : subtitleSource;
         set => subtitleSource = value ?? "";
     }
+    public string SubtitleUploader { get; set; } = "";
     public string SubtitleApiKey { get; set; } = "";
     public string SubtitleUsername { get; set; } = "";
     public string SubtitlePassword { get; set; } = "";

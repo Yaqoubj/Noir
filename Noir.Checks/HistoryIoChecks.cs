@@ -141,6 +141,10 @@ static class HistoryIoChecks
             "History backup preview counts viewings, titles, ratings and notes"
         );
         var other = Store(Path.Combine(dir, "other"));
+        preview.State.Favorites = [image.GroupKey];
+        preview.State.Likes = [image.GroupKey, movie.Id];
+        preview.State.Reactions = new() { [movie.Id] = "wow" };
+        preview.State.SeasonRatings = new() { [image.GroupKey + ":1"] = 8 };
         var merged = other.MergeBackup(preview);
         var heat2 = other.Archive.Single(i => i.Title == "Heat");
         var restored = other.Archive.Single(i => i.Id == image.Id);
@@ -158,6 +162,36 @@ static class HistoryIoChecks
                 && other.State.ShowRatings.Count == 1,
             "History merge restores viewings with their source and logging time, notes and show ratings"
         );
+        check(
+            other.State.Favorites.SequenceEqual(new[] { image.GroupKey })
+                && other.State.Likes.Contains(image.GroupKey)
+                && other.State.Likes.Contains(movie.Id)
+                && other.State.Reactions.GetValueOrDefault(movie.Id) == "wow"
+                && other.State.SeasonRatings.GetValueOrDefault(image.GroupKey + ":1") == 8,
+            "History merge restores favourites, likes, reactions and season ratings"
+        );
+        var undoStore = Store(Path.Combine(dir, "undo"));
+        undoStore.State.Likes.Add(movie.Id);
+        undoStore.MergeBackup(preview);
+        var mergeBatch = undoStore.State.ImportBatches.Last();
+        undoStore.UndoImport(mergeBatch.Id);
+        check(
+            mergeBatch.LikeKeys.SequenceEqual(new[] { image.GroupKey })
+                && undoStore.State.Favorites.Count == 0
+                && undoStore.State.Likes.SetEquals(new[] { movie.Id })
+                && undoStore.State.Reactions.Count == 0
+                && undoStore.State.SeasonRatings.Count == 0,
+            "History merge undo removes the favourites, likes, reactions and season ratings it added, and keeps the rest"
+        );
+        other.State.Reactions[movie.Id] = "loved";
+        other.State.SeasonRatings[image.GroupKey + ":1"] = 3;
+        other.MergeBackup(preview);
+        check(
+            other.State.Reactions[movie.Id] == "loved" && other.State.SeasonRatings[image.GroupKey + ":1"] == 3,
+            "History merge keeps existing reactions and season ratings"
+        );
+        other.State.Reactions[movie.Id] = "wow";
+        other.State.SeasonRatings[image.GroupKey + ":1"] = 8;
         check(other.MergeBackup(preview) == 0, "History merging the same backup twice adds nothing");
         other.State.PersonalReviews[heat2.Id] = new() { Rating = 2, Note = "Mine" };
         other.Save();

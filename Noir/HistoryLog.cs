@@ -262,6 +262,14 @@ public sealed partial class LibraryStore
                     else
                         State.PersonalReviews.Remove(item);
                 }
+            foreach (var key in batch.FavoriteKeys)
+                State.Favorites.Remove(key);
+            foreach (var key in batch.LikeKeys)
+                State.Likes.Remove(key);
+            foreach (var key in batch.ReactionKeys)
+                State.Reactions.Remove(key);
+            foreach (var key in batch.SeasonRatingKeys)
+                State.SeasonRatings.Remove(key);
             foreach (var d in batch.Displaced)
             {
                 if (!State.Catalog.TryGetValue(d.ItemId, out var entry))

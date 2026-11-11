@@ -21,7 +21,7 @@ public final class NoirApp extends Application {
         if(downloads!=null){for(org.json.JSONObject job:DataStore.objects(downloads.jobs()))if(!job.optString("status").equals("complete"))downloads.pause(job.optString("id"));if(!downloads.activeId.isEmpty())throw new IllegalStateException(Loc.t("Downloads are pausing. Try again in a moment."));}
         data.flush();new ProfileStore(c).select(id,pin);data=dataFor(c,id);useDownloads(new DownloadStore(data.context));Loc.use(data);scheduleSync(c);
     }
-    @Override public void onCreate(){super.onCreate();PhoneDensity.load(this);data=dataFor(this,new ProfileStore(this).current());useDownloads(new DownloadStore(data.context));Loc.use(data);
+    @Override public void onCreate(){super.onCreate();PhoneDensity.load(this);data=dataFor(this,new ProfileStore(this).current());useDownloads(new DownloadStore(data.context));Loc.use(data);WatchSyncSender.install(this);
         // Arabic mirrors every screen; each activity gets the direction once its window is set up.
         registerActivityLifecycleCallbacks(new ActivityLifecycleCallbacks(){
             public void onActivityCreated(android.app.Activity a,android.os.Bundle b){}public void onActivityStarted(android.app.Activity a){Loc.apply(a);}public void onActivityResumed(android.app.Activity a){if(a instanceof MainActivity)a.getWindow().getDecorView().post(()->{if(!a.isFinishing())BackgroundSync.maybeAsk((MainActivity)a);});}

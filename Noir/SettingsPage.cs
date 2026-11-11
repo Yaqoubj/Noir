@@ -406,7 +406,7 @@ public partial class MainWindow
             }
         )
         {
-            var b = ActionButton("⇩  " + label, () => ExportHistory(format, file));
+            var b = ActionButton("[[download]]  " + label, () => ExportHistory(format, file));
             b.ToolTip = tip;
             b.Padding = new(18, 11, 20, 11);
             b.Margin = new(0, 0, 10, 10);

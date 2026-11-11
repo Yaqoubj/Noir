@@ -459,6 +459,26 @@ public partial class MainWindow
                 );
         });
         ContentPanel.Children.Add(subtitleGetKey);
+        var subtitleUploaderPanel = new StackPanel();
+        subtitleUploaderPanel.Children.Add(Body(T("Preferred uploader (optional)", "المُرفِق المفضل (اختياري)"), 12));
+        var subtitleUploader = new TextBox
+        {
+            Text = subtitleInitial.Uploader,
+            Padding = new(10),
+            Margin = new(0, 5, 0, 4),
+        };
+        var subtitleUploaderField = FieldRow(subtitleUploader);
+        subtitleUploaderPanel.Children.Add(subtitleUploaderField.Row);
+        subtitleUploaderPanel.Children.Add(
+            Body(
+                T(
+                    "Subtitles by this uploader are tried first. Others still follow. The result line shows \"by name\" so you can copy one you like.",
+                    "تُجرَّب أولًا الترجمات التي رفعها هذا المُرفِق وتليها البقية. يظهر في سطر النتيجة «بواسطة الاسم» لتنسخ اسمًا يعجبك."
+                ),
+                11.5
+            )
+        );
+        ContentPanel.Children.Add(subtitleUploaderPanel);
         var subtitleOnly = new CheckBox
         {
             Content = T("Use only this source"),
@@ -481,6 +501,7 @@ public partial class MainWindow
                 (subtitleLink, T("Stremio addon link")),
                 (subtitleAuth, T("Authorization · optional")),
                 (subtitleOnly, T("Use only this source")),
+                (subtitleUploader, T("Preferred uploader (optional)", "المُرفِق المفضل (اختياري)")),
             }
         )
             System.Windows.Automation.AutomationProperties.SetName(control, name);
@@ -507,6 +528,9 @@ public partial class MainWindow
             subtitleLogin.Visibility = selectedSubtitle == "opensubtitles" ? Visibility.Visible : Visibility.Collapsed;
             subtitleAddon.Visibility = selectedSubtitle == "addon" ? Visibility.Visible : Visibility.Collapsed;
             subtitleNote.Visibility = selectedSubtitle == "wyzie" ? Visibility.Visible : Visibility.Collapsed;
+            subtitleUploaderPanel.Visibility = selectedSubtitle is "opensubtitles" or "subdl" or "subsource"
+                ? Visibility.Visible
+                : Visibility.Collapsed;
             RefreshSubtitleChoice();
         }
         subtitlePicker.SelectionChanged += (_, _) => SubtitleChanged();
@@ -522,7 +546,8 @@ public partial class MainWindow
                     subtitlePassword.Password,
                     subtitleLink.Password,
                     subtitleAuth.Password,
-                    subtitleOnly.IsChecked == true
+                    subtitleOnly.IsChecked == true,
+                    subtitleUploader.Text
                 ).Validate();
             }
             catch (IOException e)
@@ -595,7 +620,11 @@ public partial class MainWindow
             {
                 return quiet ? "" : SubtitleError(e);
             }
-            if (selection != SubtitleSelection.From(downloads.Config) && !await CheckSubtitleLink())
+            // The uploader is only an ordering preference: changing it needs no new check of the source.
+            if (
+                selection with { Uploader = "" } != SubtitleSelection.From(downloads.Config) with { Uploader = "" }
+                && !await CheckSubtitleLink()
+            )
                 return quiet ? "" : subtitleStatus.Text;
             try
             {
@@ -615,6 +644,7 @@ public partial class MainWindow
                 (subtitlePassword, subtitlePasswordField),
                 (subtitleLink, subtitleLinkField),
                 (subtitleAuth, subtitleAuthField),
+                (subtitleUploader, subtitleUploaderField),
             }
         )
         {

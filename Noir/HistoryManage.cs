@@ -640,7 +640,7 @@ public partial class MainWindow
         var row = new WrapPanel();
         ContentPanel.Children.Add(row);
         var save = ActionButton(
-            "⇩  Back up everything",
+            "[[download]]  Back up everything",
             async () =>
             {
                 var dialog = new Microsoft.Win32.SaveFileDialog

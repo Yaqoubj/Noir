@@ -26,6 +26,7 @@
         <activity android:name=".LogActivity" android:exported="false"/>
         <activity android:name=".ProfilesActivity" android:exported="false"/>
         <activity android:name=".HistoryToolsActivity" android:exported="false"/>
+        <activity android:name=".WatchSignInActivity" android:exported="false"/>
         <activity android:name=".DownloadHubActivity" android:exported="false"/>
         <activity android:name=".PhoneDownloadsActivity" android:exported="false"/>
         <activity android:name=".PhoneDownloadSettingsActivity" android:exported="false"/>

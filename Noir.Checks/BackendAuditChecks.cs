@@ -120,6 +120,7 @@ static class BackendAuditChecks
         var bytes = Enumerable.Range(0, 8192).Select(n => (byte)n).ToArray();
         var transferHandler = new RetryTransfer(bytes);
         using var manager = new PcDownloads(fresh, transfer: new HttpClient(transferHandler), start: false);
+        manager.Pause = (_, _) => Task.CompletedTask;
         var job = new PcDownloadJob
         {
             Root = media,
@@ -135,6 +136,7 @@ static class BackendAuditChecks
         );
         var bounded = new RetryTransfer(bytes) { AlwaysFail = true };
         using var failedManager = new PcDownloads(fresh, transfer: new HttpClient(bounded), start: false);
+        failedManager.Pause = (_, _) => Task.CompletedTask;
         var failedJob = new PcDownloadJob
         {
             Root = media,
@@ -158,8 +160,8 @@ static class BackendAuditChecks
             refused = true;
         }
         check(
-            refused && bounded.Starts.Count == 3 && !File.Exists(failedJob.Destination),
-            "Audit: transient transfer retries stop after three attempts without publishing an incomplete video"
+            refused && bounded.Starts.Count == 7 && !File.Exists(failedJob.Destination),
+            "Audit: transient transfer retries stop after six retries without publishing an incomplete video"
         );
         await V2AuditChecks.Run(dir, check);
     }

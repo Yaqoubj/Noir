@@ -56,6 +56,32 @@ public sealed class TorrentRuntime : IDisposable
             await manager.AddPeerAsync(new PeerInfo(peer));
     }
 
+    // Magnet metadata carries no trackers, so the transfer would run on DHT and peer exchange alone.
+    internal async Task AddTrackers(TorrentManager manager, IEnumerable<string> stored)
+    {
+        var tracker = manager.TrackerManager;
+        if (tracker.Private)
+            return;
+        var known = tracker
+            .Tiers.SelectMany(t => t.Trackers)
+            .Select(t => t.Uri.AbsoluteUri)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var wanted = stored.Where(TorrentReleases.ValidTracker).Distinct().ToList();
+        if (wanted.Count == 0 && known.Count == 0)
+            wanted = TorrentReleases.DefaultTrackers.ToList();
+        foreach (var url in wanted)
+        {
+            var uri = new Uri(url);
+            if (!options.Network && !uri.IsLoopback || !known.Add(uri.AbsoluteUri))
+                continue;
+            try
+            {
+                await tracker.AddTrackerAsync(uri);
+            }
+            catch (Exception e) when (e is InvalidOperationException or ArgumentException or NotSupportedException) { }
+        }
+    }
+
     public async Task<Torrent> Metadata(string hash, TimeSpan timeout, CancellationToken ct)
     {
         if (!System.Text.RegularExpressions.Regex.IsMatch(hash, @"\A[a-fA-F0-9]{40}\z"))
@@ -154,6 +180,7 @@ public sealed partial class PcDownloads
         public TorrentManager? Manager;
         public DateTime Started = DateTime.UtcNow;
         public readonly Dictionary<string, DateTime> Idle = [];
+        public readonly Dictionary<string, long> Progress = [];
         public readonly Dictionary<string, SpeedMeter> Meters = [];
         public long LastUploaded;
     }
@@ -175,6 +202,11 @@ public sealed partial class PcDownloads
                 {
                     job.FileId = TorrentReleases.Index(job.Hash, job.RemoteName, job.Size);
                     changed |= job.FileId >= 0;
+                }
+                if (job.Trackers.Count == 0)
+                {
+                    job.Trackers = TorrentReleases.TrackersFor(job.Hash);
+                    changed |= job.Trackers.Count > 0;
                 }
                 if (job.Alternatives.Count > 0)
                     continue;
@@ -201,7 +233,8 @@ public sealed partial class PcDownloads
                             r.Release.Hash,
                             TorrentReleases.Index(r.Release.Hash, candidate.File.Name, candidate.File.Size),
                             candidate.File.Name,
-                            candidate.File.Size
+                            candidate.File.Size,
+                            TorrentReleases.TrackersFor(r.Release.Hash)
                         )
                     );
                     changed = true;
@@ -289,6 +322,7 @@ public sealed partial class PcDownloads
                             hidden.FullName,
                             File.GetAttributes(hidden.FullName) | FileAttributes.Hidden
                         );
+                        TorrentReleases.AddTrackers(job.Hash, group.SelectMany(j => j.Trackers));
                         var cancel = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
                         var session = new TorrentSession(
                             job.Hash,
@@ -334,6 +368,7 @@ public sealed partial class PcDownloads
                     foreach (var job in jobs.Where(TorrentActive))
                     {
                         job.Status = "Paused";
+                        job.Interrupted = true;
                         job.Speed = 0;
                         job.EtaSeconds = -1;
                         job.Message = "Interrupted · resume to continue";
@@ -396,6 +431,7 @@ public sealed partial class PcDownloads
                 session.Incoming,
                 TorrentRuntime.Settings()
             );
+            await TorrentRuntime.AddTrackers(session.Manager, group.SelectMany(j => j.Trackers));
             // Set every priority before Start: a pack must never fetch other episodes by default.
             await Priorities(session.Manager, group);
             await session.Manager.StartAsync();
@@ -496,18 +532,26 @@ public sealed partial class PcDownloads
                             $"{job.Peers} أشخاص · {job.Seeds} يشاركون"
                         );
                 }
-                if (!checking && job.Seeds == 0 && job.Speed < 1)
+                // Stalled means no new bytes for DownloadStall, however many seeds are connected.
+                if (checking)
                 {
-                    if (!session.Idle.TryGetValue(job.Id, out var idle))
-                        session.Idle[job.Id] = now;
-                    else if (now - idle >= torrentOptions.DownloadStall)
-                    {
-                        await Stuck(session, [job], config);
-                        return;
-                    }
-                }
-                else
                     session.Idle.Remove(job.Id);
+                    session.Progress.Remove(job.Id);
+                }
+                else if (
+                    !TorrentStall.Advanced(
+                        session.Progress,
+                        session.Idle,
+                        job.Id,
+                        job.Bytes,
+                        now,
+                        torrentOptions.DownloadStall
+                    )
+                )
+                {
+                    await Stuck(session, [job], config);
+                    return;
+                }
             }
         }
         lock (gate)
@@ -584,6 +628,7 @@ public sealed partial class PcDownloads
                     job.Alternatives.RemoveAll(a => a.Hash == alternative.Hash || a.Hash == job.Hash);
                     job.Switches++;
                     job.Hash = alternative.Hash;
+                    job.Trackers = alternative.Trackers?.ToList() ?? TorrentReleases.TrackersFor(alternative.Hash);
                     job.FileId = alternative.FileIndex;
                     job.RemoteName = alternative.Name;
                     job.Size = alternative.Size;
@@ -715,6 +760,34 @@ public sealed partial class PcDownloads
         }
     }
 
+    // Tracker addresses the live manager for this torrent announces to (empty when it has no session).
+    internal List<string> ManagerTrackers(string hash) =>
+        torrentSessions.TryGetValue(hash, out var session) && session.Manager is { } manager
+            ? manager.TrackerManager.Tiers.SelectMany(t => t.Trackers).Select(t => t.Uri.AbsoluteUri).ToList()
+            : [];
+
     public int ActiveTorrentCount => torrentRuntime?.Engine.Torrents.Count ?? 0;
     public Task TorrentStopped => torrentWorker ?? Task.CompletedTask;
+}
+
+static class TorrentStall
+{
+    // True while the transfer is making progress; false once DownloadStall passed with no new bytes.
+    public static bool Advanced(
+        Dictionary<string, long> progress,
+        Dictionary<string, DateTime> idle,
+        string id,
+        long bytes,
+        DateTime now,
+        TimeSpan stall
+    )
+    {
+        if (!progress.TryGetValue(id, out var last) || bytes > last || !idle.ContainsKey(id))
+        {
+            progress[id] = bytes;
+            idle[id] = now;
+            return true;
+        }
+        return now - idle[id] < stall;
+    }
 }

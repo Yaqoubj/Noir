@@ -22,6 +22,78 @@ final class SubtitleClient {
     String videoHash="",release="",streamRelease=null;boolean identityRead=false;
     void streaming(String name){streamRelease=name==null?"":name;if(!streamRelease.isEmpty())release=streamRelease;videoHash="";identityRead=true;}
     final SubtitleSources sources;
+    /** "Replace saved subtitles": when on, saved phone subtitles for the language are moved to subtitle-originals before the new one is kept. */
+    volatile boolean replace=false;
+    static {String[][] words={{"%s saved from %s","تم حفظ %s من %s"},{"%s had no %s · saved from %s","لم يجد %s ترجمة %s · تم الحفظ من %s"},{"the free default","المصدر المجاني الافتراضي"},{"the release","الإصدار"},{"by %s","بواسطة %s"},{"Replace saved subtitles","استبدال الترجمات المحفوظة"},{"exact video match","تطابق تام مع الفيديو"},{"timing unchanged","التوقيت دون تغيير"},{"timing checked","تم فحص التوقيت"},{"timing unavailable","فحص التوقيت غير متاح"}};for(String[] w:words)Loc.AR.put(w[0],w[1]);}
+    /** Matching uploaders first, in their original order; everyone else follows. A preference, never a filter. */
+    static List<JSONObject> preferUploader(List<JSONObject> list,String preferred){
+        String want=preferred==null?"":preferred.trim();if(want.isEmpty())return list;List<JSONObject> first=new ArrayList<>(),rest=new ArrayList<>();
+        for(JSONObject c:list)if(c.optString("uploader").trim().equalsIgnoreCase(want))first.add(c);else rest.add(c);first.addAll(rest);return first;
+    }
+    static void markFallback(List<JSONObject> list,String chosenName){for(JSONObject c:list)DataStore.put(c,"fellBackFrom",chosenName);}
+    /** "English saved from SubDL", "the free default" for the fallback, "SubDL had no Arabic · saved from the free default" when the chosen site had nothing. */
+    static String originLine(JSONObject sub){
+        String language=Loc.t(label(sub.optString("language"))),from=sub.optString("fellBackFrom"),name=sub.optString("sourceName"),origin=sub.optString("origin");
+        if(!from.isEmpty())return Loc.f("%s had no %s · saved from %s",from,language,Loc.t("the free default"));
+        return Loc.f("%s saved from %s",language,origin.equals("release")?Loc.t("the release"):origin.equals("site")&&!name.isEmpty()?name:Loc.t("the free default"));
+    }
+    /** The full result line: where it came from, the uploader when the site gave one, then the timing/match note. */
+    static String resultLine(JSONObject sub,String tail){
+        StringBuilder line=new StringBuilder(originLine(sub));String by=sub.optString("uploader");
+        if(!by.isEmpty())line.append(" · ").append(Loc.f("by %s",by));if(tail!=null&&!tail.isEmpty())line.append(" · ").append(Loc.t(tail));return line.toString();
+    }
+    /** Moves this playback's saved phone subtitles for the language into subtitle-originals and drops them from the list. Returns how many moved. */
+    int replaceSaved(String lang)throws IOException{return moveOut(sub->matchesPlayback(sub)&&language(sub.optString("language")).equals(lang));}
+    int moveOut(java.util.function.Predicate<JSONObject> which)throws IOException{
+        JSONArray keep=new JSONArray();int moved=0;File backup=new File(data.context.getFilesDir(),"subtitle-originals");
+        for(JSONObject sub:DataStore.objects(data.phoneSubtitles(id))){
+            if(!which.test(sub)){keep.put(sub);continue;}
+            File file=data.subtitle(sub);
+            if(file!=null&&file.isFile()){if(!backup.isDirectory()&&!backup.mkdirs())throw new IOException("Couldn't back up the saved subtitle.");try{java.nio.file.Files.move(file.toPath(),new File(backup,id.replaceAll("[^A-Za-z0-9._-]","_")+"-"+System.currentTimeMillis()+"-"+file.getName()).toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING);}catch(IOException e){throw new IOException("Couldn't back up the saved subtitle.");}}
+            moved++;
+        }
+        if(moved>0){JSONObject all=data.stateObject("phoneSubtitles");DataStore.put(all,id,keep);data.stateObject("phoneSubtitles",all);}
+        return moved;
+    }
+    /** The timing check refused. When the PC reports its raw offset and scale they are kept here. */
+    static final class Refused extends IOException {
+        final boolean known;final double offset,scale;
+        Refused(String message,boolean known,double offset,double scale){super(message);this.known=known;this.offset=offset;this.scale=scale;}
+        boolean far(){return known&&farOff(offset,scale);}
+    }
+    static boolean same(JSONObject a,JSONObject b){String ua=a.optString("url"),ra=a.optString("ref");return !ua.isEmpty()&&ua.equals(b.optString("url"))||!ra.isEmpty()&&ra.equals(b.optString("ref"))&&a.optString("provider").equals(b.optString("provider"));}
+    static boolean farOff(double offset,double scale){return Math.abs(offset)>10||Math.abs(scale-1)>0.003;}
+    static final String MISMATCH="may not match this video · try Replace";
+    static {Loc.AR.put(MISMATCH,"قد لا تطابق هذا الفيديو · جرّب الاستبدال");}
+    static final class Checked {final JSONObject sub;final String tail;Checked(JSONObject sub,String tail){this.sub=sub;this.tail=tail;}}
+    interface Steps {JSONObject download(JSONObject choice)throws Exception;JSONObject sync(JSONObject sub)throws Exception;void discard(JSONObject sub)throws Exception;boolean checkable();}
+    /** Local files with a paired PC only: if the check refuses far off, one more candidate for the language is tried (two downloads at most). Never for streams. */
+    static Checked decide(Steps steps,JSONObject choice,List<JSONObject> candidates)throws Exception{
+        JSONObject first=steps.download(choice);
+        if(first.optBoolean("hashMatch"))return new Checked(first,"exact video match");
+        if(!steps.checkable())return new Checked(first,"timing unchanged");
+        try{return new Checked(steps.sync(first),"timing checked");}
+        catch(Refused refused){
+            if(!refused.far())return new Checked(first,refused.getMessage()==null?"timing unavailable":refused.getMessage());
+            JSONObject next=null;
+            if(candidates!=null)for(JSONObject c:candidates)if(c!=choice&&c.optString("language").equals(choice.optString("language"))&&!same(c,choice)){next=c;break;}
+            if(next==null)return new Checked(first,MISMATCH);
+            JSONObject second;try{second=steps.download(next);}catch(Exception e){return new Checked(first,MISMATCH);}
+            try{JSONObject fixed=steps.sync(second);steps.discard(first);return new Checked(fixed,"timing checked");}
+            catch(Refused again){if(!again.far()){steps.discard(first);return new Checked(second,again.getMessage()==null?"timing unavailable":again.getMessage());}steps.discard(second);return new Checked(first,MISMATCH);}
+            catch(Exception e){steps.discard(second);return new Checked(first,MISMATCH);}
+        }
+        catch(Exception e){return new Checked(first,e.getMessage()==null?"timing unavailable":e.getMessage());}
+    }
+    Checked downloadAndCheck(JSONObject choice,List<JSONObject> candidates,java.util.function.Consumer<JSONObject> saved)throws Exception{
+        final boolean wanted=replace;int[] downloads={0};
+        return decide(new Steps(){
+            public JSONObject download(JSONObject c)throws Exception{replace=wanted&&downloads[0]==0;try{JSONObject sub=SubtitleClient.this.download(c);downloads[0]++;if(saved!=null&&downloads[0]==1)saved.accept(sub);return sub;}finally{replace=wanted;}}
+            public JSONObject sync(JSONObject sub)throws Exception{return SubtitleClient.this.sync(sub);}
+            public void discard(JSONObject sub)throws Exception{String gone=sub.optString("id");moveOut(x->x.optString("id").equals(gone));}
+            public boolean checkable(){return data.paired()&&streamRelease==null;}
+        },choice,candidates);
+    }
     SubtitleClient(DataStore data,JSONObject item){this(data,item,SubtitleClient::fetch,new SubtitleSources(new SubtitleTransport()));}
     /** A caller-supplied transport stands in for the network entirely, so its hosts need no DNS and every request is a plain GET. */
     SubtitleClient(DataStore data,JSONObject item,Transport internet){this(data,item,internet,new SubtitleSources(new SubtitleTransport((request,cap,deadline)->new SubtitleTransport.Response(200,null,legacy(internet,request.url,cap)),host->new java.net.InetAddress[]{PUBLIC})));}
@@ -54,13 +126,14 @@ final class SubtitleClient {
     List<JSONObject> search(String lang)throws Exception{
         String imdb=item.optString("imdb");if(!imdb.matches("tt\\d+"))throw new IOException("Correct this title's match in Noir before searching for subtitles.");
         try{identity();}catch(Exception ignored){}
-        SubtitleSources.Selection chosen=SubtitleSources.Selection.from(new PhoneDownloadSettings(data.context).load()).validate();
+        JSONObject settings=new PhoneDownloadSettings(data.context).load();String uploader=settings.optString("subtitleUploader");
+        SubtitleSources.Selection chosen=SubtitleSources.Selection.from(settings).validate();
         if(!chosen.chosen())return defaultSearch(lang,imdb);
         // A chosen source is asked first. With "only" on, no other site is contacted, whatever happens.
         List<JSONObject> own=new ArrayList<>();SubtitleSources.SubtitleFailure failure=null;
         try{own=sources.search(chosen,item,release,lang,videoHash);}catch(SubtitleSources.SubtitleFailure e){failure=e;}
-        if(!own.isEmpty())return own;
-        if(!chosen.only)try{List<JSONObject> fallback=defaultSearch(lang,imdb);if(!fallback.isEmpty())return fallback;}catch(IOException e){if(failure==null)throw e;}
+        if(!own.isEmpty())return preferUploader(own,uploader);
+        if(!chosen.only)try{List<JSONObject> fallback=defaultSearch(lang,imdb);if(!fallback.isEmpty()){markFallback(fallback,chosen.name());return fallback;}}catch(IOException e){if(failure==null)throw e;}
         if(failure!=null)throw failure;
         throw new IOException(chosen.name()+" · "+Loc.t("no "+label(lang)+" subtitles found"));
     }
@@ -110,22 +183,23 @@ final class SubtitleClient {
         return bytes;
     }
     JSONObject download(JSONObject candidate)throws Exception{
-        String lang=candidate.optString("language"),provider=candidate.optString("provider"),extension=extension(candidate.optString("subtitleFileName")),seed=candidate.optString("url");byte[] bytes;
+        String lang=candidate.optString("language"),provider=candidate.optString("provider"),extension=extension(candidate.optString("subtitleFileName")),seed=candidate.optString("url"),sourceName="",fellBackFrom=candidate.optString("fellBackFrom");byte[] bytes;
         if(provider.isEmpty())bytes=fetchDefault(candidate.getString("url"));
         else{
             SubtitleSources.Selection chosen=SubtitleSources.Selection.from(new PhoneDownloadSettings(data.context).load()).validate();
             if(!chosen.source.equals(provider))throw new IOException(Loc.t("Subtitle source changed. Search again."));
-            seed=provider+":"+(seed.isEmpty()?lang+":"+candidate.optString("ref"):seed);
+            seed=provider+":"+(seed.isEmpty()?lang+":"+candidate.optString("ref"):seed);sourceName=chosen.name();
             try{SubtitleArchive.Picked picked=sources.download(chosen,candidate,item,release);bytes=picked.bytes;extension=extension(picked.name);}
             catch(SubtitleSources.SubtitleFailure failure){
                 if(chosen.only)throw failure;
                 List<JSONObject> other=defaultSearch(lang,item.optString("imdb"));if(other.isEmpty())throw failure;
-                candidate=other.get(0);seed=candidate.getString("url");extension=extension(candidate.optString("subtitleFileName"));bytes=fetchDefault(seed);
+                candidate=other.get(0);sourceName="";fellBackFrom=chosen.name();seed=candidate.getString("url");extension=extension(candidate.optString("subtitleFileName"));bytes=fetchDefault(seed);
             }
         }
         String content=decode(bytes);if(!validText(content,extension))throw new IOException("This provider returned an invalid subtitle. Try another release.");
         String rel=candidate.optString("movieReleaseName");if(rel.isEmpty())rel=candidate.optString("subtitleFileName");if(rel.isEmpty())rel=release;
-        JSONObject sub=new JSONObject();DataStore.put(sub,"sourceKey",keyOf(seed));DataStore.put(sub,"language",lang);DataStore.put(sub,"name",label(lang)+" · "+rel);DataStore.put(sub,"extension",extension);DataStore.put(sub,"hashMatch",candidate.optString("m").equals("h"));if(streamRelease!=null)DataStore.put(sub,"streamRelease",streamRelease);return save(sub,content);
+        if(replace)replaceSaved(lang);
+        JSONObject sub=new JSONObject();DataStore.put(sub,"origin",sourceName.isEmpty()?"free":"site");if(!sourceName.isEmpty())DataStore.put(sub,"sourceName",sourceName);if(!fellBackFrom.isEmpty()&&sourceName.isEmpty())DataStore.put(sub,"fellBackFrom",fellBackFrom);if(!candidate.optString("uploader").isEmpty())DataStore.put(sub,"uploader",candidate.optString("uploader"));DataStore.put(sub,"sourceKey",keyOf(seed));DataStore.put(sub,"language",lang);DataStore.put(sub,"name",label(lang)+" · "+rel);DataStore.put(sub,"extension",extension);DataStore.put(sub,"hashMatch",candidate.optString("m").equals("h"));if(streamRelease!=null)DataStore.put(sub,"streamRelease",streamRelease);return save(sub,content);
     }
     JSONObject save(JSONObject sub,String content)throws Exception{
         String originalId=sub.optString("id");DataStore.put(sub,"id",DataStore.hex(MessageDigest.getInstance("SHA-256").digest((id+":"+sub.optString("sourceKey")+":"+sub.optString("streamRelease")+":"+content).getBytes(StandardCharsets.UTF_8))).substring(0,24));File target=data.subtitle(sub);if(target==null)throw new IOException("Unsupported subtitle file.");
@@ -135,7 +209,7 @@ final class SubtitleClient {
         if(streamRelease!=null)throw new IOException("Use Adjust timing while streaming. Automatic timing needs a verified local video.");
         if(!data.paired())throw new IOException("Pair with your PC for automatic timing. Manual timing also works offline.");identity();if(videoHash.isEmpty())throw new IOException("Couldn't verify this video's identity. Use manual timing.");File file=data.subtitle(sub);if(file==null||!file.exists())throw new IOException("Save a subtitle first.");String text=decode(read(file));
         JSONObject request=new JSONObject();DataStore.put(request,"hash",videoHash);DataStore.put(request,"text",text);DataStore.put(request,"extension",sub.optString("extension"));JSONObject response=data.pcRequest("/v1/subtitle-tools/"+id+"/sync",request);
-        if(!response.optBoolean("accepted"))throw new IOException(response.optString("message","Timing was uncertain. The original subtitle is kept."));String corrected=response.getString("text");if(!validText(corrected,sub.optString("extension")))throw new IOException("Timing result was invalid. The original is kept.");JSONObject next=DataStore.copy(sub);if(next.optString("sourceKey").isEmpty())DataStore.put(next,"sourceKey","pc:"+sub.optString("id"));DataStore.put(next,"aligned",true);DataStore.put(next,"originalId",sub.optString("originalId",sub.optString("id")));return save(next,corrected);
+        if(!response.optBoolean("accepted"))throw new Refused(response.optString("message","Timing was uncertain. The original subtitle is kept."),response.has("offset")&&response.has("scale"),response.optDouble("offset"),response.optDouble("scale"));String corrected=response.getString("text");if(!validText(corrected,sub.optString("extension")))throw new IOException("Timing result was invalid. The original is kept.");JSONObject next=DataStore.copy(sub);if(next.optString("sourceKey").isEmpty())DataStore.put(next,"sourceKey","pc:"+sub.optString("id"));DataStore.put(next,"aligned",true);DataStore.put(next,"originalId",sub.optString("originalId",sub.optString("id")));return save(next,corrected);
     }
     boolean matchesPlayback(JSONObject sub){return streamRelease==null?!sub.has("streamRelease"):sub.has("streamRelease")&&streamRelease.equals(sub.optString("streamRelease"));}
     List<JSONObject> files(){List<JSONObject> all=new ArrayList<>();JSONObject latest=data.item(id);for(JSONObject sub:DataStore.objects(latest==null?null:latest.optJSONArray("subtitleFiles")))if(matchesPlayback(sub)&&data.subtitle(sub)!=null&&data.subtitle(sub).exists())all.add(sub);for(JSONObject sub:DataStore.objects(data.phoneSubtitles(id)))if(matchesPlayback(sub)&&data.subtitle(sub)!=null&&data.subtitle(sub).exists())all.add(sub);return all;}

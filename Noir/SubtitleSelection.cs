@@ -9,10 +9,19 @@ public sealed record SubtitleSelection(
     string Password = "",
     string AddonUrl = "",
     string AddonAuth = "",
-    bool Only = true
+    bool Only = true,
+    string Uploader = ""
 )
 {
     public bool Chosen => Source.Length > 0;
+
+    // Names show up in result lines and the phone's settings: one tidy line, no control characters.
+    public static string CleanUploader(string? value)
+    {
+        var clean = new string((value ?? "").Where(c => !char.IsControl(c)).ToArray()).Trim();
+        return clean.Length > 80 ? clean[..80].Trim() : clean;
+    }
+
     public string Name =>
         Source switch
         {
@@ -37,7 +46,8 @@ public sealed record SubtitleSelection(
             c.SubtitlePassword,
             c.SubtitleAddonUrl,
             c.SubtitleAddonAuth,
-            c.SubtitleAddonOnly
+            c.SubtitleAddonOnly,
+            CleanUploader(c.SubtitleUploader)
         );
 
     public SubtitleSelection Validate()
@@ -65,6 +75,7 @@ public sealed record SubtitleSelection(
             Password = Source == "opensubtitles" && !string.IsNullOrWhiteSpace(Password) ? Password : "",
             AddonUrl = Source == "addon" ? SubtitleAddon.Normalize(AddonUrl) : "",
             AddonAuth = Source == "addon" ? AddonAuth : "",
+            Uploader = CleanUploader(Uploader),
         };
     }
 }

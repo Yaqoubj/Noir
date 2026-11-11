@@ -17,7 +17,8 @@ public sealed record SubtitleCandidate(
     string Url,
     bool HashMatch,
     int Score,
-    SubtitleProviderReference? Provider = null
+    SubtitleProviderReference? Provider = null,
+    string Uploader = ""
 );
 
 public sealed record SubtitleAsset(string Language, string Name, string Url);
@@ -39,6 +40,14 @@ public sealed class SubtitleDownloads
         backupDirectory = Path.Combine(profile, "subtitle-originals");
         Directory.CreateDirectory(backupDirectory);
     }
+
+    // A preference, never a filter: matching uploaders (case-insensitive) sort first, everything else follows in its own order.
+    public static bool PrefersUploader(SubtitleCandidate candidate, string uploader) =>
+        uploader.Trim().Length > 0 && candidate.Uploader.Equals(uploader.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    // A refused timing check whose raw result is this far from zero belongs to some other video, not a slightly different encode.
+    public static bool FarOff(double offset, double scale) =>
+        !double.IsFinite(offset) || !double.IsFinite(scale) || Math.Abs(offset) > 10 || Math.Abs(scale - 1) > .003;
 
     public static string Language(string value) =>
         value.Trim().ToLowerInvariant() switch
@@ -257,7 +266,8 @@ public sealed class SubtitleDownloads
         CancellationToken ct,
         List<SubtitleAsset>? pack = null,
         bool skipEmbedded = false,
-        VideoItem? streamTarget = null
+        VideoItem? streamTarget = null,
+        bool replace = false
     )
     {
         await work.WaitAsync(ct);
@@ -285,8 +295,10 @@ public sealed class SubtitleDownloads
                 var label = lang == "ar" ? "Arabic" : "English";
                 var existing = MobileSubtitles
                     .Find(target, requireVideo: streamTarget == null)
-                    .FirstOrDefault(s => SidecarLanguage(s.Path) == lang);
-                if (existing.Path != null)
+                    .Where(s => SidecarLanguage(s.Path) == lang)
+                    .Select(s => s.Path)
+                    .ToList();
+                if (existing.Count > 0 && !replace)
                 {
                     messages.Add(label + " already saved");
                     continue;
@@ -301,16 +313,10 @@ public sealed class SubtitleDownloads
                     continue;
                 }
                 var bundled = settings.Chosen ? null : pack?.FirstOrDefault(s => s.Language == lang);
-                string link,
-                    ext;
-                bool exact;
-                SubtitleCandidate? candidate = null;
+                SubtitleCandidate candidate;
+                var options = new List<SubtitleCandidate>();
                 if (bundled != null)
-                {
-                    link = bundled.Url;
-                    ext = Path.GetExtension(bundled.Name).ToLowerInvariant();
-                    exact = true;
-                }
+                    candidate = new("", lang, bundled.Name, "", bundled.Url, true, 0);
                 else
                 {
                     try
@@ -348,8 +354,8 @@ public sealed class SubtitleDownloads
                         messages.Add(label + " lookup unavailable");
                         continue;
                     }
-                    var best = found.FirstOrDefault(s => s.Language == lang);
-                    if (best == null)
+                    options = found.Where(s => s.Language == lang).ToList();
+                    if (options.Count == 0)
                     {
                         messages.Add(
                             lookupFailures.TryGetValue(lang, out var failure) ? failure.Message
@@ -359,29 +365,16 @@ public sealed class SubtitleDownloads
                         );
                         continue;
                     }
-                    candidate = best;
-                    link = best.Url;
-                    ext = Path.GetExtension(best.Name).ToLowerInvariant();
-                    if (!TextSubtitle(best.Name))
-                        ext = ".srt";
-                    exact = best.HashMatch;
+                    candidate = options[0];
                 }
                 try
                 {
-                    byte[] data;
+                    var used = candidate;
+                    var fellBack = false;
+                    Obtained first;
                     try
                     {
-                        if (candidate?.Provider != null)
-                        {
-                            var downloaded = await providers.Download(candidate, ct);
-                            data = downloaded.Bytes;
-                            if (TextSubtitle(downloaded.Name))
-                                ext = Path.GetExtension(downloaded.Name).ToLowerInvariant();
-                        }
-                        else
-                            data = settings.Chosen
-                                ? await providers.File(settings, link, ct)
-                                : await Download(link, ct);
+                        first = await Obtain(candidate, settings, ct);
                     }
                     catch (SubtitleSourceException) when (settings.Chosen && !settings.Only)
                     {
@@ -389,33 +382,92 @@ public sealed class SubtitleDownloads
                         var best = fallback.FirstOrDefault(s => s.Language == lang);
                         if (best == null)
                             throw;
-                        data = await providers.File(settings, best.Url, ct);
-                        ext = TextSubtitle(best.Name) ? Path.GetExtension(best.Name).ToLowerInvariant() : ".srt";
-                        exact = best.HashMatch;
+                        first = Ready(await providers.File(settings, best.Url, ct), best);
+                        used = best;
+                        fellBack = true;
                     }
-                    var text = Decode(data);
-                    if (!ValidText(text, ext))
-                        throw new IOException("Invalid subtitle response");
                     var destination = Path.Combine(
                         Path.GetDirectoryName(target.Path)!,
-                        Path.GetFileNameWithoutExtension(target.Path) + "." + lang + ext
+                        Path.GetFileNameWithoutExtension(target.Path) + "." + lang + first.Ext
                     );
-                    var temp = destination + "." + Guid.NewGuid().ToString("N") + ".tmp";
-                    await File.WriteAllTextAsync(temp, text, new UTF8Encoding(false), ct);
-                    try
+                    // The saved subtitle is moved aside only once its replacement is written beside the video;
+                    // if the new file cannot be put in place, the old ones move back.
+                    await WriteNew(destination, first.Text, ct, replace ? existing : null);
+                    string timing;
+                    SyncResult? checkedTiming = null;
+                    if (autoSync && !first.Exact && streamTarget == null)
                     {
-                        File.Move(temp, destination, false);
+                        checkedTiming = await SyncDetailed(item.Path, destination, ct);
+                        timing = checkedTiming.Value.Text;
                     }
-                    finally
+                    else
+                        timing = first.Exact
+                            ? "release matched"
+                            : "timing unchanged · adjust in Subtitles → Timing if needed";
+                    var doubtful = false;
+                    // A refusal that is far off means this subtitle probably belongs to another video: one more candidate, then stop.
+                    if (checkedTiming is { Far: true } && !fellBack && bundled == null && options.Count > 1)
                     {
-                        if (File.Exists(temp))
-                            File.Delete(temp);
+                        var folder = Path.Combine(
+                            Path.GetTempPath(),
+                            "noir-subtitle-alt-" + Guid.NewGuid().ToString("N")
+                        );
+                        var alt = Path.Combine(folder, Path.GetFileName(destination));
+                        try
+                        {
+                            var second = await Obtain(options[1], settings, ct);
+                            Directory.CreateDirectory(folder);
+                            await File.WriteAllTextAsync(alt, second.Text, new UTF8Encoding(false), ct);
+                            var other = second.Exact
+                                ? new SyncResult("release matched", true, 0, 1)
+                                : await SyncDetailed(item.Path, alt, ct);
+                            if (other.Accepted || other.Close)
+                            {
+                                ReplaceSubtitle(alt, destination);
+                                var altBackup = BackupFor(alt);
+                                if (File.Exists(altBackup))
+                                    File.Move(altBackup, BackupFor(destination), true);
+                                used = options[1];
+                                timing = other.Text;
+                            }
+                            else
+                                doubtful = true;
+                        }
+                        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                        {
+                            throw;
+                        }
+                        catch (Exception e)
+                            when (e
+                                    is IOException
+                                        or HttpRequestException
+                                        or InvalidDataException
+                                        or UnauthorizedAccessException
+                                || e is OperationCanceledException
+                            )
+                        {
+                            doubtful = true;
+                        }
+                        finally
+                        {
+                            try
+                            {
+                                if (File.Exists(BackupFor(alt)))
+                                    File.Delete(BackupFor(alt));
+                                if (Directory.Exists(folder))
+                                    Directory.Delete(folder, true);
+                            }
+                            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+                        }
                     }
-                    var timing =
-                        autoSync && !exact && streamTarget == null ? await Sync(item.Path, destination, ct)
-                        : exact ? "release matched"
-                        : "timing unchanged · adjust in Subtitles → Timing if needed";
-                    messages.Add(label + " saved · " + timing);
+                    else if (checkedTiming is { Far: true })
+                        doubtful = true;
+                    messages.Add(
+                        SavedFrom(label, bundled != null, used, settings, fellBack)
+                            + " · "
+                            + timing
+                            + (doubtful ? " · may not match this video · try Replace" : "")
+                    );
                 }
                 catch (SubtitleSourceException e)
                 {
@@ -441,17 +493,117 @@ public sealed class SubtitleDownloads
         }
     }
 
-    public async Task<string> Sync(string video, string subtitle, CancellationToken ct)
+    internal readonly record struct SyncResult(string Text, bool Accepted, double? RawOffset, double RawScale)
     {
-        if (!File.Exists(video) || !File.Exists(subtitle))
-            throw new IOException("Save the video and subtitles first.");
-        var backup = Path.Combine(
+        // Refused, and the raw result says another video (or a badly different cut).
+        public bool Far => !Accepted && RawOffset is { } o && FarOff(o, RawScale);
+
+        // Refused only because the match was not confident, but the raw offset and scale are small.
+        public bool Close => !Accepted && RawOffset is { } o && !FarOff(o, RawScale);
+    }
+
+    readonly record struct Obtained(string Text, string Ext, bool Exact, SubtitleCandidate Used);
+
+    static Obtained Ready(byte[] data, SubtitleCandidate candidate, string? named = null)
+    {
+        var ext = Path.GetExtension(named ?? candidate.Name).ToLowerInvariant();
+        if (!TextSubtitle(named ?? candidate.Name))
+            ext = ".srt";
+        var text = Decode(data);
+        if (!ValidText(text, ext))
+            throw new IOException("Invalid subtitle response");
+        return new(text, ext, candidate.HashMatch, candidate);
+    }
+
+    async Task<Obtained> Obtain(SubtitleCandidate candidate, SubtitleSelection settings, CancellationToken ct)
+    {
+        if (candidate.Provider != null)
+        {
+            var downloaded = await providers.Download(candidate, ct);
+            return Ready(downloaded.Bytes, candidate, TextSubtitle(downloaded.Name) ? downloaded.Name : null);
+        }
+        return Ready(
+            settings.Chosen ? await providers.File(settings, candidate.Url, ct) : await Download(candidate.Url, ct),
+            candidate
+        );
+    }
+
+    // "English saved from SubDL by Alice", "SubDL had no Arabic · saved from the free default", "English saved from the release".
+    static string SavedFrom(string label, bool pack, SubtitleCandidate used, SubtitleSelection settings, bool fellBack)
+    {
+        if (pack)
+            return label + " saved from the release";
+        if (used.Provider != null)
+            return label
+                + " saved from "
+                + used.Provider.Selection.Name
+                + (used.Uploader.Length > 0 ? " by " + used.Uploader : "");
+        return settings.Chosen
+            ? settings.Name + (fellBack ? " couldn't provide " : " had no ") + label + " · saved from the free default"
+            : label + " saved from the free default";
+    }
+
+    string BackupFor(string subtitle) =>
+        Path.Combine(
             backupDirectory,
             Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(subtitle)))
                 + Path.GetExtension(subtitle).ToLowerInvariant()
         );
-        var (message, offset, _) = await Align(video, subtitle, ct, backup);
-        return offset == null ? message : $"auto-synced ({offset:+0.00;-0.00;0.00}s)";
+
+    // Replace saved subtitles: the old files (and their auto-sync originals) go to the same backup folder, never deleted.
+    List<(string From, string To)> KeepReplaced(IEnumerable<string> saved, string destination)
+    {
+        var stamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
+        var old = saved.ToList();
+        var moved = new List<(string From, string To)>();
+        foreach (
+            var path in old.Append(destination).Concat(old.Select(BackupFor)).Append(BackupFor(destination)).Distinct()
+        )
+            if (File.Exists(path))
+            {
+                var to = Path.Combine(
+                    backupDirectory,
+                    "replaced-" + stamp + "-" + Guid.NewGuid().ToString("N")[..6] + "-" + Path.GetFileName(path)
+                );
+                File.Move(path, to, false);
+                moved.Add((path, to));
+            }
+        return moved;
+    }
+
+    async Task WriteNew(string destination, string text, CancellationToken ct, IEnumerable<string>? replacing = null)
+    {
+        var temp = destination + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        await File.WriteAllTextAsync(temp, text, new UTF8Encoding(false), ct);
+        List<(string From, string To)> moved = [];
+        try
+        {
+            if (replacing != null)
+                moved = KeepReplaced(replacing, destination);
+            File.Move(temp, destination, false);
+            moved.Clear();
+        }
+        finally
+        {
+            if (File.Exists(temp))
+                File.Delete(temp);
+            for (var n = moved.Count - 1; n >= 0; n--)
+                if (!File.Exists(moved[n].From))
+                    File.Move(moved[n].To, moved[n].From, false);
+        }
+    }
+
+    public async Task<string> Sync(string video, string subtitle, CancellationToken ct) =>
+        (await SyncDetailed(video, subtitle, ct)).Text;
+
+    internal async Task<SyncResult> SyncDetailed(string video, string subtitle, CancellationToken ct)
+    {
+        if (!File.Exists(video) || !File.Exists(subtitle))
+            throw new IOException("Save the video and subtitles first.");
+        var (message, offset, _, rawOffset, rawScale) = await Align(video, subtitle, ct, BackupFor(subtitle));
+        return offset == null
+            ? new(message, false, rawOffset, rawScale)
+            : new($"auto-synced ({offset:+0.00;-0.00;0.00}s)", true, offset, rawScale);
     }
 
     // Subtitles built into the video can be off too; check a copy and keep it beside the video only when it moved.
@@ -472,7 +624,7 @@ public sealed class SubtitleDownloads
             var extracted = Path.Combine(folder, "track" + track.Extension);
             if (!await EmbeddedSubtitles.Extract(video, track.Index, extracted, ct))
                 return "timing check unavailable";
-            var (message, offset, scale) = await Align(video, extracted, ct, null, audio: true);
+            var (message, offset, scale, _, _) = await Align(video, extracted, ct, null, audio: true);
             if (offset == null)
                 return message == "timing uncertain · original kept"
                     ? "timing uncertain · built-in track kept"
@@ -848,7 +1000,8 @@ public sealed class SubtitleDownloads
         Regex.IsMatch(name, @"(?i)\.synced\.(en|ar)(\.(srt|ass|ssa|vtt))?$");
 
     // Offset is null when the subtitle was left unchanged; on success the subtitle file is replaced in place.
-    async Task<(string Message, double? Offset, double Scale)> Align(
+    // On a refusal the tool's raw offset and scale come back too (RawOffset is null when the tool gave none).
+    async Task<(string Message, double? Offset, double Scale, double? RawOffset, double RawScale)> Align(
         string video,
         string subtitle,
         CancellationToken ct,
@@ -857,69 +1010,58 @@ public sealed class SubtitleDownloads
     )
     {
         var tool = Path.Combine(ToolRoot, "NoirSubtitleSync.exe");
-        if (!File.Exists(tool))
-            return ("automatic timing tool unavailable", null, 1);
+        if (ToolOverride == null && !File.Exists(tool))
+            return ("automatic timing tool unavailable", null, 1, null, 1);
         var ext = Path.GetExtension(subtitle).ToLowerInvariant();
         if (ext is not (".srt" or ".ass" or ".ssa" or ".vtt"))
-            return ("timing unchanged", null, 1);
+            return ("timing unchanged", null, 1, null, 1);
         var output = Path.Combine(
             Path.GetDirectoryName(subtitle)!,
             Path.GetFileNameWithoutExtension(subtitle) + "." + Guid.NewGuid().ToString("N") + ext
         );
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(TimeSpan.FromMinutes(4));
-        var start = new ProcessStartInfo(tool)
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            WorkingDirectory = Path.GetDirectoryName(tool)!,
-        };
-        foreach (var a in new[] { video, subtitle, output })
-            start.ArgumentList.Add(a);
-        if (audio)
-            start.ArgumentList.Add("--audio");
-        using var process = new Process { StartInfo = start };
         try
         {
-            process.Start();
-            try
-            {
-                process.PriorityClass = ProcessPriorityClass.BelowNormal;
-            }
-            catch (System.ComponentModel.Win32Exception) { }
-            var stdout = process.StandardOutput.ReadToEndAsync(timeout.Token);
-            var stderr = process.StandardError.ReadToEndAsync(timeout.Token);
-            try
-            {
-                await process.WaitForExitAsync(timeout.Token);
-            }
-            catch
-            {
-                if (!process.HasExited)
-                    process.Kill(true);
-                throw;
-            }
-            var json = await stdout;
-            await stderr;
-            if (process.ExitCode != 0 || !File.Exists(output))
-                return ("timing needs manual adjustment", null, 1);
+            var arguments = new List<string> { video, subtitle, output };
+            if (audio)
+                arguments.Add("--audio");
+            var (exit, json) = await RunTool(arguments, TimeSpan.FromMinutes(4), ct);
+            if (exit != 0)
+                return ("timing needs manual adjustment", null, 1, null, 1);
             using var result = JsonDocument.Parse(json.Trim());
+            double? rawOffset = null;
+            var rawScale = 1d;
+            if (
+                result.RootElement.TryGetProperty("offset", out var o)
+                && o.ValueKind == JsonValueKind.Number
+                && o.TryGetDouble(out var oValue)
+                && double.IsFinite(oValue)
+            )
+            {
+                rawOffset = oValue;
+                if (
+                    result.RootElement.TryGetProperty("scale", out var sc)
+                    && sc.ValueKind == JsonValueKind.Number
+                    && sc.TryGetDouble(out var sValue)
+                    && double.IsFinite(sValue)
+                )
+                    rawScale = sValue;
+            }
             if (!result.RootElement.TryGetProperty("accepted", out var ok) || ok.ValueKind != JsonValueKind.True)
-                return ("timing uncertain · original kept", null, 1);
+                return ("timing uncertain · original kept", null, 1, rawOffset, rawScale);
+            if (!File.Exists(output))
+                return ("timing needs manual adjustment", null, 1, null, 1);
             var offset = result.RootElement.GetProperty("offset").GetDouble();
             var scale = result.RootElement.GetProperty("scale").GetDouble();
             if (!AcceptTiming(offset, scale) || !ValidText(await File.ReadAllTextAsync(output, ct), ext))
-                return ("timing uncertain · original kept", null, 1);
+                return ("timing uncertain · original kept", null, 1, offset, scale);
             if (backup != null && !File.Exists(backup))
                 File.Copy(subtitle, backup, false);
             ReplaceSubtitle(output, subtitle);
-            return ("", offset, scale);
+            return ("", offset, scale, offset, scale);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            return ("timing check timed out · original kept", null, 1);
+            return ("timing check timed out · original kept", null, 1, null, 1);
         }
         catch (Exception e)
             when (e
@@ -931,7 +1073,7 @@ public sealed class SubtitleDownloads
                         or KeyNotFoundException
             )
         {
-            return ("timing check unavailable · original kept", null, 1);
+            return ("timing check unavailable · original kept", null, 1, null, 1);
         }
         finally
         {

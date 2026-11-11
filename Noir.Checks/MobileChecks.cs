@@ -32,6 +32,22 @@ static class MobileChecks
             s.MobileSnapshot().Items.Count == 3,
             "Phone receives full known episode counts including unavailable episodes"
         );
+        {
+            var (trakt, serializd) = (s.State.SyncTrakt, s.State.SyncSerializd);
+            s.State.SyncTrakt = true;
+            s.State.SyncSerializd = false;
+            var camel = JsonSerializer.Serialize(
+                s.MobileSnapshot(),
+                new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }
+            );
+            check(
+                camel.Contains("\"syncTrakt\":true")
+                    && camel.Contains("\"syncSerializd\":false")
+                    && camel.Contains("\"reviewTitle\":"),
+                "Phone receives the PC's watch-sync switches and each title's review title"
+            );
+            (s.State.SyncTrakt, s.State.SyncSerializd) = (trakt, serializd);
+        }
         var at = DateTimeOffset.UtcNow.AddSeconds(1).ToUnixTimeMilliseconds();
         var pcRevision = s.GetProgress(i)!.UpdatedAt;
         var op = new MobileOperation
@@ -331,6 +347,7 @@ static class MobileChecks
             final.MobileSnapshot().Items.Count(x => x.Group == i.GroupKey) == 3 && final.ViewingHistory(i).Count == 1,
             "Deleted files retain phone-synced history and complete counts across restarts"
         );
+        CommunityBackoffChecks.Run(root, check);
     }
 
     static string PlaceholderId(string group, int season, int episode) =>

@@ -31,6 +31,7 @@ final class PhoneDownloadSettings {
         defaults(value);if(!java.util.Arrays.asList("off","ratio","forever").contains(value.optString("torrentSharing"))||value.optInt("torrentUploadKB")<1||value.optInt("torrentUploadKB")>1048576)throw new IOException("Check the sharing upload limit.");
         String manifest=value.optString("manifest").trim();if(!manifest.isEmpty())PhoneDownloadProvider.streamUri(manifest,"tt1",true,0,0);
         DataStore.put(value,"subtitleAddonUrl",SubtitleClient.normalizeAddon(value.optString("subtitleAddonUrl")));
+        DataStore.put(value,"subtitleUploader",value.optString("subtitleUploader").trim());
         if(!java.util.Arrays.asList("","opensubtitles","subdl","subsource","wyzie","addon").contains(value.optString("subtitleSource")))throw new IOException("Choose a subtitle source.");
         if(value.has("subtitleSiteKeys")){JSONObject clean=new JSONObject(),keys=value.optJSONObject("subtitleSiteKeys");for(String site:SubtitleSources.SITES)if(keys!=null&&!keys.optString(site).isEmpty())DataStore.put(clean,site,keys.optString(site));DataStore.put(value,"subtitleSiteKeys",clean);}
         if(value.optLong("maxEpisodeBytes")<0)throw new IOException("Enter a positive maximum size.");
@@ -49,6 +50,6 @@ final class PhoneDownloadSettings {
         String source=value.optString("subtitleSource");if(source.isEmpty()&&!value.optString("subtitleAddonUrl").isEmpty())source="addon";if(!java.util.Arrays.asList("","opensubtitles","subdl","subsource","wyzie","addon").contains(source))source="";
         for(String site:SubtitleSources.SITES){String key=sent!=null&&!sent.optString(site).isEmpty()?sent.optString(site):old==null?"":old.optString(site);if(!key.isEmpty())DataStore.put(keys,site,key);}
         if(java.util.Arrays.asList(SubtitleSources.SITES).contains(source)&&!value.optString("subtitleApiKey").isEmpty())DataStore.put(keys,source,value.optString("subtitleApiKey"));
-        DataStore.put(value,"subtitleSource",source);DataStore.put(value,"subtitleSiteKeys",keys);return value;
+        DataStore.put(value,"subtitleUploader",value.optString("subtitleUploader").trim());DataStore.put(value,"subtitleSource",source);DataStore.put(value,"subtitleSiteKeys",keys);return value;
     }
 }

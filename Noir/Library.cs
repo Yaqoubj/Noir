@@ -51,6 +51,7 @@ public sealed class PlayerState
     public bool SyncTrakt { get; set; }
     public bool SyncSerializd { get; set; }
     public Dictionary<string, WatchSyncJob> WatchSync { get; set; } = new();
+    public Dictionary<string, SyncPaceState> SyncPace { get; set; } = new();
     public Dictionary<string, string> SerializdSeasons { get; set; } = new();
     public Dictionary<string, CatalogEntry> Catalog { get; set; } = new();
     public Dictionary<string, string> CatalogAliases { get; set; } = new();
@@ -137,6 +138,12 @@ public sealed class ImportBatch
 
     // Ratings this import created; undo removes only these.
     public List<string> RatedItemIds { get; set; } = [];
+
+    // Favourites, likes, reactions and season ratings a backup merge added; undo removes only these.
+    public List<string> FavoriteKeys { get; set; } = [];
+    public List<string> LikeKeys { get; set; } = [];
+    public List<string> ReactionKeys { get; set; } = [];
+    public List<string> SeasonRatingKeys { get; set; } = [];
 
     // Undated guesses a dated import replaced; undo puts them back.
     public List<DisplacedViewing> Displaced { get; set; } = [];

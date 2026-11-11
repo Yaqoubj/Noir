@@ -411,6 +411,167 @@ static class DownloadChecks
         );
         using var workerReload = new PcDownloads(workerStore, workerProvider, start: false);
         check(workerReload.Jobs().All(j => j.Status == "Completed"), "Completed queue receipts survive restart");
+        await Resilience(dir, check);
+    }
+
+    // F3 (interrupted jobs continue, user pauses stay) and F4 (network drop, Last-Modified validator).
+    static async Task Resilience(string dir, Action<bool, string> check)
+    {
+        var root = Path.Combine(dir, "resilience");
+        var media = Path.Combine(root, "shows");
+        Directory.CreateDirectory(media);
+        var store = new LibraryStore(Path.Combine(root, "profile"));
+        store.State.Roots = [new() { Path = media }];
+        store.State.Catalog.Clear();
+        store.State.Language = "en";
+        VideoItem Episode(int n) =>
+            new()
+            {
+                Id = "resilience-" + n,
+                CollectionKey = "show:resilience",
+                Title = "Resilient",
+                Year = 2026,
+                Season = 1,
+                Episode = n,
+                ImdbId = "tt456",
+                Available = false,
+            };
+        PcDownloadJob Job(int n, string status, bool interrupted = false)
+        {
+            var item = Episode(n);
+            store.State.Catalog[item.Id] = new() { Item = item };
+            return new()
+            {
+                Name = item.Label,
+                Target = item,
+                Root = media,
+                Destination = DownloadNaming.Destination(media, item, "Resilient.S01E0" + n + ".mkv"),
+                Status = status,
+                Interrupted = interrupted,
+                Message = interrupted ? "Interrupted · resume to continue" : "",
+                Size = 8192,
+            };
+        }
+        var crashed = Job(1, "Downloading");
+        var closed = Job(2, "Paused", true);
+        var paused = Job(3, "Paused");
+        store.Save();
+        File.WriteAllText(
+            Path.Combine(store.DataDirectory, "pc-downloads.json"),
+            JsonSerializer.Serialize(new[] { crashed, closed, paused })
+        );
+        using (var reopened = new PcDownloads(store, new FakeProvider(), start: false))
+        {
+            var jobs = reopened.Jobs();
+            check(
+                jobs.Single(j => j.Id == crashed.Id).Status == "Queued"
+                    && jobs.Single(j => j.Id == closed.Id).Status == "Queued"
+                    && jobs.Single(j => j.Id == closed.Id).Message == "",
+                "Downloads cut off by closing Noir come back Queued and continue by themselves"
+            );
+            check(
+                jobs.Single(j => j.Id == paused.Id).Status == "Paused"
+                    && !jobs.Single(j => j.Id == paused.Id).Interrupted,
+                "A download the user paused stays paused after a restart"
+            );
+            var old = JsonSerializer.Deserialize<PcDownloadJob>("{\"Status\":\"Queued\",\"Hash\":\"abc\"}")!;
+            check(
+                !old.Interrupted && old.Trackers.Count == 0 && old.LastModified.Length == 0,
+                "Old job files without trackers, validator or interrupted marker still load"
+            );
+        }
+
+        var bytes = Enumerable.Range(0, 8192).Select(n => (byte)(n % 251)).ToArray();
+        var drop = Job(4, "Downloading");
+        var handler = new DropHandler(bytes) { Failures = 4 };
+        using var http = new HttpClient(handler);
+        using var downloader = new PcDownloads(store, new FakeProvider(), http, start: false);
+        var waits = new List<TimeSpan>();
+        downloader.Pause = (t, _) =>
+        {
+            waits.Add(t);
+            return Task.CompletedTask;
+        };
+        var part = Path.Combine(store.DataDirectory, "download-parts", drop.Id + ".part");
+        Directory.CreateDirectory(Path.GetDirectoryName(part)!);
+        File.WriteAllBytes(part, bytes[..1000]);
+        drop.LastModified = DropHandler.Stamp;
+        await downloader.Transfer(drop, "https://cdn.example.invalid/file", CancellationToken.None);
+        check(
+            File.ReadAllBytes(drop.Destination).SequenceEqual(bytes)
+                && waits.Select(w => (int)w.TotalSeconds).SequenceEqual(new[] { 5, 15, 30, 60 }),
+            "A network drop is retried with growing waits (5, 15, 30, 60 s) and the download completes"
+        );
+        check(
+            handler.IfRange == DropHandler.Stamp && handler.Start == 1000,
+            "A server without ETag resumes the partial file using Last-Modified as the If-Range validator"
+        );
+
+        var dead = Job(5, "Downloading");
+        var deadHandler = new DropHandler(bytes) { Failures = 100 };
+        using var deadHttp = new HttpClient(deadHandler);
+        using var deadDownloads = new PcDownloads(store, new FakeProvider(), deadHttp, start: false);
+        var deadWaits = new List<TimeSpan>();
+        deadDownloads.Pause = (t, _) =>
+        {
+            deadWaits.Add(t);
+            return Task.CompletedTask;
+        };
+        var gaveUp = false;
+        try
+        {
+            await deadDownloads.Transfer(dead, "https://cdn.example.invalid/file", CancellationToken.None);
+        }
+        catch (HttpRequestException)
+        {
+            gaveUp = true;
+        }
+        check(
+            gaveUp && deadWaits.Count == 6 && deadWaits.Max() == TimeSpan.FromSeconds(120),
+            "A download that never reconnects gives up after six waits, none longer than 120 s"
+        );
+
+        var bare = Job(6, "Downloading");
+        var barePart = Path.Combine(store.DataDirectory, "download-parts", bare.Id + ".part");
+        File.WriteAllBytes(barePart, bytes[..500]);
+        var bareHandler = new DropHandler(bytes) { Validators = false };
+        using var bareHttp = new HttpClient(bareHandler);
+        using var bareDownloads = new PcDownloads(store, new FakeProvider(), bareHttp, start: false);
+        await bareDownloads.Transfer(bare, "https://cdn.example.invalid/file", CancellationToken.None);
+        check(
+            bareHandler.Start == 0 && File.ReadAllBytes(bare.Destination).SequenceEqual(bytes),
+            "With no ETag and no Last-Modified a resume still restarts from zero"
+        );
+    }
+
+    sealed class DropHandler(byte[] bytes) : HttpMessageHandler
+    {
+        public const string Stamp = "Wed, 21 Oct 2026 07:28:00 GMT";
+        public int Failures;
+        public bool Validators = true;
+        public long Start;
+        public string IfRange = "";
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            if (Failures-- > 0)
+                throw new HttpRequestException("network down");
+            Start = request.Headers.Range?.Ranges.First().From ?? 0;
+            IfRange = request.Headers.TryGetValues("If-Range", out var v) ? v.First() : "";
+            var response = new HttpResponseMessage(Start > 0 ? HttpStatusCode.PartialContent : HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(bytes[(int)Start..]),
+            };
+            if (Validators)
+                response.Content.Headers.LastModified = DateTimeOffset.Parse(Stamp);
+            if (Start > 0)
+                response.Content.Headers.ContentRange = new ContentRangeHeaderValue(
+                    Start,
+                    bytes.Length - 1,
+                    bytes.Length
+                );
+            return Task.FromResult(response);
+        }
     }
 
     sealed class FakeProvider : IDownloadProvider

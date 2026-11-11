@@ -243,6 +243,25 @@ public sealed partial class LibraryStore
                     if (other.EpisodeSchedules.TryGetValue(entry.Item.GroupKey, out var schedule))
                         State.EpisodeSchedules.TryAdd(mine.GroupKey, schedule);
                 }
+                // Favourites, likes, reactions and season ratings: what is already here wins.
+                string MapKey(string key) =>
+                    other.Catalog.TryGetValue(key, out var known) ? Remember(known.Item).Item.Id : key;
+                // Only what this merge added is recorded, so Undo removes exactly that.
+                foreach (var key in other.Favorites)
+                    if (State.Favorites.Count < 4 && !State.Favorites.Contains(MapKey(key)))
+                    {
+                        State.Favorites.Add(MapKey(key));
+                        record.FavoriteKeys.Add(MapKey(key));
+                    }
+                foreach (var key in other.Likes)
+                    if (State.Likes.Add(MapKey(key)))
+                        record.LikeKeys.Add(MapKey(key));
+                foreach (var (key, mood) in other.Reactions)
+                    if (State.Reactions.TryAdd(MapKey(key), mood))
+                        record.ReactionKeys.Add(MapKey(key));
+                foreach (var (key, score) in other.SeasonRatings)
+                    if (State.SeasonRatings.TryAdd(key, score))
+                        record.SeasonRatingKeys.Add(key);
                 foreach (var (name, members) in other.Collections)
                 {
                     if (!State.Collections.TryGetValue(name, out var set))
