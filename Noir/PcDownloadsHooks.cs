@@ -5,7 +5,8 @@ namespace Noir;
 public sealed partial class PcDownloads
 {
     /// <summary>Stop the torrent behind this job (download or seeding). When deleteData is true, also delete its incoming/partial data. Safe to call for non-torrent jobs.</summary>
-    partial void TorrentStop(PcDownloadJob job,bool deleteData);
+    partial void TorrentStop(PcDownloadJob job, bool deleteData);
+
     /// <summary>The finished file of this job was moved to newPath by the user (Move to…/organizer). The torrent engine re-points seeding or stops it.</summary>
-    partial void TorrentFileMoved(PcDownloadJob job,string newPath);
+    partial void TorrentFileMoved(PcDownloadJob job, string newPath);
 }

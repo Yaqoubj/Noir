@@ -1,0 +1,5 @@
+# W6 formats C# only; XAML and project files keep their hand layout.
+*.xaml
+*.csproj
+*.props
+*.xml

@@ -5,128 +5,890 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+
 namespace Noir;
+
 public partial class MainWindow
 {
     async Task ValidateDownloads()
     {
-        var checks=new List<string>();void Check(bool ok,string label){if(!ok)throw new Exception(label);checks.Add(label);}
-        void Picture(FrameworkElement element,string name){element.UpdateLayout();var bitmap=new RenderTargetBitmap((int)element.ActualWidth,(int)element.ActualHeight,96,96,PixelFormats.Pbgra32);var drawing=new DrawingVisual();using(var context=drawing.RenderOpen())context.DrawRectangle(new VisualBrush(element),null,new Rect(0,0,element.ActualWidth,element.ActualHeight));bitmap.Render(drawing);var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));using var output=File.Create(Path.Combine(store.DataDirectory,name));encoder.Save(output);}
-        void HostPicture(string name){var host=(FrameworkElement)LibraryRoot.Parent;host.UpdateLayout();var bitmap=new RenderTargetBitmap((int)host.ActualWidth,(int)host.ActualHeight,96,96,PixelFormats.Pbgra32);bitmap.Render(host);var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));using var output=File.Create(Path.Combine(store.DataDirectory,name));encoder.Save(output);}
+        var checks = new List<string>();
+        void Check(bool ok, string label)
+        {
+            if (!ok)
+                throw new Exception(label);
+            checks.Add(label);
+        }
+        void Picture(FrameworkElement element, string name)
+        {
+            element.UpdateLayout();
+            var bitmap = new RenderTargetBitmap(
+                (int)element.ActualWidth,
+                (int)element.ActualHeight,
+                96,
+                96,
+                PixelFormats.Pbgra32
+            );
+            var drawing = new DrawingVisual();
+            using (var context = drawing.RenderOpen())
+                context.DrawRectangle(
+                    new VisualBrush(element),
+                    null,
+                    new Rect(0, 0, element.ActualWidth, element.ActualHeight)
+                );
+            bitmap.Render(drawing);
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(bitmap));
+            using var output = File.Create(Path.Combine(store.DataDirectory, name));
+            encoder.Save(output);
+        }
+        void HostPicture(string name)
+        {
+            var host = (FrameworkElement)LibraryRoot.Parent;
+            host.UpdateLayout();
+            var bitmap = new RenderTargetBitmap(
+                (int)host.ActualWidth,
+                (int)host.ActualHeight,
+                96,
+                96,
+                PixelFormats.Pbgra32
+            );
+            bitmap.Render(host);
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(bitmap));
+            using var output = File.Create(Path.Combine(store.DataDirectory, name));
+            encoder.Save(output);
+        }
         try
         {
-            var media=Path.Combine(store.DataDirectory,"fixture-media");Directory.CreateDirectory(media);store.State.Roots=[new(){Path=media}];store.State.Catalog.Clear();store.State.OnlineMetadata=false;
-            var item=new VideoItem{Id="download-ui",Title="Noir UI fixture",CollectionKey="ui-fixture",Year=2026,Season=1,Episode=1,ImdbId="tt123",Available=false};store.State.Catalog[item.Id]=new(){Item=item};store.State.EpisodeSchedules[item.GroupKey]=[new(){Season=1,Episode=1},new(){Season=1,Episode=2}];store.Save();File.Delete(Path.Combine(store.DataDirectory,"pc-downloads.json"));downloads=new(store,new UiDownloadProvider(),start:false,freeSpace:_=>10L*1024*1024*1024);downloads.Configure("https://example.invalid/fixture/manifest.json","fixture-not-real",media,"");
-            settingsSection="Downloads";Navigate("Settings");Check(Descendants(ContentPanel).OfType<PasswordBox>().Count()==6,"Both provider fields and every subtitle key, password and addon link hide private configuration");Check(Descendants(ContentPanel).OfType<CheckBox>().Any(b=>b.Content as string=="Download Arabic subtitles"),"Settings include Arabic subtitle download and automatic timing preferences");ContentScroll.ScrollToBottom();UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"download-settings.png"));
-            detailKey=item.GroupKey;page="Shows";Render();ContentScroll.ScrollToTop();UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"download-episode-actions.png"));Check(Descendants(ContentPanel).OfType<Button>().Any(b=>IconSet.Src(b.Content) is "[[download]] Download" or "[[play]] Stream"),"Unavailable episode has a visible Stream or Download button");
-            FindDownloads(item,true);await Task.Delay(150);var picker=FindSheet("Download")??throw new Exception("The download scope sheet did not open");var planner=(DependencyObject)picker.Overlay;
-            Check(Descendants(planner).OfType<Button>().Count(b=>b.Tag is string tag&&tag.StartsWith("DownloadScope:"))==4,"One scope sheet exposes episode, season, whole show and next episodes cards");
-            var moreOptions=Descendants(planner).OfType<Expander>().Single(e=>Equals(e.Tag,"DownloadMoreOptions"));Check(!moreOptions.IsExpanded,"More options starts as a one-line summary");
-            Check(!Descendants(planner).OfType<Button>().Any(b=>System.Windows.Automation.AutomationProperties.GetName(b)=="More next episodes"),"The next-episodes stepper is hidden until \"Next N episodes\" is chosen");Descendants(planner).OfType<Button>().Single(b=>Equals(b.Tag,"DownloadScope:Next N episodes")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));UpdateLayout();
-            var plus=Descendants(planner).OfType<Button>().Single(b=>System.Windows.Automation.AutomationProperties.GetName(b)=="More next episodes");plus.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));UpdateLayout();Check(Descendants(planner).OfType<TextBlock>().Any(t=>t.Text=="Next 4 episodes"),"Next episodes has a working plus stepper");Descendants(planner).OfType<Button>().Single(b=>System.Windows.Automation.AutomationProperties.GetName(b)=="Fewer next episodes").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            HostPicture("download-scope-en.png");moreOptions=Descendants(planner).OfType<Expander>().Single(e=>Equals(e.Tag,"DownloadMoreOptions"));moreOptions.IsExpanded=true;await Task.Delay(80);
-            Check(Descendants(planner).OfType<CheckBox>().All(b=>b.Content as string!="Only episodes I don't have")&&Descendants(planner).OfType<TextBlock>().Any(t=>t.Text=="Max total for this download"),"More options includes watched, quality, audio, per-episode and total limits; episodes you have are always skipped");moreOptions.IsExpanded=false;
-            Descendants(planner).OfType<Button>().Single(b=>b.Content as string=="Find releases").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));await Task.Delay(600);
-            Check(picker.Kind==SheetKind.Side&&picker.Panel.CornerRadius.TopLeft>=14&&MainWindow.OpenSheets.Contains(picker),"The season planner is an in-window side sheet, not a separate window");Check(OwnedWindows.Count==0,"Opening the planner creates no operating-system window");
-            Check(Descendants(planner).OfType<Button>().Any(b=>Equals(b.Tag,"DownloadScope:Whole show")),"The planner keeps the whole-show scope reachable during review");
-            Check(Descendants(planner).OfType<TextBlock>().Any(t=>t.Text=="Ready")&&Descendants(planner).OfType<TextBlock>().Any(t=>t.Text.Contains("Season pack covers 2 of 2")),"Episode cards show ready status and an explainable pack choice");
-            Picture(picker.Panel,"download-releases.png");HostPicture("season-planner-sheet-en.png");
-            var change=Descendants(planner).OfType<Button>().First(b=>b.Content as string=="Change");change.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            var alternative=change.ContextMenu.Items.OfType<MenuItem>().Single(m=>Descendants((DependencyObject)m.Header).OfType<TextBlock>().Any(t=>t.Text=="1080p single alternative"));alternative.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));change.ContextMenu.IsOpen=false;
-            Check(Descendants(planner).OfType<TextBlock>().Any(t=>t.Text=="Your choice · Ready"),"Change menu swaps a pack episode to an available single");
-            var episodeBoxes=Descendants(planner).OfType<CheckBox>().Where(b=>b.Content is TextBlock t&&t.Text.StartsWith("E")).ToList();Check(episodeBoxes.Count==2,"Season planner lists both known episodes");
-            episodeBoxes[1].IsChecked=false;Check(Descendants(planner).OfType<Button>().Any(b=>b.Content as string=="Download 1 episodes"),"Excluding an episode updates the primary action");episodeBoxes[1].IsChecked=true;
-            var auto=Descendants(planner).OfType<CheckBox>().Single(b=>b.Content as string=="Auto-download new episodes");auto.IsChecked=true;Check(downloads.SeasonPreferences(item.Id).AutoDownload,"The per-show automatic-download toggle persists immediately");auto.IsChecked=false;await Task.Delay(100);Check(FindSheet("Keep ready") is {} keep&&keep.Kind==SheetKind.Side,"Turning on automatic downloads opens Keep ready as a sheet over the planner");FindSheet("Keep ready")?.Close(false);
-            Picture(picker.Panel,"download-files.png");Check(picker.Footer.Visibility==Visibility.Visible&&picker.FooterButtons.Children.OfType<Button>().Last().Content as string=="Download 2 episodes","The sheet footer holds the plan summary and ends with the primary action");
-            var submit=Descendants(planner).OfType<Button>().Single(b=>b.Content as string=="Download 2 episodes");submit.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));await Task.Delay(300);if(readyValidationRun!=null)await readyValidationRun;Check(downloads.Jobs().Count(j=>j.Target.Title=="Noir UI fixture")==2&&downloads.Jobs().Any(j=>j.Hash==new string('b',40)),"One confirmation queues the chosen pack and swapped single");Check(page=="Downloads","Queued files open the permanent Downloads tab");Check(!MainWindow.OpenSheets.Any(),"Queuing closes the planner sheet");
-            bool Shown(string key)=>Descendants(ContentPanel).OfType<StackPanel>().Single(x=>Equals(x.Tag,"DownloadsSection:"+key)).Visibility==Visibility.Visible;
-            var onlyWaiting=Shown("waiting")&&!Shown("now")&&!Shown("attention")&&!Shown("ready");Check(onlyWaiting,"Sections with no downloads are hidden"+(onlyWaiting?"":$" [now={Shown("now")} waiting={Shown("waiting")} attention={Shown("attention")} ready={Shown("ready")} jobs={string.Join(",",downloads.Jobs().Select(j=>j.Status))}]"));Check(!Descendants(ContentPanel).OfType<Border>().Any(b=>Equals(b.Tag,"DownloadsEmpty")&&b.Visibility==Visibility.Visible),"The empty state is hidden while downloads exist");Picture(ContentPanel,"download-queue.png");var firstRow=Descendants(ContentPanel).OfType<ProgressBar>().First();ContentScroll.ScrollToBottom();var offset=ContentScroll.VerticalOffset;downloadPageUpdate?.Invoke();Check(Descendants(ContentPanel).OfType<ProgressBar>().Contains(firstRow)&&Math.Abs(ContentScroll.VerticalOffset-offset)<1,"Queue refresh preserves existing rows and scroll position");
-            downloads.Changed+=DownloadChanged;UpdateDownloadBadge();UpdateLayout();Check(!Descendants(DownloadsNav).OfType<TextBlock>().Any(t=>t.Text=="2"),"The rail Downloads icon carries no count badge");var first=downloads.Jobs().First(j=>j.Target.Title=="Noir UI fixture");downloads.Control(first.Id,"pause");await Task.Delay(100);UpdateDownloadsTop();Check(Descendants(ContentPanel).OfType<TextBlock>().Any(t=>Plain(t).StartsWith("Paused"))&&Descendants(DownloadsTop).OfType<TextBlock>().Any(t=>t.Text=="1"),"Download events update visible rows and the top-bar count automatically");downloads.Control(first.Id,"resume");await Task.Delay(100);UpdateDownloadsTop();Check(Descendants(DownloadsTop).OfType<TextBlock>().Any(t=>t.Text=="2"),"Resuming a job restores its active count");
-            await ValidateDownloadStates(media,item,Check,Picture,HostPicture);
-            await ValidateDownloadManagement(media,item,Check,Picture,HostPicture);
-            File.WriteAllText(Path.Combine(store.DataDirectory,"download-ui-checks.json"),JsonSerializer.Serialize(checks));
+            var media = Path.Combine(store.DataDirectory, "fixture-media");
+            Directory.CreateDirectory(media);
+            store.State.Roots = [new() { Path = media }];
+            store.State.Catalog.Clear();
+            store.State.OnlineMetadata = false;
+            var item = new VideoItem
+            {
+                Id = "download-ui",
+                Title = "Noir UI fixture",
+                CollectionKey = "ui-fixture",
+                Year = 2026,
+                Season = 1,
+                Episode = 1,
+                ImdbId = "tt123",
+                Available = false,
+            };
+            store.State.Catalog[item.Id] = new() { Item = item };
+            store.State.EpisodeSchedules[item.GroupKey] =
+            [
+                new() { Season = 1, Episode = 1 },
+                new() { Season = 1, Episode = 2 },
+            ];
+            store.Save();
+            File.Delete(Path.Combine(store.DataDirectory, "pc-downloads.json"));
+            downloads = new(store, new UiDownloadProvider(), start: false, freeSpace: _ => 10L * 1024 * 1024 * 1024);
+            downloads.Configure("https://example.invalid/fixture/manifest.json", "fixture-not-real", media, "");
+            settingsSection = "Downloads";
+            Navigate("Settings");
+            Check(
+                Descendants(ContentPanel).OfType<PasswordBox>().Count() == 6,
+                "Both provider fields and every subtitle key, password and addon link hide private configuration"
+            );
+            Check(
+                Descendants(ContentPanel)
+                    .OfType<CheckBox>()
+                    .Any(b => b.Content as string == "Download Arabic subtitles"),
+                "Settings include Arabic subtitle download and automatic timing preferences"
+            );
+            ContentScroll.ScrollToBottom();
+            UpdateLayout();
+            CaptureLibrary(Path.Combine(store.DataDirectory, "download-settings.png"));
+            detailKey = item.GroupKey;
+            page = "Shows";
+            Render();
+            ContentScroll.ScrollToTop();
+            UpdateLayout();
+            CaptureLibrary(Path.Combine(store.DataDirectory, "download-episode-actions.png"));
+            Check(
+                Descendants(ContentPanel)
+                    .OfType<Button>()
+                    .Any(b => IconSet.Src(b.Content) is "[[download]] Download" or "[[play]] Stream"),
+                "Unavailable episode has a visible Stream or Download button"
+            );
+            FindDownloads(item, true);
+            await Task.Delay(150);
+            var picker = FindSheet("Download") ?? throw new Exception("The download scope sheet did not open");
+            var planner = (DependencyObject)picker.Overlay;
+            Check(
+                Descendants(planner)
+                    .OfType<Button>()
+                    .Count(b => b.Tag is string tag && tag.StartsWith("DownloadScope:")) == 4,
+                "One scope sheet exposes episode, season, whole show and next episodes cards"
+            );
+            var moreOptions = Descendants(planner).OfType<Expander>().Single(e => Equals(e.Tag, "DownloadMoreOptions"));
+            Check(!moreOptions.IsExpanded, "More options starts as a one-line summary");
+            Check(
+                !Descendants(planner)
+                    .OfType<Button>()
+                    .Any(b => System.Windows.Automation.AutomationProperties.GetName(b) == "More next episodes"),
+                "The next-episodes stepper is hidden until \"Next N episodes\" is chosen"
+            );
+            Descendants(planner)
+                .OfType<Button>()
+                .Single(b => Equals(b.Tag, "DownloadScope:Next N episodes"))
+                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            UpdateLayout();
+            var plus = Descendants(planner)
+                .OfType<Button>()
+                .Single(b => System.Windows.Automation.AutomationProperties.GetName(b) == "More next episodes");
+            plus.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            UpdateLayout();
+            Check(
+                Descendants(planner).OfType<TextBlock>().Any(t => t.Text == "Next 4 episodes"),
+                "Next episodes has a working plus stepper"
+            );
+            Descendants(planner)
+                .OfType<Button>()
+                .Single(b => System.Windows.Automation.AutomationProperties.GetName(b) == "Fewer next episodes")
+                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            HostPicture("download-scope-en.png");
+            moreOptions = Descendants(planner).OfType<Expander>().Single(e => Equals(e.Tag, "DownloadMoreOptions"));
+            moreOptions.IsExpanded = true;
+            await Task.Delay(80);
+            Check(
+                Descendants(planner).OfType<CheckBox>().All(b => b.Content as string != "Only episodes I don't have")
+                    && Descendants(planner).OfType<TextBlock>().Any(t => t.Text == "Max total for this download"),
+                "More options includes watched, quality, audio, per-episode and total limits; episodes you have are always skipped"
+            );
+            moreOptions.IsExpanded = false;
+            Descendants(planner)
+                .OfType<Button>()
+                .Single(b => b.Content as string == "Find releases")
+                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await Task.Delay(600);
+            Check(
+                picker.Kind == SheetKind.Side
+                    && picker.Panel.CornerRadius.TopLeft >= 14
+                    && MainWindow.OpenSheets.Contains(picker),
+                "The season planner is an in-window side sheet, not a separate window"
+            );
+            Check(OwnedWindows.Count == 0, "Opening the planner creates no operating-system window");
+            Check(
+                Descendants(planner).OfType<Button>().Any(b => Equals(b.Tag, "DownloadScope:Whole show")),
+                "The planner keeps the whole-show scope reachable during review"
+            );
+            Check(
+                Descendants(planner).OfType<TextBlock>().Any(t => t.Text == "Ready")
+                    && Descendants(planner).OfType<TextBlock>().Any(t => t.Text.Contains("Season pack covers 2 of 2")),
+                "Episode cards show ready status and an explainable pack choice"
+            );
+            Picture(picker.Panel, "download-releases.png");
+            HostPicture("season-planner-sheet-en.png");
+            var change = Descendants(planner).OfType<Button>().First(b => b.Content as string == "Change");
+            change.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            var alternative = change
+                .ContextMenu.Items.OfType<MenuItem>()
+                .Single(m =>
+                    Descendants((DependencyObject)m.Header)
+                        .OfType<TextBlock>()
+                        .Any(t => t.Text == "1080p single alternative")
+                );
+            alternative.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            change.ContextMenu.IsOpen = false;
+            Check(
+                Descendants(planner).OfType<TextBlock>().Any(t => t.Text == "Your choice · Ready"),
+                "Change menu swaps a pack episode to an available single"
+            );
+            var episodeBoxes = Descendants(planner)
+                .OfType<CheckBox>()
+                .Where(b => b.Content is TextBlock t && t.Text.StartsWith("E"))
+                .ToList();
+            Check(episodeBoxes.Count == 2, "Season planner lists both known episodes");
+            episodeBoxes[1].IsChecked = false;
+            Check(
+                Descendants(planner).OfType<Button>().Any(b => b.Content as string == "Download 1 episodes"),
+                "Excluding an episode updates the primary action"
+            );
+            episodeBoxes[1].IsChecked = true;
+            var auto = Descendants(planner)
+                .OfType<CheckBox>()
+                .Single(b => b.Content as string == "Auto-download new episodes");
+            auto.IsChecked = true;
+            Check(
+                downloads.SeasonPreferences(item.Id).AutoDownload,
+                "The per-show automatic-download toggle persists immediately"
+            );
+            auto.IsChecked = false;
+            await Task.Delay(100);
+            Check(
+                FindSheet("Keep ready") is { } keep && keep.Kind == SheetKind.Side,
+                "Turning on automatic downloads opens Keep ready as a sheet over the planner"
+            );
+            FindSheet("Keep ready")?.Close(false);
+            Picture(picker.Panel, "download-files.png");
+            Check(
+                picker.Footer.Visibility == Visibility.Visible
+                    && picker.FooterButtons.Children.OfType<Button>().Last().Content as string == "Download 2 episodes",
+                "The sheet footer holds the plan summary and ends with the primary action"
+            );
+            var submit = Descendants(planner)
+                .OfType<Button>()
+                .Single(b => b.Content as string == "Download 2 episodes");
+            submit.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await Task.Delay(300);
+            if (readyValidationRun != null)
+                await readyValidationRun;
+            Check(
+                downloads.Jobs().Count(j => j.Target.Title == "Noir UI fixture") == 2
+                    && downloads.Jobs().Any(j => j.Hash == new string('b', 40)),
+                "One confirmation queues the chosen pack and swapped single"
+            );
+            Check(page == "Downloads", "Queued files open the permanent Downloads tab");
+            Check(!MainWindow.OpenSheets.Any(), "Queuing closes the planner sheet");
+            bool Shown(string key) =>
+                Descendants(ContentPanel)
+                    .OfType<StackPanel>()
+                    .Single(x => Equals(x.Tag, "DownloadsSection:" + key))
+                    .Visibility == Visibility.Visible;
+            var onlyWaiting = Shown("waiting") && !Shown("now") && !Shown("attention") && !Shown("ready");
+            Check(
+                onlyWaiting,
+                "Sections with no downloads are hidden"
+                    + (
+                        onlyWaiting
+                            ? ""
+                            : $" [now={Shown("now")} waiting={Shown("waiting")} attention={Shown("attention")} ready={Shown("ready")} jobs={string.Join(",", downloads.Jobs().Select(j => j.Status))}]"
+                    )
+            );
+            Check(
+                !Descendants(ContentPanel)
+                    .OfType<Border>()
+                    .Any(b => Equals(b.Tag, "DownloadsEmpty") && b.Visibility == Visibility.Visible),
+                "The empty state is hidden while downloads exist"
+            );
+            Picture(ContentPanel, "download-queue.png");
+            var firstRow = Descendants(ContentPanel).OfType<ProgressBar>().First();
+            ContentScroll.ScrollToBottom();
+            var offset = ContentScroll.VerticalOffset;
+            downloadPageUpdate?.Invoke();
+            Check(
+                Descendants(ContentPanel).OfType<ProgressBar>().Contains(firstRow)
+                    && Math.Abs(ContentScroll.VerticalOffset - offset) < 1,
+                "Queue refresh preserves existing rows and scroll position"
+            );
+            downloads.Changed += DownloadChanged;
+            UpdateDownloadBadge();
+            UpdateLayout();
+            Check(
+                !Descendants(DownloadsNav).OfType<TextBlock>().Any(t => t.Text == "2"),
+                "The rail Downloads icon carries no count badge"
+            );
+            var first = downloads.Jobs().First(j => j.Target.Title == "Noir UI fixture");
+            downloads.Control(first.Id, "pause");
+            await Task.Delay(100);
+            UpdateDownloadsTop();
+            Check(
+                Descendants(ContentPanel).OfType<TextBlock>().Any(t => Plain(t).StartsWith("Paused"))
+                    && Descendants(DownloadsTop).OfType<TextBlock>().Any(t => t.Text == "1"),
+                "Download events update visible rows and the top-bar count automatically"
+            );
+            downloads.Control(first.Id, "resume");
+            await Task.Delay(100);
+            UpdateDownloadsTop();
+            Check(
+                Descendants(DownloadsTop).OfType<TextBlock>().Any(t => t.Text == "2"),
+                "Resuming a job restores its active count"
+            );
+            await ValidateDownloadStates(media, item, Check, Picture, HostPicture);
+            await ValidateDownloadManagement(media, item, Check, Picture, HostPicture);
+            File.WriteAllText(
+                Path.Combine(store.DataDirectory, "download-ui-checks.json"),
+                JsonSerializer.Serialize(checks)
+            );
         }
-        catch(Exception e){File.WriteAllText(Path.Combine(store.DataDirectory,"download-ui-failure.txt"),e.ToString());}finally{CloseAllSheets();CloseDownloadsPopover();foreach(var window in OwnedWindows.Cast<Window>().ToList())window.Close();}
+        catch (Exception e)
+        {
+            File.WriteAllText(Path.Combine(store.DataDirectory, "download-ui-failure.txt"), e.ToString());
+        }
+        finally
+        {
+            CloseAllSheets();
+            CloseDownloadsPopover();
+            foreach (var window in OwnedWindows.Cast<Window>().ToList())
+                window.Close();
+        }
     }
+
     // Fixture rows for every state: sections, the status line, actions, the top-bar popover and the Arabic page.
-    async Task ValidateDownloadStates(string media,VideoItem item,Action<bool,string> Check,Action<FrameworkElement,string> Picture,Action<string> HostPicture)
+    async Task ValidateDownloadStates(
+        string media,
+        VideoItem item,
+        Action<bool, string> Check,
+        Action<FrameworkElement, string> Picture,
+        Action<string> HostPicture
+    )
     {
-        var manager=downloads!;var language=store.State.Language;var total=(long)(3.4*1073741824);
-        var queued=manager.Jobs().OrderBy(j=>j.CreatedAt).ToList();var a=queued[0];var b=queued[1];
-        manager.Mutate(a.Id,j=>{j.Status="Downloading";j.Size=total;j.Bytes=(long)(1.2*1073741824);j.Speed=4.2*1048576;j.EtaSeconds=360;});
-        var folder=Path.Combine(media,"Noir UI fixture (2026)","Season 01");Directory.CreateDirectory(folder);var doneFile=Path.Combine(folder,"Noir UI fixture (2026) S01E03.mkv");File.WriteAllBytes(doneFile,new byte[2048]);
-        store.State.Catalog["fx-done"]=new(){Item=new VideoItem{Id="fx-done",CollectionKey="ui-fixture",Title="Noir UI fixture",Year=2026,Season=1,Episode=3,Path=doneFile,Available=true}};
-        PcDownloadJob Fx(string id,int episode,string status,long size,long bytes,string message,string destination)=>new(){Id=id,Name=$"Noir UI fixture — S01 · E{episode:00}",Target=new VideoItem{Id=id,CollectionKey="ui-fixture",Title="Noir UI fixture",Year=2026,Season=1,Episode=episode},Status=status,Size=size,Bytes=bytes,Message=message,Destination=destination,CreatedAt=DateTimeOffset.UtcNow.AddMinutes(episode-10)};
-        manager.Inject(Fx("fx-failed",4,"Failed",total,total/10,"The source went offline",Path.Combine(folder,"failed.mkv")));manager.Inject(Fx("fx-done",3,"Completed",2048,2048,"Saved to the PC library",doneFile));
-        manager.Inject(Fx("fx-gone",5,"Completed",2048,2048,"Saved to the PC library",Path.Combine(folder,"not-scanned.mkv")));manager.Inject(Fx("fx-paused",6,"Paused",total,total/4,"Interrupted · resume to continue",Path.Combine(folder,"paused.mkv")));
-        Width=1320;Height=900;Navigate("Downloads");await Task.Delay(400);UpdateLayout();
-        Border RowOf(string id)=>Descendants(ContentPanel).OfType<Border>().Single(x=>Equals(x.Tag,"DownloadRow:"+id));
-        string TextOf(DependencyObject root)=>string.Join(" ",Descendants(root).OfType<TextBlock>().Select(Plain));
-        bool InSection(string id,string key)=>(RowOf(id).Parent as FrameworkElement)?.Parent is StackPanel box&&Equals(box.Tag,"DownloadsSection:"+key);
-        var boxes=Descendants(ContentPanel).OfType<StackPanel>().Where(x=>x.Tag is string t&&t.StartsWith("DownloadsSection:")).ToList();
-        Check(boxes.Select(x=>(string)x.Tag).SequenceEqual(["DownloadsSection:now","DownloadsSection:waiting","DownloadsSection:attention","DownloadsSection:ready"])&&boxes.All(x=>x.Visibility==Visibility.Visible),"Downloading now, Waiting, Needs attention and Ready to watch appear in that order once each has a download");
-        Check(InSection(a.Id,"now")&&InSection(b.Id,"waiting")&&InSection("fx-paused","waiting")&&InSection("fx-failed","attention")&&InSection("fx-done","ready"),"Every download sits in the section for its state");
-        var rowA=TextOf(RowOf(a.Id));
-        var rowAok=rowA.Contains("Downloading")&&rowA.Contains("4.2 MB/s")&&rowA.Contains("6 min left")&&rowA.Contains("1.2 of 3.4 GB");Check(rowAok,"A downloading row shows speed, time left and how much has arrived"+(rowAok?"":" ["+rowA+"]"));
-        var bar=Descendants(RowOf(a.Id)).OfType<ProgressBar>().Single();Check(!bar.IsIndeterminate&&bar.Maximum==total&&bar.Value==(long)(1.2*1073741824)&&bar.Height==4&&rowA.Contains("35%"),"A downloading row has a determinate 4 px bar with its percentage");
-        Check(Descendants(RowOf(a.Id)).OfType<Button>().Any(x=>x.Content as string=="Pause")&&!Descendants(RowOf(a.Id)).OfType<Button>().Any(x=>x.Content as string=="Resume"),"A downloading row offers Pause");
-        var rowB=TextOf(RowOf(b.Id));Check(rowB.Contains("Waiting")&&rowB.Contains("for a free slot"),"A queued row says it is waiting for a free slot");
-        Check(TextOf(RowOf("fx-paused")).Contains("Paused")&&Descendants(RowOf("fx-paused")).OfType<Button>().Any(x=>x.Content as string=="Resume"),"A paused row says Paused and offers Resume");
-        var failed=RowOf("fx-failed");Check(TextOf(failed).Contains("Failed")&&TextOf(failed).Contains("The source went offline")&&Descendants(failed).OfType<Button>().Any(x=>x.Content as string=="Retry"),"A failed row shows the plain reason and a Retry button");
-        var done=RowOf("fx-done");Check(TextOf(done).Contains("Saved to the PC library")&&Descendants(done).OfType<Button>().Any(x=>IconSet.Src(x.Content)=="[[play]] Play"&&x.IsEnabled),"A finished row says it was saved and offers an enabled ▶ Play");
-        Check(!Descendants(done).OfType<Button>().Any(x=>x.Content as string is "Pause" or "Resume" or "Retry"),"A finished row never shows Pause");
-        var gone=RowOf("fx-gone");Check(Descendants(gone).OfType<Button>().Any(x=>IconSet.Src(x.Content)=="[[play]] Play"&&!x.IsEnabled&&x.ToolTip is string),"A finished file that is not in the library yet has ▶ Play disabled with a tooltip");
-        var more=Descendants(done).OfType<Button>().First(x=>IconSet.Src(x.Content)=="[[more]]");more.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));var menu=more.ContextMenu;Check(menu!=null&&menu.Items.OfType<MenuItem>().Any(m=>IconSet.Src(m.Header)=="Show in folder"),"A finished row's ⋯ menu offers Show in folder");menu!.IsOpen=false;
-        var buttons=Descendants(ContentPanel).OfType<Button>().ToList();Check(buttons.Any(x=>x.Content as string=="Pause all"&&x.Visibility==Visibility.Visible)&&!buttons.Any(x=>x.Content as string=="Resume all"&&x.Visibility==Visibility.Visible),"Pause all shows only when there is something to pause");
-        var summary=Descendants(ContentPanel).OfType<TextBlock>().First(t=>t.Text.Contains("free on"));var summaryOk=summary.Text.StartsWith("1 downloading")&&summary.Text.Contains("2 waiting")&&summary.Text.Contains("1 needs attention")&&summary.Text.Contains("10.0 GB free on");Check(summaryOk,"The summary line counts downloads and shows free space on the download drive"+(summaryOk?"":" ["+summary.Text+"]"));
-        var rowInstance=RowOf(b.Id);manager.Mutate(b.Id,j=>j.Status="Downloading");Check(ReferenceEquals(rowInstance,RowOf(b.Id))&&InSection(b.Id,"now"),"A row moves to its new section without being rebuilt");manager.Mutate(b.Id,j=>j.Status="Queued");
-        for(var i=0;i<12;i++){var older=Fx("fx-old-"+i,10+i,"Completed",2048,2048,"Saved to the PC library",Path.Combine(folder,$"old-{i}.mkv"));older.CreatedAt=DateTimeOffset.UtcNow.AddHours(-5-i);manager.Inject(older);}
-        int ReadyRows()=>Descendants(ContentPanel).OfType<StackPanel>().Single(x=>Equals(x.Tag,"DownloadsSection:ready")).Children.OfType<StackPanel>().Last().Children.OfType<Border>().Count(x=>x.Tag is string t&&t.StartsWith("DownloadRow:"));
-        Button? ShowAll()=>Descendants(ContentPanel).OfType<Button>().FirstOrDefault(x=>x.Visibility==Visibility.Visible&&x.Content is string s&&(s.StartsWith("Show all")||s=="Show fewer"));
-        Check(ReadyRows()==12&&ShowAll()?.Content as string=="Show all (14)","Ready to watch shows the newest 12 and a Show all (14) button");
-        ShowAll()!.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Check(ReadyRows()==14&&ShowAll()?.Content as string=="Show fewer","Show all reveals every finished download");ShowAll()!.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Check(ReadyRows()==12,"Show fewer returns to the newest 12");
-        ContentScroll.ScrollToTop();UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"downloads-page-en.png"));
-        UpdateDownloadsTop();Check(DownloadsTop.Visibility==Visibility.Visible&&Descendants(DownloadsTop).OfType<TextBlock>().Any(t=>t.Text==manager.ActiveCount.ToString())&&manager.ActiveCount==2,"The top-bar Downloads button shows a badge with the active count");
-        Navigate("Home");await Task.Delay(100);ToggleDownloadsPopover();await Task.Delay(300);UpdateLayout();var pop=downloadsPopover??throw new Exception("The Downloads popover did not open");
-        var popRows=Descendants(pop).OfType<Border>().Where(x=>Equals(x.Tag,"DownloadsPopoverRow")).ToList();var panel=Descendants(pop).OfType<Border>().First(x=>Equals(x.Tag,"DownloadsPopoverPanel"));
-        Check(popRows.Count==5&&Descendants(pop).OfType<Button>().Any(x=>x.Content as string=="See all"),"The popover lists the 5 latest downloads and a See all button");
-        Check(Math.Abs(panel.ActualWidth-320)<1&&panel.CornerRadius.TopLeft>=14&&panel.TransformToAncestor((FrameworkElement)LibraryRoot.Parent).TransformBounds(new Rect(panel.RenderSize)).Right<=((FrameworkElement)LibraryRoot.Parent).ActualWidth+1,"The popover is 320 wide, rounded and stays inside the window");
-        Check(popRows.Any(x=>TextOf(x).Contains("Downloading"))&&popRows.Any(x=>Descendants(x).OfType<ProgressBar>().Any()),"Popover rows show a coloured state word and a progress bar");
+        var manager = downloads!;
+        var language = store.State.Language;
+        var total = (long)(3.4 * 1073741824);
+        var queued = manager.Jobs().OrderBy(j => j.CreatedAt).ToList();
+        var a = queued[0];
+        var b = queued[1];
+        manager.Mutate(a.Id, j =>
+        {
+            j.Status = "Downloading";
+            j.Size = total;
+            j.Bytes = (long)(1.2 * 1073741824);
+            j.Speed = 4.2 * 1048576;
+            j.EtaSeconds = 360;
+        });
+        var folder = Path.Combine(media, "Noir UI fixture (2026)", "Season 01");
+        Directory.CreateDirectory(folder);
+        var doneFile = Path.Combine(folder, "Noir UI fixture (2026) S01E03.mkv");
+        File.WriteAllBytes(doneFile, new byte[2048]);
+        store.State.Catalog["fx-done"] = new()
+        {
+            Item = new VideoItem
+            {
+                Id = "fx-done",
+                CollectionKey = "ui-fixture",
+                Title = "Noir UI fixture",
+                Year = 2026,
+                Season = 1,
+                Episode = 3,
+                Path = doneFile,
+                Available = true,
+            },
+        };
+        PcDownloadJob Fx(
+            string id,
+            int episode,
+            string status,
+            long size,
+            long bytes,
+            string message,
+            string destination
+        ) =>
+            new()
+            {
+                Id = id,
+                Name = $"Noir UI fixture — S01 · E{episode:00}",
+                Target = new VideoItem
+                {
+                    Id = id,
+                    CollectionKey = "ui-fixture",
+                    Title = "Noir UI fixture",
+                    Year = 2026,
+                    Season = 1,
+                    Episode = episode,
+                },
+                Status = status,
+                Size = size,
+                Bytes = bytes,
+                Message = message,
+                Destination = destination,
+                CreatedAt = DateTimeOffset.UtcNow.AddMinutes(episode - 10),
+            };
+        manager.Inject(
+            Fx(
+                "fx-failed",
+                4,
+                "Failed",
+                total,
+                total / 10,
+                "The source went offline",
+                Path.Combine(folder, "failed.mkv")
+            )
+        );
+        manager.Inject(Fx("fx-done", 3, "Completed", 2048, 2048, "Saved to the PC library", doneFile));
+        manager.Inject(
+            Fx(
+                "fx-gone",
+                5,
+                "Completed",
+                2048,
+                2048,
+                "Saved to the PC library",
+                Path.Combine(folder, "not-scanned.mkv")
+            )
+        );
+        manager.Inject(
+            Fx(
+                "fx-paused",
+                6,
+                "Paused",
+                total,
+                total / 4,
+                "Interrupted · resume to continue",
+                Path.Combine(folder, "paused.mkv")
+            )
+        );
+        Width = 1320;
+        Height = 900;
+        Navigate("Downloads");
+        await Task.Delay(400);
+        UpdateLayout();
+        Border RowOf(string id) =>
+            Descendants(ContentPanel).OfType<Border>().Single(x => Equals(x.Tag, "DownloadRow:" + id));
+        string TextOf(DependencyObject root) => string.Join(" ", Descendants(root).OfType<TextBlock>().Select(Plain));
+        bool InSection(string id, string key) =>
+            (RowOf(id).Parent as FrameworkElement)?.Parent is StackPanel box
+            && Equals(box.Tag, "DownloadsSection:" + key);
+        var boxes = Descendants(ContentPanel)
+            .OfType<StackPanel>()
+            .Where(x => x.Tag is string t && t.StartsWith("DownloadsSection:"))
+            .ToList();
+        Check(
+            boxes
+                .Select(x => (string)x.Tag)
+                .SequenceEqual([
+                    "DownloadsSection:now",
+                    "DownloadsSection:waiting",
+                    "DownloadsSection:attention",
+                    "DownloadsSection:ready",
+                ]) && boxes.All(x => x.Visibility == Visibility.Visible),
+            "Downloading now, Waiting, Needs attention and Ready to watch appear in that order once each has a download"
+        );
+        Check(
+            InSection(a.Id, "now")
+                && InSection(b.Id, "waiting")
+                && InSection("fx-paused", "waiting")
+                && InSection("fx-failed", "attention")
+                && InSection("fx-done", "ready"),
+            "Every download sits in the section for its state"
+        );
+        var rowA = TextOf(RowOf(a.Id));
+        var rowAok =
+            rowA.Contains("Downloading")
+            && rowA.Contains("4.2 MB/s")
+            && rowA.Contains("6 min left")
+            && rowA.Contains("1.2 of 3.4 GB");
+        Check(
+            rowAok,
+            "A downloading row shows speed, time left and how much has arrived" + (rowAok ? "" : " [" + rowA + "]")
+        );
+        var bar = Descendants(RowOf(a.Id)).OfType<ProgressBar>().Single();
+        Check(
+            !bar.IsIndeterminate
+                && bar.Maximum == total
+                && bar.Value == (long)(1.2 * 1073741824)
+                && bar.Height == 4
+                && rowA.Contains("35%"),
+            "A downloading row has a determinate 4 px bar with its percentage"
+        );
+        Check(
+            Descendants(RowOf(a.Id)).OfType<Button>().Any(x => x.Content as string == "Pause")
+                && !Descendants(RowOf(a.Id)).OfType<Button>().Any(x => x.Content as string == "Resume"),
+            "A downloading row offers Pause"
+        );
+        var rowB = TextOf(RowOf(b.Id));
+        Check(
+            rowB.Contains("Waiting") && rowB.Contains("for a free slot"),
+            "A queued row says it is waiting for a free slot"
+        );
+        Check(
+            TextOf(RowOf("fx-paused")).Contains("Paused")
+                && Descendants(RowOf("fx-paused")).OfType<Button>().Any(x => x.Content as string == "Resume"),
+            "A paused row says Paused and offers Resume"
+        );
+        var failed = RowOf("fx-failed");
+        Check(
+            TextOf(failed).Contains("Failed")
+                && TextOf(failed).Contains("The source went offline")
+                && Descendants(failed).OfType<Button>().Any(x => x.Content as string == "Retry"),
+            "A failed row shows the plain reason and a Retry button"
+        );
+        var done = RowOf("fx-done");
+        Check(
+            TextOf(done).Contains("Saved to the PC library")
+                && Descendants(done)
+                    .OfType<Button>()
+                    .Any(x => IconSet.Src(x.Content) == "[[play]] Play" && x.IsEnabled),
+            "A finished row says it was saved and offers an enabled ▶ Play"
+        );
+        Check(
+            !Descendants(done).OfType<Button>().Any(x => x.Content as string is "Pause" or "Resume" or "Retry"),
+            "A finished row never shows Pause"
+        );
+        var gone = RowOf("fx-gone");
+        Check(
+            Descendants(gone)
+                .OfType<Button>()
+                .Any(x => IconSet.Src(x.Content) == "[[play]] Play" && !x.IsEnabled && x.ToolTip is string),
+            "A finished file that is not in the library yet has ▶ Play disabled with a tooltip"
+        );
+        var more = Descendants(done).OfType<Button>().First(x => IconSet.Src(x.Content) == "[[more]]");
+        more.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        var menu = more.ContextMenu;
+        Check(
+            menu != null && menu.Items.OfType<MenuItem>().Any(m => IconSet.Src(m.Header) == "Show in folder"),
+            "A finished row's ⋯ menu offers Show in folder"
+        );
+        menu!.IsOpen = false;
+        var buttons = Descendants(ContentPanel).OfType<Button>().ToList();
+        Check(
+            buttons.Any(x => x.Content as string == "Pause all" && x.Visibility == Visibility.Visible)
+                && !buttons.Any(x => x.Content as string == "Resume all" && x.Visibility == Visibility.Visible),
+            "Pause all shows only when there is something to pause"
+        );
+        var summary = Descendants(ContentPanel).OfType<TextBlock>().First(t => t.Text.Contains("free on"));
+        var summaryOk =
+            summary.Text.StartsWith("1 downloading")
+            && summary.Text.Contains("2 waiting")
+            && summary.Text.Contains("1 needs attention")
+            && summary.Text.Contains("10.0 GB free on");
+        Check(
+            summaryOk,
+            "The summary line counts downloads and shows free space on the download drive"
+                + (summaryOk ? "" : " [" + summary.Text + "]")
+        );
+        var rowInstance = RowOf(b.Id);
+        manager.Mutate(b.Id, j => j.Status = "Downloading");
+        Check(
+            ReferenceEquals(rowInstance, RowOf(b.Id)) && InSection(b.Id, "now"),
+            "A row moves to its new section without being rebuilt"
+        );
+        manager.Mutate(b.Id, j => j.Status = "Queued");
+        for (var i = 0; i < 12; i++)
+        {
+            var older = Fx(
+                "fx-old-" + i,
+                10 + i,
+                "Completed",
+                2048,
+                2048,
+                "Saved to the PC library",
+                Path.Combine(folder, $"old-{i}.mkv")
+            );
+            older.CreatedAt = DateTimeOffset.UtcNow.AddHours(-5 - i);
+            manager.Inject(older);
+        }
+        int ReadyRows() =>
+            Descendants(ContentPanel)
+                .OfType<StackPanel>()
+                .Single(x => Equals(x.Tag, "DownloadsSection:ready"))
+                .Children.OfType<StackPanel>()
+                .Last()
+                .Children.OfType<Border>()
+                .Count(x => x.Tag is string t && t.StartsWith("DownloadRow:"));
+        Button? ShowAll() =>
+            Descendants(ContentPanel)
+                .OfType<Button>()
+                .FirstOrDefault(x =>
+                    x.Visibility == Visibility.Visible
+                    && x.Content is string s
+                    && (s.StartsWith("Show all") || s == "Show fewer")
+                );
+        Check(
+            ReadyRows() == 12 && ShowAll()?.Content as string == "Show all (14)",
+            "Ready to watch shows the newest 12 and a Show all (14) button"
+        );
+        ShowAll()!.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Check(
+            ReadyRows() == 14 && ShowAll()?.Content as string == "Show fewer",
+            "Show all reveals every finished download"
+        );
+        ShowAll()!.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Check(ReadyRows() == 12, "Show fewer returns to the newest 12");
+        ContentScroll.ScrollToTop();
+        UpdateLayout();
+        CaptureLibrary(Path.Combine(store.DataDirectory, "downloads-page-en.png"));
+        UpdateDownloadsTop();
+        Check(
+            DownloadsTop.Visibility == Visibility.Visible
+                && Descendants(DownloadsTop).OfType<TextBlock>().Any(t => t.Text == manager.ActiveCount.ToString())
+                && manager.ActiveCount == 2,
+            "The top-bar Downloads button shows a badge with the active count"
+        );
+        Navigate("Home");
+        await Task.Delay(100);
+        ToggleDownloadsPopover();
+        await Task.Delay(300);
+        UpdateLayout();
+        var pop = downloadsPopover ?? throw new Exception("The Downloads popover did not open");
+        var popRows = Descendants(pop).OfType<Border>().Where(x => Equals(x.Tag, "DownloadsPopoverRow")).ToList();
+        var panel = Descendants(pop).OfType<Border>().First(x => Equals(x.Tag, "DownloadsPopoverPanel"));
+        Check(
+            popRows.Count == 5 && Descendants(pop).OfType<Button>().Any(x => x.Content as string == "See all"),
+            "The popover lists the 5 latest downloads and a See all button"
+        );
+        Check(
+            Math.Abs(panel.ActualWidth - 320) < 1
+                && panel.CornerRadius.TopLeft >= 14
+                && panel
+                    .TransformToAncestor((FrameworkElement)LibraryRoot.Parent)
+                    .TransformBounds(new Rect(panel.RenderSize))
+                    .Right
+                    <= ((FrameworkElement)LibraryRoot.Parent).ActualWidth + 1,
+            "The popover is 320 wide, rounded and stays inside the window"
+        );
+        Check(
+            popRows.Any(x => TextOf(x).Contains("Downloading"))
+                && popRows.Any(x => Descendants(x).OfType<ProgressBar>().Any()),
+            "Popover rows show a coloured state word and a progress bar"
+        );
         HostPicture("downloads-popover-en.png");
-        pop.RaiseEvent(new System.Windows.Input.KeyEventArgs(System.Windows.Input.Keyboard.PrimaryDevice,PresentationSource.FromVisual(pop)!,Environment.TickCount,System.Windows.Input.Key.Escape){RoutedEvent=System.Windows.Input.Keyboard.PreviewKeyDownEvent});Check(downloadsPopover==null&&!LibraryRootHasPopover(),"Escape closes the popover");
-        ToggleDownloadsPopover();await Task.Delay(100);Descendants(downloadsPopover!).OfType<Button>().First(x=>x.Content as string=="See all").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));await Task.Delay(100);Check(page=="Downloads"&&downloadsPopover==null,"See all opens the Downloads page and closes the popover");
-        SetLanguage("ar");Navigate("Downloads");await Task.Delay(400);UpdateLayout();
-        Check(LibraryRoot.FlowDirection==FlowDirection.RightToLeft&&ContentPanel.FlowDirection==FlowDirection.RightToLeft,"The Arabic Downloads page is right-to-left");
-        Check(Descendants(ContentPanel).OfType<TextBlock>().Any(t=>t.Text.StartsWith("S01")&&t.FlowDirection==FlowDirection.LeftToRight),"Arabic keeps the season and episode label left-to-right");
-        Check(Descendants(ContentPanel).OfType<TextBlock>().Any(t=>Plain(t).Contains("جارٍ التنزيل")),"Arabic rows use Arabic state words");
-        ContentScroll.ScrollToTop();UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"downloads-page-ar.png"));SetLanguage(language);Navigate("Downloads");await Task.Delay(200);
+        pop.RaiseEvent(
+            new System.Windows.Input.KeyEventArgs(
+                System.Windows.Input.Keyboard.PrimaryDevice,
+                PresentationSource.FromVisual(pop)!,
+                Environment.TickCount,
+                System.Windows.Input.Key.Escape
+            )
+            {
+                RoutedEvent = System.Windows.Input.Keyboard.PreviewKeyDownEvent,
+            }
+        );
+        Check(downloadsPopover == null && !LibraryRootHasPopover(), "Escape closes the popover");
+        ToggleDownloadsPopover();
+        await Task.Delay(100);
+        Descendants(downloadsPopover!)
+            .OfType<Button>()
+            .First(x => x.Content as string == "See all")
+            .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Task.Delay(100);
+        Check(
+            page == "Downloads" && downloadsPopover == null,
+            "See all opens the Downloads page and closes the popover"
+        );
+        SetLanguage("ar");
+        Navigate("Downloads");
+        await Task.Delay(400);
+        UpdateLayout();
+        Check(
+            LibraryRoot.FlowDirection == FlowDirection.RightToLeft
+                && ContentPanel.FlowDirection == FlowDirection.RightToLeft,
+            "The Arabic Downloads page is right-to-left"
+        );
+        Check(
+            Descendants(ContentPanel)
+                .OfType<TextBlock>()
+                .Any(t => t.Text.StartsWith("S01") && t.FlowDirection == FlowDirection.LeftToRight),
+            "Arabic keeps the season and episode label left-to-right"
+        );
+        Check(
+            Descendants(ContentPanel).OfType<TextBlock>().Any(t => Plain(t).Contains("جارٍ التنزيل")),
+            "Arabic rows use Arabic state words"
+        );
+        ContentScroll.ScrollToTop();
+        UpdateLayout();
+        CaptureLibrary(Path.Combine(store.DataDirectory, "downloads-page-ar.png"));
+        SetLanguage(language);
+        Navigate("Downloads");
+        await Task.Delay(200);
     }
-    async Task ValidateDownloadManagement(string media,VideoItem item,Action<bool,string> Check,Action<FrameworkElement,string> Picture,Action<string> HostPicture)
+
+    async Task ValidateDownloadManagement(
+        string media,
+        VideoItem item,
+        Action<bool, string> Check,
+        Action<FrameworkElement, string> Picture,
+        Action<string> HostPicture
+    )
     {
-        var manager=downloads!;downloadsTab="Queue";Navigate("Downloads");await Task.Delay(200);
-        Check(Descendants(ContentPanel).OfType<Button>().Any(b=>b.Content as string=="Queue")&&Descendants(ContentPanel).OfType<Button>().Any(b=>b.Content as string=="On this PC")&&Descendants(ContentPanel).OfType<Button>().FirstOrDefault(b=>Equals(b.Tag,"DownloadsMore"))?.ContextMenu is {} downloadsMenu&&downloadsMenu.Items.OfType<MenuItem>().Any(m=>m.Header as string=="Free up space")&&downloadsMenu.Items.OfType<MenuItem>().Any(m=>m.Header as string=="Clear finished"),"Downloads has Queue / On this PC tabs and the management actions in one three-dot menu");
-        var local=await Task.Run(()=>manager.LocalLibrary());var files=local.SelectMany(g=>g.Files).ToList();Check(files.Count>0,"Completed local files appear in the headless library model");
-        Descendants(ContentPanel).OfType<Button>().First(b=>b.Content as string=="On this PC").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));await Task.Delay(400);
-        var show=Descendants(ContentPanel).OfType<Expander>().First(e=>e.Tag is string tag&&tag.StartsWith("DownloadLibraryGroup:"));Check(!show.IsExpanded,"Shows on this PC start collapsed");show.IsExpanded=true;await Task.Delay(60);var season=Descendants(show).OfType<Expander>().First();season.IsExpanded=true;await Task.Delay(60);UpdateLayout();
-        Check(Descendants(ContentPanel).OfType<Border>().Count(b=>Equals(b.Tag,"DownloadLocalRow"))>=3&&Descendants(ContentPanel).OfType<TextBlock>().Any(t=>t.Text=="Downloaded by Noir"),"Local files expand from show to season to episode with sizes and a Noir badge");HostPicture("download-library-en.png");
-        var menuButton=Descendants(season).OfType<Button>().Last(b=>IconSet.Src(b.Content)=="[[more]]");menuButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));await Task.Delay(80);Check(menuButton.ContextMenu.Items.OfType<MenuItem>().Any(m=>IconSet.Src(m.Header)=="Move to…")&&menuButton.ContextMenu.Items.OfType<MenuItem>().Any(m=>IconSet.Src(m.Header)=="Play"),"Episode more menu offers Play, folder, Delete and Move");Picture(menuButton.ContextMenu,"download-library-menu.png");menuButton.ContextMenu.IsOpen=false;
-        ShowDownloadDelete("Season 1",files);await Task.Delay(80);var deletion=FindSheet("Delete files")!;Check(Descendants(deletion.Overlay).OfType<RadioButton>().Count()==2&&Descendants(deletion.Overlay).OfType<RadioButton>().Single(r=>r.Content as string=="Move to Recycle Bin").IsChecked==true&&Descendants(deletion.Overlay).OfType<CheckBox>().Any(c=>c.Content as string=="Remember my choice"),"Delete confirmation defaults to Recycle Bin and offers permanent deletion plus remembered choice");HostPicture("download-delete-en.png");deletion.Close(false);
-        ShowDownloadMove("Season 1",files);await Task.Delay(80);var move=FindSheet("Move to…")!;Check(Descendants(move.Overlay).OfType<ComboBox>().Any()&&Descendants(move.Overlay).OfType<Button>().Any(b=>b.Content as string=="Choose folder…"),"Move sheet offers registered folders and Choose folder");HostPicture("download-move-en.png");move.Close(false);
-        File.WriteAllBytes(Path.Combine(store.DataDirectory,"download-parts","validation-orphan.part"),new byte[1048576]);ShowDownloadFreeSpace();await Task.Delay(250);var free=FindSheet("Free up space")!;Check(Descendants(free.Overlay).OfType<CheckBox>().Any(c=>c.Content is string label&&label.StartsWith("Leftover partial downloads"))&&Descendants(free.Overlay).OfType<ComboBox>().Any(),"Free up space offers ticked partial-file suggestions and the deletion preference");HostPicture("download-free-space-en.png");free.Close(false);
-        ShowDownloadCancel(manager.Jobs().First(j=>j.Status=="Queued"));await Task.Delay(80);var cancel=FindSheet("Cancel download")!;Check(Descendants(cancel.Overlay).OfType<RadioButton>().Single(r=>r.Content as string=="Cancel and delete the partial file").IsChecked==true,"Cancel defaults to deleting the partial file and also offers resumable storage");HostPicture("download-cancel-en.png");cancel.Close(false);
-        SetLanguage("ar");downloadsTab="On this PC";Navigate("Downloads");await Task.Delay(300);Check(Descendants(ContentPanel).OfType<Button>().Any(b=>b.Content as string=="على هذا الكمبيوتر")&&ContentPanel.FlowDirection==FlowDirection.RightToLeft,"The local library tabs and layout are Arabic and RTL");HostPicture("download-library-ar.png");
-        FindDownloads(item);await Task.Delay(80);var scope=OpenSheets.Last();Check(scope.Panel.FlowDirection==FlowDirection.RightToLeft&&Descendants(scope.Overlay).OfType<TextBlock>().Any(t=>t.Text=="هذه الحلقة"),"The common scope sheet mirrors and translates its choices in Arabic");HostPicture("download-scope-ar.png");scope.Close(false);
-        ShowDownloadDelete("الموسم 1",files);await Task.Delay(80);HostPicture("download-delete-ar.png");OpenSheets.Last().Close(false);ShowDownloadFreeSpace();await Task.Delay(200);HostPicture("download-free-space-ar.png");OpenSheets.Last().Close(false);SetLanguage("en");downloadsTab="Queue";Navigate("Downloads");
+        var manager = downloads!;
+        downloadsTab = "Queue";
+        Navigate("Downloads");
+        await Task.Delay(200);
+        Check(
+            Descendants(ContentPanel).OfType<Button>().Any(b => b.Content as string == "Queue")
+                && Descendants(ContentPanel).OfType<Button>().Any(b => b.Content as string == "On this PC")
+                && Descendants(ContentPanel)
+                    .OfType<Button>()
+                    .FirstOrDefault(b => Equals(b.Tag, "DownloadsMore"))
+                    ?.ContextMenu
+                    is { } downloadsMenu
+                && downloadsMenu.Items.OfType<MenuItem>().Any(m => m.Header as string == "Free up space")
+                && downloadsMenu.Items.OfType<MenuItem>().Any(m => m.Header as string == "Clear finished"),
+            "Downloads has Queue / On this PC tabs and the management actions in one three-dot menu"
+        );
+        var local = await Task.Run(() => manager.LocalLibrary());
+        var files = local.SelectMany(g => g.Files).ToList();
+        Check(files.Count > 0, "Completed local files appear in the headless library model");
+        Descendants(ContentPanel)
+            .OfType<Button>()
+            .First(b => b.Content as string == "On this PC")
+            .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Task.Delay(400);
+        var show = Descendants(ContentPanel)
+            .OfType<Expander>()
+            .First(e => e.Tag is string tag && tag.StartsWith("DownloadLibraryGroup:"));
+        Check(!show.IsExpanded, "Shows on this PC start collapsed");
+        show.IsExpanded = true;
+        await Task.Delay(60);
+        var season = Descendants(show).OfType<Expander>().First();
+        season.IsExpanded = true;
+        await Task.Delay(60);
+        UpdateLayout();
+        Check(
+            Descendants(ContentPanel).OfType<Border>().Count(b => Equals(b.Tag, "DownloadLocalRow")) >= 3
+                && Descendants(ContentPanel).OfType<TextBlock>().Any(t => t.Text == "Downloaded by Noir"),
+            "Local files expand from show to season to episode with sizes and a Noir badge"
+        );
+        HostPicture("download-library-en.png");
+        var menuButton = Descendants(season).OfType<Button>().Last(b => IconSet.Src(b.Content) == "[[more]]");
+        menuButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await Task.Delay(80);
+        Check(
+            menuButton.ContextMenu.Items.OfType<MenuItem>().Any(m => IconSet.Src(m.Header) == "Move to…")
+                && menuButton.ContextMenu.Items.OfType<MenuItem>().Any(m => IconSet.Src(m.Header) == "Play"),
+            "Episode more menu offers Play, folder, Delete and Move"
+        );
+        Picture(menuButton.ContextMenu, "download-library-menu.png");
+        menuButton.ContextMenu.IsOpen = false;
+        ShowDownloadDelete("Season 1", files);
+        await Task.Delay(80);
+        var deletion = FindSheet("Delete files")!;
+        Check(
+            Descendants(deletion.Overlay).OfType<RadioButton>().Count() == 2
+                && Descendants(deletion.Overlay)
+                    .OfType<RadioButton>()
+                    .Single(r => r.Content as string == "Move to Recycle Bin")
+                    .IsChecked == true
+                && Descendants(deletion.Overlay)
+                    .OfType<CheckBox>()
+                    .Any(c => c.Content as string == "Remember my choice"),
+            "Delete confirmation defaults to Recycle Bin and offers permanent deletion plus remembered choice"
+        );
+        HostPicture("download-delete-en.png");
+        deletion.Close(false);
+        ShowDownloadMove("Season 1", files);
+        await Task.Delay(80);
+        var move = FindSheet("Move to…")!;
+        Check(
+            Descendants(move.Overlay).OfType<ComboBox>().Any()
+                && Descendants(move.Overlay).OfType<Button>().Any(b => b.Content as string == "Choose folder…"),
+            "Move sheet offers registered folders and Choose folder"
+        );
+        HostPicture("download-move-en.png");
+        move.Close(false);
+        File.WriteAllBytes(
+            Path.Combine(store.DataDirectory, "download-parts", "validation-orphan.part"),
+            new byte[1048576]
+        );
+        ShowDownloadFreeSpace();
+        await Task.Delay(250);
+        var free = FindSheet("Free up space")!;
+        Check(
+            Descendants(free.Overlay)
+                .OfType<CheckBox>()
+                .Any(c => c.Content is string label && label.StartsWith("Leftover partial downloads"))
+                && Descendants(free.Overlay).OfType<ComboBox>().Any(),
+            "Free up space offers ticked partial-file suggestions and the deletion preference"
+        );
+        HostPicture("download-free-space-en.png");
+        free.Close(false);
+        ShowDownloadCancel(manager.Jobs().First(j => j.Status == "Queued"));
+        await Task.Delay(80);
+        var cancel = FindSheet("Cancel download")!;
+        Check(
+            Descendants(cancel.Overlay)
+                .OfType<RadioButton>()
+                .Single(r => r.Content as string == "Cancel and delete the partial file")
+                .IsChecked == true,
+            "Cancel defaults to deleting the partial file and also offers resumable storage"
+        );
+        HostPicture("download-cancel-en.png");
+        cancel.Close(false);
+        SetLanguage("ar");
+        downloadsTab = "On this PC";
+        Navigate("Downloads");
+        await Task.Delay(300);
+        Check(
+            Descendants(ContentPanel).OfType<Button>().Any(b => b.Content as string == "على هذا الكمبيوتر")
+                && ContentPanel.FlowDirection == FlowDirection.RightToLeft,
+            "The local library tabs and layout are Arabic and RTL"
+        );
+        HostPicture("download-library-ar.png");
+        FindDownloads(item);
+        await Task.Delay(80);
+        var scope = OpenSheets.Last();
+        Check(
+            scope.Panel.FlowDirection == FlowDirection.RightToLeft
+                && Descendants(scope.Overlay).OfType<TextBlock>().Any(t => t.Text == "هذه الحلقة"),
+            "The common scope sheet mirrors and translates its choices in Arabic"
+        );
+        HostPicture("download-scope-ar.png");
+        scope.Close(false);
+        ShowDownloadDelete("الموسم 1", files);
+        await Task.Delay(80);
+        HostPicture("download-delete-ar.png");
+        OpenSheets.Last().Close(false);
+        ShowDownloadFreeSpace();
+        await Task.Delay(200);
+        HostPicture("download-free-space-ar.png");
+        OpenSheets.Last().Close(false);
+        SetLanguage("en");
+        downloadsTab = "Queue";
+        Navigate("Downloads");
     }
+
     // A status line is built from coloured runs, which TextBlock.Text does not report.
-    static string Plain(TextBlock t)=>t.Inlines.Count>0?string.Concat(t.Inlines.Select(i=>i is System.Windows.Documents.Run r?r.Text:i is System.Windows.Documents.InlineUIContainer {Child:TextBlock c}?c.Text:"")):t.Text;
-    bool LibraryRootHasPopover()=>((Grid)LibraryRoot.Parent).Children.OfType<Grid>().Any(g=>Equals(g.Tag,"DownloadsPopover"));
+    static string Plain(TextBlock t) =>
+        t.Inlines.Count > 0
+            ? string.Concat(
+                t.Inlines.Select(i =>
+                    i is System.Windows.Documents.Run r ? r.Text
+                    : i is System.Windows.Documents.InlineUIContainer { Child: TextBlock c } ? c.Text
+                    : ""
+                )
+            )
+            : t.Text;
+
+    bool LibraryRootHasPopover() =>
+        ((Grid)LibraryRoot.Parent).Children.OfType<Grid>().Any(g => Equals(g.Tag, "DownloadsPopover"));
+
     sealed class UiDownloadProvider : IDownloadProvider
     {
-        public Task<List<IndexedRelease>> Search(VideoItem i,CancellationToken ct)=>Task.FromResult(new List<IndexedRelease>{new(new(){Id=Guid.NewGuid().ToString("N"),Name="1080p · HEVC · English",Detail="Season 1 pack · choose only the episodes you want",Size=2L*1024*1024*1024,Cached=true,CacheStatus="Ready",SizeKind="Pack",Sources=["TorBox library"],Resolution="1080p"},new string('a',40)),new(new(){Id=Guid.NewGuid().ToString("N"),Name="1080p single alternative",Resolution="1080p",Languages="English",Cached=true,CacheStatus="Ready",Sources=["AIOStreams"]},new string('b',40))});
-        public Task<List<TorboxFile>> Files(string h,CancellationToken ct)=>Task.FromResult(h[0]=='b'?new List<TorboxFile>{new(1,"Noir.UI.fixture.S01E01.mkv",512L*1024*1024)}:new List<TorboxFile>{new(1,"Noir.UI.fixture.S01E01.mkv",1024L*1024*1024),new(2,"Noir.UI.fixture.S01E02.mkv",1024L*1024*1024)});
-        public Task<TorboxTorrent> Prepare(string h,long id,CancellationToken ct)=>throw new NotSupportedException();
-        public Task<string> Link(long id,long file,CancellationToken ct)=>throw new NotSupportedException();
+        public Task<List<IndexedRelease>> Search(VideoItem i, CancellationToken ct) =>
+            Task.FromResult(
+                new List<IndexedRelease>
+                {
+                    new(
+                        new()
+                        {
+                            Id = Guid.NewGuid().ToString("N"),
+                            Name = "1080p · HEVC · English",
+                            Detail = "Season 1 pack · choose only the episodes you want",
+                            Size = 2L * 1024 * 1024 * 1024,
+                            Cached = true,
+                            CacheStatus = "Ready",
+                            SizeKind = "Pack",
+                            Sources = ["TorBox library"],
+                            Resolution = "1080p",
+                        },
+                        new string('a', 40)
+                    ),
+                    new(
+                        new()
+                        {
+                            Id = Guid.NewGuid().ToString("N"),
+                            Name = "1080p single alternative",
+                            Resolution = "1080p",
+                            Languages = "English",
+                            Cached = true,
+                            CacheStatus = "Ready",
+                            Sources = ["AIOStreams"],
+                        },
+                        new string('b', 40)
+                    ),
+                }
+            );
+
+        public Task<List<TorboxFile>> Files(string h, CancellationToken ct) =>
+            Task.FromResult(
+                h[0] == 'b'
+                    ? new List<TorboxFile> { new(1, "Noir.UI.fixture.S01E01.mkv", 512L * 1024 * 1024) }
+                    : new List<TorboxFile>
+                    {
+                        new(1, "Noir.UI.fixture.S01E01.mkv", 1024L * 1024 * 1024),
+                        new(2, "Noir.UI.fixture.S01E02.mkv", 1024L * 1024 * 1024),
+                    }
+            );
+
+        public Task<TorboxTorrent> Prepare(string h, long id, CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        public Task<string> Link(long id, long file, CancellationToken ct) => throw new NotSupportedException();
     }
 }
 #endif

@@ -1,162 +1,1296 @@
-using System.IO.Compression;
 using System.Buffers.Binary;
+using System.IO.Compression;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Security.Cryptography;
 using Noir;
 
 static class SubtitleProviderChecks
 {
-    const string Key="FAKE_SUBTITLE_KEY",Auth="Bearer FAKE_ADDON_AUTH",Subtitle="1\n00:00:01,000 --> 00:00:04,000\nHello subtitle";
-    sealed record Request(Uri Uri,HttpMethod Method,Dictionary<string,string> Headers,string Body);
+    const string Key = "FAKE_SUBTITLE_KEY",
+        Auth = "Bearer FAKE_ADDON_AUTH",
+        Subtitle = "1\n00:00:01,000 --> 00:00:04,000\nHello subtitle";
+
+    sealed record Request(Uri Uri, HttpMethod Method, Dictionary<string, string> Headers, string Body);
+
     sealed class Handler : HttpMessageHandler
     {
-        public readonly List<Request> Requests=[];
-        public Func<Request,HttpResponseMessage> Reply=_=>Response("{}");
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken ct){var r=new Request(request.RequestUri!,request.Method,request.Headers.ToDictionary(h=>h.Key,h=>string.Join(",",h.Value),StringComparer.OrdinalIgnoreCase),request.Content==null?"":await request.Content.ReadAsStringAsync(ct));Requests.Add(r);return Reply(r);}
+        public readonly List<Request> Requests = [];
+        public Func<Request, HttpResponseMessage> Reply = _ => Response("{}");
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            var r = new Request(
+                request.RequestUri!,
+                request.Method,
+                request.Headers.ToDictionary(
+                    h => h.Key,
+                    h => string.Join(",", h.Value),
+                    StringComparer.OrdinalIgnoreCase
+                ),
+                request.Content == null ? "" : await request.Content.ReadAsStringAsync(ct)
+            );
+            Requests.Add(r);
+            return Reply(r);
+        }
     }
+
     sealed class Counted(byte[] bytes) : MemoryStream(bytes)
     {
         public int BytesRead;
-        public override async ValueTask<int> ReadAsync(Memory<byte> buffer,CancellationToken ct=default){var count=await base.ReadAsync(buffer,ct);BytesRead+=count;return count;}
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        {
+            var count = await base.ReadAsync(buffer, ct);
+            BytesRead += count;
+            return count;
+        }
     }
-    static HttpResponseMessage Response(string body,int status=200)=>new((HttpStatusCode)status){Content=new StringContent(body)};
-    static HttpResponseMessage Binary(byte[] bytes)=>new(HttpStatusCode.OK){Content=new ByteArrayContent(bytes)};
-    static Dictionary<string,string> Query(Uri uri)=>uri.Query.TrimStart('?').Split('&',StringSplitOptions.RemoveEmptyEntries).Select(v=>v.Split('=',2)).ToDictionary(v=>Uri.UnescapeDataString(v[0]),v=>Uri.UnescapeDataString(v.ElementAtOrDefault(1)??""));
-    static SubtitleSelection Selection(string source,bool only=true)=>new(source,Key,AddonUrl:source=="addon"?"https://addon.example/config":"",AddonAuth:source=="addon"?Auth:"",Only:only);
-    static VideoItem Item(bool movie)=>new(){ImdbId="tt0111161",IsMovie=movie,Season=1,Episode=3};
-    static byte[] Zip(params (string Name,byte[] Bytes)[] files){using var output=new MemoryStream();using(var zip=new ZipArchive(output,ZipArchiveMode.Create,true)){foreach(var file in files){var entry=zip.CreateEntry(file.Name);using var stream=entry.Open();stream.Write(file.Bytes);}}return output.ToArray();}
-    static byte[] ZipText(params string[] names)=>Zip(names.Select(n=>(n,Encoding.UTF8.GetBytes(Subtitle))).ToArray());
-    static byte[] LieAboutSize(byte[] bytes){for(int i=0;i<bytes.Length-30;i++){if(BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(i))==0x04034b50)BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(i+22),1);if(BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(i))==0x02014b50)BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(i+24),1);}return bytes;}
-    static string SearchBody(string source,string language,bool movie)=>source switch{
-        "opensubtitles"=>JsonSerializer.Serialize(new{data=new[]{new{id="search",attributes=new{language,release="Release.WEB",moviehash_match=true,feature_details=new{season_number=1,episode_number=3},files=new[]{new{file_id=42,file_name="Release.S01E03.srt"}}}}}}),
-        "subdl"=>JsonSerializer.Serialize(new{status=true,subtitles=new[]{new{lang=language.ToUpperInvariant(),release_name="Release.WEB",name="Release.S01E03.zip",url="/subtitle/1-2.zip",season=1,episode=3}}}),
-        "subsource"=>JsonSerializer.Serialize(new{data=new[]{new{subtitleId=42,movieId=movie?8:7,language=language=="en"?"english":"arabic",releaseInfo=new[]{"Release.WEB"}}}}),
-        "wyzie"=>JsonSerializer.Serialize(new[]{new{id="42",language,url="https://sub.wyzie.io/c/42?tok=FAKE_SIGNED_LINK",format="srt",fileName="Release.S01E03.srt",release="Release.WEB",match=new{reasons=new[]{"hash"}}}}),
-        _=>JsonSerializer.Serialize(new{subtitles=new[]{new{id="42",lang=language,url="https://addon.example/config/file.srt",subtitleFileName="Release.S01E03.srt",movieReleaseName="Release.WEB",season=1,episode=3,m="h"}}})};
-    static string Empty(string source)=>source switch{"opensubtitles" or "subsource"=>"{\"data\":[]}","subdl"=>"{\"status\":true,\"subtitles\":[]}","wyzie"=>"[]",_=>"{\"subtitles\":[]}"};
-    public static async Task Run(string root,Action<bool,string> check)
+
+    static HttpResponseMessage Response(string body, int status = 200) =>
+        new((HttpStatusCode)status) { Content = new StringContent(body) };
+
+    static HttpResponseMessage Binary(byte[] bytes) => new(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) };
+
+    static Dictionary<string, string> Query(Uri uri) =>
+        uri
+            .Query.TrimStart('?')
+            .Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Select(v => v.Split('=', 2))
+            .ToDictionary(
+                v => Uri.UnescapeDataString(v[0]),
+                v => Uri.UnescapeDataString(v.ElementAtOrDefault(1) ?? "")
+            );
+
+    static SubtitleSelection Selection(string source, bool only = true) =>
+        new(
+            source,
+            Key,
+            AddonUrl: source == "addon" ? "https://addon.example/config" : "",
+            AddonAuth: source == "addon" ? Auth : "",
+            Only: only
+        );
+
+    static VideoItem Item(bool movie) =>
+        new()
+        {
+            ImdbId = "tt0111161",
+            IsMovie = movie,
+            Season = 1,
+            Episode = 3,
+        };
+
+    static byte[] Zip(params (string Name, byte[] Bytes)[] files)
     {
-        var profile=Path.Combine(Directory.GetCurrentDirectory(),"work","subtitle-round","bpc","checks-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(profile);
-        foreach(var source in new[]{"opensubtitles","subdl","subsource","wyzie","addon"}){
-            using var handler=new Handler();using var client=new HttpClient(handler);var api=new SubtitleProviders(client);var selection=Selection(source);
-            foreach(var movie in new[]{true,false})foreach(var language in new[]{"en","ar"}){
-                handler.Requests.Clear();handler.Reply=r=>Response(r.Uri.AbsolutePath.EndsWith("/movies/search")?"{\"data\":[{\"movieId\":99,\"imdbId\":\"tt999\",\"season\":1},{\"movieId\":8,\"imdbId\":\"tt0111161\",\"season\":2},{\"movieId\":7,\"imdbId\":\"tt0111161\",\"season\":1}]}":SearchBody(source,language,movie));
-                var results=await api.Search(selection,Item(movie),"Release.WEB.mkv",[language],"0123456789abcdef",CancellationToken.None);check(results.Count==1&&results[0].Language==language&&results[0].Provider!=null,source+" parses "+(movie?"movie":"episode")+" "+language);
-                var first=handler.Requests[0];var last=handler.Requests[^1];var q=Query(first.Uri);var expectedHost=source switch{"opensubtitles"=>"api.opensubtitles.com","subdl"=>"api.subdl.com","subsource"=>"api.subsource.net","wyzie"=>"sub.wyzie.io",_=>"addon.example"};
-                check(handler.Requests.All(r=>r.Uri.Host==expectedHost&&r.Method==HttpMethod.Get&&r.Headers.GetValueOrDefault("User-Agent","").StartsWith("Noir/")),source+" uses its exact API host and per-call user agent");
-                if(source=="opensubtitles")check(first.Uri.AbsolutePath=="/api/v1/subtitles"&&q["languages"]==language&&q[movie?"imdb_id":"parent_imdb_id"]=="111161"&&q["moviehash"]=="0123456789abcdef"&&(movie?!q.ContainsKey("season_number"):q["season_number"]=="1"&&q["episode_number"]=="3")&&first.Headers["Api-Key"]==Key&&first.Headers["Accept"]=="application/json"&&!first.Headers.ContainsKey("Authorization")&&results[0].Url==""&&results[0].HashMatch,"OpenSubtitles exact search parameters, authentication, opaque file ID and hash bonus");
-                if(source=="subdl")check(first.Uri.AbsolutePath=="/api/v1/subtitles"&&q["api_key"]==Key&&q["imdb_id"]=="tt0111161"&&q["type"]==(movie?"movie":"tv")&&q["languages"]==language.ToUpperInvariant()&&q["subs_per_page"]=="30"&&q["releases"]=="1"&&q["file_name"]=="Release.WEB.mkv"&&(movie?!q.ContainsKey("season_number"):q["season_number"]=="1"&&q["episode_number"]=="3")&&!results[0].HashMatch,"SubDL exact search parameters and no invented hash match");
-                if(source=="subsource"){var lq=Query(last.Uri);check(first.Uri.AbsolutePath=="/api/v1/movies/search"&&q["searchType"]=="imdb"&&q["imdb"]=="tt0111161"&&(movie?!q.ContainsKey("season"):q["season"]=="1")&&last.Uri.AbsolutePath=="/api/v1/subtitles"&&lq["movieId"]==(movie?"8":"7")&&lq["language"]==(language=="en"?"english":"arabic")&&lq["limit"]=="100"&&(movie?!lq.ContainsKey("seasonNumber"):lq["seasonNumber"]=="1"&&lq["episodeNumber"]=="3")&&handler.Requests.All(r=>r.Headers["X-API-Key"]==Key)&&results[0].Url=="","SubSource exact title match, language list and key headers");}
-                if(source=="wyzie")check(first.Uri.AbsolutePath=="/search"&&q["key"]==Key&&q["id"]=="tt0111161"&&q["language"]==language&&q["hash"]=="0123456789abcdef"&&q["video"]=="Release.WEB.mkv"&&q["limit"]=="200"&&(movie?!q.ContainsKey("season"):q["season"]=="1"&&q["episode"]=="3")&&results[0].HashMatch,"Wyzie exact search parameters and documented hash reason");
-                if(source=="addon")check(first.Uri.AbsolutePath.StartsWith("/config/subtitles/"+(movie?"movie/tt0111161/":"series/tt0111161%3A1%3A3/"),StringComparison.OrdinalIgnoreCase)&&first.Uri.AbsoluteUri.Contains("filename=Release.WEB.mkv&videoHash=0123456789abcdef.json")&&first.Headers["Authorization"]==Auth,"Addon exact Stremio movie/episode route and optional authorization");
-                check(results[0].Score>= (source is "opensubtitles" or "wyzie" or "addon"?1000:0)&&!results[0].Url.Contains(Key)&&!results[0].ToString().Contains(Key),source+" candidate ranking and printable provenance keep the key private");
-                handler.Requests.Clear();handler.Reply=r=>{
-                    if(r.Uri.AbsolutePath=="/api/v1/download")return Response("{\"link\":\"https://files.example/sub.srt\"}");
-                    return source is "subdl" or "subsource"?Binary(ZipText("../../Release.S01E03.srt")):Response(Subtitle);};
-                var downloaded=await api.Download(results[0],CancellationToken.None);check(Encoding.UTF8.GetString(downloaded.Bytes)==Subtitle,source+" downloads subtitle bytes through provider dispatch");
-                check(handler.Requests[^1].Headers.All(h=>h.Key is not ("Api-Key" or "Authorization" or "X-API-Key"))||source is "subsource" or "addon",source+" file requests do not inherit API credentials");
-                if(source=="opensubtitles")check(handler.Requests.Count==2&&handler.Requests[0].Method==HttpMethod.Post&&handler.Requests[0].Body=="{\"file_id\":42,\"sub_format\":\"srt\"}"&&handler.Requests[0].Headers["Api-Key"]==Key,"OpenSubtitles download exchange has exact JSON and authenticated API only");
-                if(source=="subdl")check(handler.Requests[0].Uri.Host=="dl.subdl.com"&&handler.Requests[0].Uri.AbsolutePath=="/subtitle/1-2.zip"&&handler.Requests[0].Uri.Query.Length==0,"SubDL joins zip path on fixed download host without key");
-                if(source=="subsource")check(handler.Requests[0].Uri.Host=="api.subsource.net"&&handler.Requests[0].Uri.AbsolutePath=="/api/v1/subtitles/42/download"&&handler.Requests[0].Headers["X-API-Key"]==Key,"SubSource opaque ID downloads zip with required API header");
-                if(source=="wyzie")check(handler.Requests[0].Uri.Host=="sub.wyzie.io"&&Query(handler.Requests[0].Uri).Keys.SequenceEqual(new[]{"tok"}),"Wyzie file request preserves signature without adding key");
+        using var output = new MemoryStream();
+        using (var zip = new ZipArchive(output, ZipArchiveMode.Create, true))
+        {
+            foreach (var file in files)
+            {
+                var entry = zip.CreateEntry(file.Name);
+                using var stream = entry.Open();
+                stream.Write(file.Bytes);
             }
-            handler.Reply=r=>Response(r.Uri.AbsolutePath.EndsWith("/movies/search")?"{\"data\":[{\"movieId\":7,\"imdbId\":\"tt0111161\",\"season\":1}]}":source=="subsource"?SearchBody(source,Query(r.Uri)["language"]=="english"?"en":"ar",true):source=="wyzie"?"[]":SearchBody(source,"en",true));
-            await api.Search(selection,Item(false),"release",["en","ar"],"invalid-hash",CancellationToken.None);var multi=Query(handler.Requests[^1].Uri);
-            check(source switch{"opensubtitles"=>multi["languages"]=="ar,en"&&!multi.ContainsKey("moviehash"),"subdl"=>multi["languages"]=="AR,EN","wyzie"=>multi["language"]=="en,ar"&&!multi.ContainsKey("hash"),"subsource"=>multi["language"]=="english",_=>true},source+" maps both supported languages and rejects malformed hash");
-            foreach(var malformed in new[]{"not json","null","{}",new string('x',4*1024*1024+1)}){
-                handler.Reply=_=>Response(malformed);bool rejected=false;try{await api.Search(selection,Item(true),"",["en"],"",CancellationToken.None);}catch(SubtitleSourceException e){rejected=e.Kind==SubtitleFailureKind.Unavailable&&!e.Message.Contains(Key);}
-                check(rejected,source+" rejects malformed or oversized lookup safely");
+        }
+        return output.ToArray();
+    }
+
+    static byte[] ZipText(params string[] names) =>
+        Zip(names.Select(n => (n, Encoding.UTF8.GetBytes(Subtitle))).ToArray());
+
+    static byte[] LieAboutSize(byte[] bytes)
+    {
+        for (int i = 0; i < bytes.Length - 30; i++)
+        {
+            if (BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(i)) == 0x04034b50)
+                BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(i + 22), 1);
+            if (BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(i)) == 0x02014b50)
+                BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(i + 24), 1);
+        }
+        return bytes;
+    }
+
+    static string SearchBody(string source, string language, bool movie) =>
+        source switch
+        {
+            "opensubtitles" => JsonSerializer.Serialize(
+                new
+                {
+                    data = new[]
+                    {
+                        new
+                        {
+                            id = "search",
+                            attributes = new
+                            {
+                                language,
+                                release = "Release.WEB",
+                                moviehash_match = true,
+                                feature_details = new { season_number = 1, episode_number = 3 },
+                                files = new[] { new { file_id = 42, file_name = "Release.S01E03.srt" } },
+                            },
+                        },
+                    },
+                }
+            ),
+            "subdl" => JsonSerializer.Serialize(
+                new
+                {
+                    status = true,
+                    subtitles = new[]
+                    {
+                        new
+                        {
+                            lang = language.ToUpperInvariant(),
+                            release_name = "Release.WEB",
+                            name = "Release.S01E03.zip",
+                            url = "/subtitle/1-2.zip",
+                            season = 1,
+                            episode = 3,
+                        },
+                    },
+                }
+            ),
+            "subsource" => JsonSerializer.Serialize(
+                new
+                {
+                    data = new[]
+                    {
+                        new
+                        {
+                            subtitleId = 42,
+                            movieId = movie ? 8 : 7,
+                            language = language == "en" ? "english" : "arabic",
+                            releaseInfo = new[] { "Release.WEB" },
+                        },
+                    },
+                }
+            ),
+            "wyzie" => JsonSerializer.Serialize(
+                new[]
+                {
+                    new
+                    {
+                        id = "42",
+                        language,
+                        url = "https://sub.wyzie.io/c/42?tok=FAKE_SIGNED_LINK",
+                        format = "srt",
+                        fileName = "Release.S01E03.srt",
+                        release = "Release.WEB",
+                        match = new { reasons = new[] { "hash" } },
+                    },
+                }
+            ),
+            _ => JsonSerializer.Serialize(
+                new
+                {
+                    subtitles = new[]
+                    {
+                        new
+                        {
+                            id = "42",
+                            lang = language,
+                            url = "https://addon.example/config/file.srt",
+                            subtitleFileName = "Release.S01E03.srt",
+                            movieReleaseName = "Release.WEB",
+                            season = 1,
+                            episode = 3,
+                            m = "h",
+                        },
+                    },
+                }
+            ),
+        };
+
+    static string Empty(string source) =>
+        source switch
+        {
+            "opensubtitles" or "subsource" => "{\"data\":[]}",
+            "subdl" => "{\"status\":true,\"subtitles\":[]}",
+            "wyzie" => "[]",
+            _ => "{\"subtitles\":[]}",
+        };
+
+    public static async Task Run(string root, Action<bool, string> check)
+    {
+        var profile = Path.Combine(
+            Directory.GetCurrentDirectory(),
+            "work",
+            "subtitle-round",
+            "bpc",
+            "checks-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(profile);
+        foreach (var source in new[] { "opensubtitles", "subdl", "subsource", "wyzie", "addon" })
+        {
+            using var handler = new Handler();
+            using var client = new HttpClient(handler);
+            var api = new SubtitleProviders(client);
+            var selection = Selection(source);
+            foreach (var movie in new[] { true, false })
+            foreach (var language in new[] { "en", "ar" })
+            {
+                handler.Requests.Clear();
+                handler.Reply = r =>
+                    Response(
+                        r.Uri.AbsolutePath.EndsWith("/movies/search")
+                            ? "{\"data\":[{\"movieId\":99,\"imdbId\":\"tt999\",\"season\":1},{\"movieId\":8,\"imdbId\":\"tt0111161\",\"season\":2},{\"movieId\":7,\"imdbId\":\"tt0111161\",\"season\":1}]}"
+                            : SearchBody(source, language, movie)
+                    );
+                var results = await api.Search(
+                    selection,
+                    Item(movie),
+                    "Release.WEB.mkv",
+                    [language],
+                    "0123456789abcdef",
+                    CancellationToken.None
+                );
+                check(
+                    results.Count == 1 && results[0].Language == language && results[0].Provider != null,
+                    source + " parses " + (movie ? "movie" : "episode") + " " + language
+                );
+                var first = handler.Requests[0];
+                var last = handler.Requests[^1];
+                var q = Query(first.Uri);
+                var expectedHost = source switch
+                {
+                    "opensubtitles" => "api.opensubtitles.com",
+                    "subdl" => "api.subdl.com",
+                    "subsource" => "api.subsource.net",
+                    "wyzie" => "sub.wyzie.io",
+                    _ => "addon.example",
+                };
+                check(
+                    handler.Requests.All(r =>
+                        r.Uri.Host == expectedHost
+                        && r.Method == HttpMethod.Get
+                        && r.Headers.GetValueOrDefault("User-Agent", "").StartsWith("Noir/")
+                    ),
+                    source + " uses its exact API host and per-call user agent"
+                );
+                if (source == "opensubtitles")
+                    check(
+                        first.Uri.AbsolutePath == "/api/v1/subtitles"
+                            && q["languages"] == language
+                            && q[movie ? "imdb_id" : "parent_imdb_id"] == "111161"
+                            && q["moviehash"] == "0123456789abcdef"
+                            && (
+                                movie
+                                    ? !q.ContainsKey("season_number")
+                                    : q["season_number"] == "1" && q["episode_number"] == "3"
+                            )
+                            && first.Headers["Api-Key"] == Key
+                            && first.Headers["Accept"] == "application/json"
+                            && !first.Headers.ContainsKey("Authorization")
+                            && results[0].Url == ""
+                            && results[0].HashMatch,
+                        "OpenSubtitles exact search parameters, authentication, opaque file ID and hash bonus"
+                    );
+                if (source == "subdl")
+                    check(
+                        first.Uri.AbsolutePath == "/api/v1/subtitles"
+                            && q["api_key"] == Key
+                            && q["imdb_id"] == "tt0111161"
+                            && q["type"] == (movie ? "movie" : "tv")
+                            && q["languages"] == language.ToUpperInvariant()
+                            && q["subs_per_page"] == "30"
+                            && q["releases"] == "1"
+                            && q["file_name"] == "Release.WEB.mkv"
+                            && (
+                                movie
+                                    ? !q.ContainsKey("season_number")
+                                    : q["season_number"] == "1" && q["episode_number"] == "3"
+                            )
+                            && !results[0].HashMatch,
+                        "SubDL exact search parameters and no invented hash match"
+                    );
+                if (source == "subsource")
+                {
+                    var lq = Query(last.Uri);
+                    check(
+                        first.Uri.AbsolutePath == "/api/v1/movies/search"
+                            && q["searchType"] == "imdb"
+                            && q["imdb"] == "tt0111161"
+                            && (movie ? !q.ContainsKey("season") : q["season"] == "1")
+                            && last.Uri.AbsolutePath == "/api/v1/subtitles"
+                            && lq["movieId"] == (movie ? "8" : "7")
+                            && lq["language"] == (language == "en" ? "english" : "arabic")
+                            && lq["limit"] == "100"
+                            && (
+                                movie
+                                    ? !lq.ContainsKey("seasonNumber")
+                                    : lq["seasonNumber"] == "1" && lq["episodeNumber"] == "3"
+                            )
+                            && handler.Requests.All(r => r.Headers["X-API-Key"] == Key)
+                            && results[0].Url == "",
+                        "SubSource exact title match, language list and key headers"
+                    );
+                }
+                if (source == "wyzie")
+                    check(
+                        first.Uri.AbsolutePath == "/search"
+                            && q["key"] == Key
+                            && q["id"] == "tt0111161"
+                            && q["language"] == language
+                            && q["hash"] == "0123456789abcdef"
+                            && q["video"] == "Release.WEB.mkv"
+                            && q["limit"] == "200"
+                            && (movie ? !q.ContainsKey("season") : q["season"] == "1" && q["episode"] == "3")
+                            && results[0].HashMatch,
+                        "Wyzie exact search parameters and documented hash reason"
+                    );
+                if (source == "addon")
+                    check(
+                        first.Uri.AbsolutePath.StartsWith(
+                            "/config/subtitles/" + (movie ? "movie/tt0111161/" : "series/tt0111161%3A1%3A3/"),
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                            && first.Uri.AbsoluteUri.Contains(
+                                "filename=Release.WEB.mkv&videoHash=0123456789abcdef.json"
+                            )
+                            && first.Headers["Authorization"] == Auth,
+                        "Addon exact Stremio movie/episode route and optional authorization"
+                    );
+                check(
+                    results[0].Score >= (source is "opensubtitles" or "wyzie" or "addon" ? 1000 : 0)
+                        && !results[0].Url.Contains(Key)
+                        && !results[0].ToString().Contains(Key),
+                    source + " candidate ranking and printable provenance keep the key private"
+                );
+                handler.Requests.Clear();
+                handler.Reply = r =>
+                {
+                    if (r.Uri.AbsolutePath == "/api/v1/download")
+                        return Response("{\"link\":\"https://files.example/sub.srt\"}");
+                    return source is "subdl" or "subsource"
+                        ? Binary(ZipText("../../Release.S01E03.srt"))
+                        : Response(Subtitle);
+                };
+                var downloaded = await api.Download(results[0], CancellationToken.None);
+                check(
+                    Encoding.UTF8.GetString(downloaded.Bytes) == Subtitle,
+                    source + " downloads subtitle bytes through provider dispatch"
+                );
+                check(
+                    handler.Requests[^1].Headers.All(h => h.Key is not ("Api-Key" or "Authorization" or "X-API-Key"))
+                        || source is "subsource" or "addon",
+                    source + " file requests do not inherit API credentials"
+                );
+                if (source == "opensubtitles")
+                    check(
+                        handler.Requests.Count == 2
+                            && handler.Requests[0].Method == HttpMethod.Post
+                            && handler.Requests[0].Body == "{\"file_id\":42,\"sub_format\":\"srt\"}"
+                            && handler.Requests[0].Headers["Api-Key"] == Key,
+                        "OpenSubtitles download exchange has exact JSON and authenticated API only"
+                    );
+                if (source == "subdl")
+                    check(
+                        handler.Requests[0].Uri.Host == "dl.subdl.com"
+                            && handler.Requests[0].Uri.AbsolutePath == "/subtitle/1-2.zip"
+                            && handler.Requests[0].Uri.Query.Length == 0,
+                        "SubDL joins zip path on fixed download host without key"
+                    );
+                if (source == "subsource")
+                    check(
+                        handler.Requests[0].Uri.Host == "api.subsource.net"
+                            && handler.Requests[0].Uri.AbsolutePath == "/api/v1/subtitles/42/download"
+                            && handler.Requests[0].Headers["X-API-Key"] == Key,
+                        "SubSource opaque ID downloads zip with required API header"
+                    );
+                if (source == "wyzie")
+                    check(
+                        handler.Requests[0].Uri.Host == "sub.wyzie.io"
+                            && Query(handler.Requests[0].Uri).Keys.SequenceEqual(new[] { "tok" }),
+                        "Wyzie file request preserves signature without adding key"
+                    );
             }
-            foreach(var status in new[]{401,403,402,406,429,500,503,-1,0}){
-                handler.Requests.Clear();handler.Reply=_=>{if(status==-1)throw new TaskCanceledException("fake timeout "+Key);if(status==0)throw new HttpRequestException("fake URL ?key="+Key);var response=Response(source=="opensubtitles"?"{\"message\":\""+Key+"\",\"reset_time\":\"2030-01-01T00:00:00Z\"}":source=="wyzie"?"{\"message\":\""+Key+"\",\"reset_at\":\"2030-01-01T00:00:00Z\"}":"{\"message\":\""+Key+"\"}",status);if(source=="subsource")response.Headers.TryAddWithoutValidation("X-RateLimit-Reset","1893456000");else if(source is "subdl" or "addon")response.Headers.RetryAfter=new System.Net.Http.Headers.RetryConditionHeaderValue(new DateTimeOffset(2030,1,1,0,0,0,TimeSpan.Zero));return response;};
-                var kind=status is 401 or 403?SubtitleFailureKind.BadKey:status is 402 or 406 or 429?SubtitleFailureKind.Limit:SubtitleFailureKind.Unavailable;bool mapped=false;
-                try{await api.Search(selection,Item(true),"",["en"],"",CancellationToken.None);}catch(SubtitleSourceException e){mapped=e.Kind==kind&&!e.Message.Contains(Key)&&e.Message.StartsWith(selection.Name+" · ")&&(kind!=SubtitleFailureKind.Limit||e.Message.Contains("2030"));}
-                check(mapped,source+" maps failure "+status+" without request secrets");
-                var engine=new SubtitleDownloads(profile,client,()=>selection);var target=new VideoItem{Path=Path.Combine(profile,source+status,"video.mkv")};var message=await engine.Fetch(Item(true),"Release",["ar"],false,CancellationToken.None,[new("ar","pack.srt","https://pack.example/sub.srt")],streamTarget:target);
-                check(handler.Requests.All(r=>r.Uri.Host==ExpectedHost(source))&&!message.Contains(Key)&&message.Contains(selection.Name),source+" Only=true forbids fallback and packs for "+status);
-                handler.Requests.Clear();handler.Reply=r=>r.Uri.Host=="opensubtitles-v3.strem.io"?Response("{\"subtitles\":[]}"):status==-1?throw new TaskCanceledException():status==0?throw new HttpRequestException():Response("{}",status);
-                await new SubtitleDownloads(profile,client,()=>selection with{Only=false}).Search(Item(true),"",CancellationToken.None,false);
-                check(handler.Requests[^1].Uri.Host=="opensubtitles-v3.strem.io",source+" Only=false falls back for "+status);
+            handler.Reply = r =>
+                Response(
+                    r.Uri.AbsolutePath.EndsWith("/movies/search")
+                        ? "{\"data\":[{\"movieId\":7,\"imdbId\":\"tt0111161\",\"season\":1}]}"
+                    : source == "subsource"
+                        ? SearchBody(source, Query(r.Uri)["language"] == "english" ? "en" : "ar", true)
+                    : source == "wyzie" ? "[]"
+                    : SearchBody(source, "en", true)
+                );
+            await api.Search(selection, Item(false), "release", ["en", "ar"], "invalid-hash", CancellationToken.None);
+            var multi = Query(handler.Requests[^1].Uri);
+            check(
+                source switch
+                {
+                    "opensubtitles" => multi["languages"] == "ar,en" && !multi.ContainsKey("moviehash"),
+                    "subdl" => multi["languages"] == "AR,EN",
+                    "wyzie" => multi["language"] == "en,ar" && !multi.ContainsKey("hash"),
+                    "subsource" => multi["language"] == "english",
+                    _ => true,
+                },
+                source + " maps both supported languages and rejects malformed hash"
+            );
+            foreach (var malformed in new[] { "not json", "null", "{}", new string('x', 4 * 1024 * 1024 + 1) })
+            {
+                handler.Reply = _ => Response(malformed);
+                bool rejected = false;
+                try
+                {
+                    await api.Search(selection, Item(true), "", ["en"], "", CancellationToken.None);
+                }
+                catch (SubtitleSourceException e)
+                {
+                    rejected = e.Kind == SubtitleFailureKind.Unavailable && !e.Message.Contains(Key);
+                }
+                check(rejected, source + " rejects malformed or oversized lookup safely");
             }
-            handler.Requests.Clear();handler.Reply=_=>Response(Empty(source));var exclusive=new SubtitleDownloads(profile,client,()=>selection);var emptyMessage=await exclusive.Fetch(Item(true),"",["ar"],false,CancellationToken.None,[new("ar","pack.srt","https://pack.example/file")],streamTarget:new VideoItem{Path=Path.Combine(profile,source+"empty","video.mkv")});
-            check(emptyMessage==selection.Name+" · no Arabic subtitles found"&&handler.Requests.All(r=>r.Uri.Host==ExpectedHost(source)),source+" Only=true empty result names source and ignores packs");
-            handler.Requests.Clear();handler.Reply=r=>Response(r.Uri.Host=="opensubtitles-v3.strem.io"?"{\"subtitles\":[]}":Empty(source));await new SubtitleDownloads(profile,client,()=>selection with{Only=false}).Search(Item(true),"",CancellationToken.None,false);check(handler.Requests[^1].Uri.Host=="opensubtitles-v3.strem.io",source+" empty result falls back only when allowed");
-            handler.Reply=r=>Response(r.Uri.AbsolutePath.EndsWith("/movies/search")?"{\"data\":[{\"movieId\":7,\"imdbId\":\"tt0111161\",\"season\":1}]}":SearchBody(source,"en",false));
-            var forDownload=(await api.Search(selection,Item(false),"Release",["en"],"",CancellationToken.None))[0];
-            foreach(var status in new[]{401,403,402,406,429,500,-1,0}){
-                handler.Requests.Clear();handler.Reply=_=>status==-1?throw new TaskCanceledException("fake timeout "+Key):status==0?throw new HttpRequestException("fake query "+Key):Response("{\"message\":\""+Key+"\"}",status);
-                var kind=status is 401 or 403?SubtitleFailureKind.BadKey:status is 402 or 406 or 429?SubtitleFailureKind.Limit:SubtitleFailureKind.Unavailable;bool mapped=false;try{await api.Download(forDownload,CancellationToken.None);}catch(SubtitleSourceException e){mapped=e.Kind==kind&&!e.Message.Contains(Key);}check(mapped,source+" maps download failure "+status+" privately");
-                foreach(var only in new[]{true,false}){
-                    handler.Requests.Clear();var chosen=selection with{Only=only};handler.Reply=r=>{
-                        if(r.Uri.Host=="opensubtitles-v3.strem.io")return Response("{\"subtitles\":[{\"id\":\"fallback\",\"lang\":\"en\",\"url\":\"https://fallback.example/sub.srt\"}]}");
-                        if(r.Uri.Host=="fallback.example")return Response(Subtitle);
-                        if(r.Uri.AbsolutePath.EndsWith("/movies/search"))return Response("{\"data\":[{\"movieId\":7,\"imdbId\":\"tt0111161\",\"season\":1}]}");
-                        if(r.Uri.AbsolutePath.EndsWith("/subtitles")||r.Uri.AbsolutePath=="/search"||r.Uri.AbsolutePath.Contains("/subtitles/series/"))return Response(SearchBody(source,"en",false));
-                        return status==-1?throw new TaskCanceledException():status==0?throw new HttpRequestException():Response("{}",status);
+            foreach (var status in new[] { 401, 403, 402, 406, 429, 500, 503, -1, 0 })
+            {
+                handler.Requests.Clear();
+                handler.Reply = _ =>
+                {
+                    if (status == -1)
+                        throw new TaskCanceledException("fake timeout " + Key);
+                    if (status == 0)
+                        throw new HttpRequestException("fake URL ?key=" + Key);
+                    var response = Response(
+                        source == "opensubtitles"
+                                ? "{\"message\":\"" + Key + "\",\"reset_time\":\"2030-01-01T00:00:00Z\"}"
+                            : source == "wyzie" ? "{\"message\":\"" + Key + "\",\"reset_at\":\"2030-01-01T00:00:00Z\"}"
+                            : "{\"message\":\"" + Key + "\"}",
+                        status
+                    );
+                    if (source == "subsource")
+                        response.Headers.TryAddWithoutValidation("X-RateLimit-Reset", "1893456000");
+                    else if (source is "subdl" or "addon")
+                        response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(
+                            new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero)
+                        );
+                    return response;
+                };
+                var kind =
+                    status is 401 or 403 ? SubtitleFailureKind.BadKey
+                    : status is 402 or 406 or 429 ? SubtitleFailureKind.Limit
+                    : SubtitleFailureKind.Unavailable;
+                bool mapped = false;
+                try
+                {
+                    await api.Search(selection, Item(true), "", ["en"], "", CancellationToken.None);
+                }
+                catch (SubtitleSourceException e)
+                {
+                    mapped =
+                        e.Kind == kind
+                        && !e.Message.Contains(Key)
+                        && e.Message.StartsWith(selection.Name + " · ")
+                        && (kind != SubtitleFailureKind.Limit || e.Message.Contains("2030"));
+                }
+                check(mapped, source + " maps failure " + status + " without request secrets");
+                var engine = new SubtitleDownloads(profile, client, () => selection);
+                var target = new VideoItem { Path = Path.Combine(profile, source + status, "video.mkv") };
+                var message = await engine.Fetch(
+                    Item(true),
+                    "Release",
+                    ["ar"],
+                    false,
+                    CancellationToken.None,
+                    [new("ar", "pack.srt", "https://pack.example/sub.srt")],
+                    streamTarget: target
+                );
+                check(
+                    handler.Requests.All(r => r.Uri.Host == ExpectedHost(source))
+                        && !message.Contains(Key)
+                        && message.Contains(selection.Name),
+                    source + " Only=true forbids fallback and packs for " + status
+                );
+                handler.Requests.Clear();
+                handler.Reply = r =>
+                    r.Uri.Host == "opensubtitles-v3.strem.io" ? Response("{\"subtitles\":[]}")
+                    : status == -1 ? throw new TaskCanceledException()
+                    : status == 0 ? throw new HttpRequestException()
+                    : Response("{}", status);
+                await new SubtitleDownloads(profile, client, () => selection with { Only = false }).Search(
+                    Item(true),
+                    "",
+                    CancellationToken.None,
+                    false
+                );
+                check(
+                    handler.Requests[^1].Uri.Host == "opensubtitles-v3.strem.io",
+                    source + " Only=false falls back for " + status
+                );
+            }
+            handler.Requests.Clear();
+            handler.Reply = _ => Response(Empty(source));
+            var exclusive = new SubtitleDownloads(profile, client, () => selection);
+            var emptyMessage = await exclusive.Fetch(
+                Item(true),
+                "",
+                ["ar"],
+                false,
+                CancellationToken.None,
+                [new("ar", "pack.srt", "https://pack.example/file")],
+                streamTarget: new VideoItem { Path = Path.Combine(profile, source + "empty", "video.mkv") }
+            );
+            check(
+                emptyMessage == selection.Name + " · no Arabic subtitles found"
+                    && handler.Requests.All(r => r.Uri.Host == ExpectedHost(source)),
+                source + " Only=true empty result names source and ignores packs"
+            );
+            handler.Requests.Clear();
+            handler.Reply = r =>
+                Response(r.Uri.Host == "opensubtitles-v3.strem.io" ? "{\"subtitles\":[]}" : Empty(source));
+            await new SubtitleDownloads(profile, client, () => selection with { Only = false }).Search(
+                Item(true),
+                "",
+                CancellationToken.None,
+                false
+            );
+            check(
+                handler.Requests[^1].Uri.Host == "opensubtitles-v3.strem.io",
+                source + " empty result falls back only when allowed"
+            );
+            handler.Reply = r =>
+                Response(
+                    r.Uri.AbsolutePath.EndsWith("/movies/search")
+                        ? "{\"data\":[{\"movieId\":7,\"imdbId\":\"tt0111161\",\"season\":1}]}"
+                        : SearchBody(source, "en", false)
+                );
+            var forDownload = (await api.Search(selection, Item(false), "Release", ["en"], "", CancellationToken.None))[
+                0
+            ];
+            foreach (var status in new[] { 401, 403, 402, 406, 429, 500, -1, 0 })
+            {
+                handler.Requests.Clear();
+                handler.Reply = _ =>
+                    status == -1 ? throw new TaskCanceledException("fake timeout " + Key)
+                    : status == 0 ? throw new HttpRequestException("fake query " + Key)
+                    : Response("{\"message\":\"" + Key + "\"}", status);
+                var kind =
+                    status is 401 or 403 ? SubtitleFailureKind.BadKey
+                    : status is 402 or 406 or 429 ? SubtitleFailureKind.Limit
+                    : SubtitleFailureKind.Unavailable;
+                bool mapped = false;
+                try
+                {
+                    await api.Download(forDownload, CancellationToken.None);
+                }
+                catch (SubtitleSourceException e)
+                {
+                    mapped = e.Kind == kind && !e.Message.Contains(Key);
+                }
+                check(mapped, source + " maps download failure " + status + " privately");
+                foreach (var only in new[] { true, false })
+                {
+                    handler.Requests.Clear();
+                    var chosen = selection with { Only = only };
+                    handler.Reply = r =>
+                    {
+                        if (r.Uri.Host == "opensubtitles-v3.strem.io")
+                            return Response(
+                                "{\"subtitles\":[{\"id\":\"fallback\",\"lang\":\"en\",\"url\":\"https://fallback.example/sub.srt\"}]}"
+                            );
+                        if (r.Uri.Host == "fallback.example")
+                            return Response(Subtitle);
+                        if (r.Uri.AbsolutePath.EndsWith("/movies/search"))
+                            return Response("{\"data\":[{\"movieId\":7,\"imdbId\":\"tt0111161\",\"season\":1}]}");
+                        if (
+                            r.Uri.AbsolutePath.EndsWith("/subtitles")
+                            || r.Uri.AbsolutePath == "/search"
+                            || r.Uri.AbsolutePath.Contains("/subtitles/series/")
+                        )
+                            return Response(SearchBody(source, "en", false));
+                        return status == -1 ? throw new TaskCanceledException()
+                            : status == 0 ? throw new HttpRequestException()
+                            : Response("{}", status);
                     };
-                    var target=new VideoItem{Path=Path.Combine(profile,source+"download"+status+only,"video.mkv")};var message=await new SubtitleDownloads(profile,client,()=>chosen).Fetch(Item(false),"Release",["en"],false,CancellationToken.None,[new("en","pack.srt","https://pack.example/file")],streamTarget:target);
-                    check(only?handler.Requests.All(r=>r.Uri.Host is not ("opensubtitles-v3.strem.io" or "fallback.example" or "pack.example"))&&!File.Exists(Path.ChangeExtension(target.Path,"en.srt")):handler.Requests.Any(r=>r.Uri.Host=="fallback.example")&&message.Contains("saved"),source+" download failure "+status+" respects Only="+only);
+                    var target = new VideoItem
+                    {
+                        Path = Path.Combine(profile, source + "download" + status + only, "video.mkv"),
+                    };
+                    var message = await new SubtitleDownloads(profile, client, () => chosen).Fetch(
+                        Item(false),
+                        "Release",
+                        ["en"],
+                        false,
+                        CancellationToken.None,
+                        [new("en", "pack.srt", "https://pack.example/file")],
+                        streamTarget: target
+                    );
+                    check(
+                        only
+                            ? handler.Requests.All(r =>
+                                r.Uri.Host is not ("opensubtitles-v3.strem.io" or "fallback.example" or "pack.example")
+                            ) && !File.Exists(Path.ChangeExtension(target.Path, "en.srt"))
+                            : handler.Requests.Any(r => r.Uri.Host == "fallback.example") && message.Contains("saved"),
+                        source + " download failure " + status + " respects Only=" + only
+                    );
                 }
             }
-            foreach(var body in new[]{new string('x',4*1024*1024+1),"<html>error</html>"}){handler.Reply=_=>Response(body);bool rejected=false;try{await api.Download(forDownload,CancellationToken.None);}catch(SubtitleSourceException e){rejected=e.Kind==SubtitleFailureKind.Unavailable;}check(rejected,source+" rejects oversized or malformed downloaded content");}
-            handler.Requests.Clear();handler.Reply=r=>Response(r.Uri.AbsolutePath.EndsWith("/manifest.json")?"{\"name\":\"Fake addon\",\"resources\":[\"subtitles\"]}":r.Uri.AbsolutePath.EndsWith("/movies/search")?"{\"data\":[{\"movieId\":7,\"imdbId\":\"tt0111161\"}]}":Empty(source));await api.Check(selection,CancellationToken.None);
-            check(handler.Requests.All(r=>r.Method==HttpMethod.Get&&!r.Uri.AbsolutePath.EndsWith("/download")&&r.Uri.Host==ExpectedHost(source))&&handler.Requests.Any(r=>r.Uri.AbsoluteUri.Contains("tt0111161")||r.Uri.AbsoluteUri.Contains("111161")),source+" Check searches a known movie in English without download quota");
-            handler.Requests.Clear();handler.Reply=_=>new(HttpStatusCode.Redirect){Headers={Location=new Uri("https://other.example/stolen")}};bool redirect=false;try{await api.Search(selection,Item(true),"",["en"],"",CancellationToken.None);}catch(SubtitleSourceException e){redirect=e.Kind==SubtitleFailureKind.Unavailable;}check(redirect&&handler.Requests.Count==1,source+" credential redirect cannot reach another host");
+            foreach (var body in new[] { new string('x', 4 * 1024 * 1024 + 1), "<html>error</html>" })
+            {
+                handler.Reply = _ => Response(body);
+                bool rejected = false;
+                try
+                {
+                    await api.Download(forDownload, CancellationToken.None);
+                }
+                catch (SubtitleSourceException e)
+                {
+                    rejected = e.Kind == SubtitleFailureKind.Unavailable;
+                }
+                check(rejected, source + " rejects oversized or malformed downloaded content");
+            }
+            handler.Requests.Clear();
+            handler.Reply = r =>
+                Response(
+                    r.Uri.AbsolutePath.EndsWith("/manifest.json")
+                        ? "{\"name\":\"Fake addon\",\"resources\":[\"subtitles\"]}"
+                    : r.Uri.AbsolutePath.EndsWith("/movies/search")
+                        ? "{\"data\":[{\"movieId\":7,\"imdbId\":\"tt0111161\"}]}"
+                    : Empty(source)
+                );
+            await api.Check(selection, CancellationToken.None);
+            check(
+                handler.Requests.All(r =>
+                    r.Method == HttpMethod.Get
+                    && !r.Uri.AbsolutePath.EndsWith("/download")
+                    && r.Uri.Host == ExpectedHost(source)
+                )
+                    && handler.Requests.Any(r =>
+                        r.Uri.AbsoluteUri.Contains("tt0111161") || r.Uri.AbsoluteUri.Contains("111161")
+                    ),
+                source + " Check searches a known movie in English without download quota"
+            );
+            handler.Requests.Clear();
+            handler.Reply = _ =>
+                new(HttpStatusCode.Redirect) { Headers = { Location = new Uri("https://other.example/stolen") } };
+            bool redirect = false;
+            try
+            {
+                await api.Search(selection, Item(true), "", ["en"], "", CancellationToken.None);
+            }
+            catch (SubtitleSourceException e)
+            {
+                redirect = e.Kind == SubtitleFailureKind.Unavailable;
+            }
+            check(redirect && handler.Requests.Count == 1, source + " credential redirect cannot reach another host");
         }
-        await Additional(profile,check);
+        await Additional(profile, check);
     }
-    static string ExpectedHost(string source)=>source switch{"opensubtitles"=>"api.opensubtitles.com","subdl"=>"api.subdl.com","subsource"=>"api.subsource.net","wyzie"=>"sub.wyzie.io",_=>"addon.example"};
-    static async Task Additional(string profile,Action<bool,string> check)
+
+    static string ExpectedHost(string source) =>
+        source switch
+        {
+            "opensubtitles" => "api.opensubtitles.com",
+            "subdl" => "api.subdl.com",
+            "subsource" => "api.subsource.net",
+            "wyzie" => "sub.wyzie.io",
+            _ => "addon.example",
+        };
+
+    static async Task Additional(string profile, Action<bool, string> check)
     {
-        foreach(var address in new[]{"0.0.0.0","10.0.0.1","127.0.0.1","172.16.1.1","192.168.1.1","169.254.169.254","100.64.0.1","224.0.0.1","255.255.255.255","::","::1","fc00::1","fe80::1","ff02::1","::ffff:127.0.0.1","::ffff:192.168.1.1"})check(!SubtitleTransport.PublicAddress(IPAddress.Parse(address)),"Subtitle transport blocks private/special address "+address);
-        check(SubtitleTransport.PublicAddress(IPAddress.Parse("8.8.8.8"))&&SubtitleTransport.PublicAddress(IPAddress.Parse("2606:4700:4700::1111")),"Subtitle transport accepts public v4 and v6");
-        foreach(var url in new[]{"http://files.example/a","https://files.example:444/a","https://user:pass@files.example/a","https://127.0.0.1/a","https://[::ffff:10.0.0.1]/a","https://100.127.1.2/a"})check(!SubtitleTransport.ValidUrl(url),"Subtitle link literal/HTTPS validation rejects unsafe destination");
-        var context=new DnsEndPoint("rebind.example",443);bool blocked=false;try{await SubtitleTransport.Connect(context,CancellationToken.None,(_,_)=>Task.FromResult(new[]{IPAddress.Parse("8.8.8.8"),IPAddress.Loopback}));}catch(IOException){blocked=true;}check(blocked,"Connection-time resolver rejects mixed public/private DNS before opening a socket");
-        int resolves=0,connections=0;Task<IPAddress[]> Resolve(string host,CancellationToken ct)=>Task.FromResult(new[]{IPAddress.Parse(++resolves==1?"8.8.8.8":"127.0.0.1")});Task<Stream> Open(IPAddress address,int port,CancellationToken ct){connections++;return Task.FromResult<Stream>(new MemoryStream());}
-        using(await SubtitleTransport.Connect(context,CancellationToken.None,Resolve,Open)){}try{await SubtitleTransport.Connect(context,CancellationToken.None,Resolve,Open);}catch(IOException){}check(resolves==2&&connections==1,"Subtitle transport revalidates public-to-private DNS rebinding before opening another connection");
-        var episode=Item(false);var movie=Item(true);var picked=await SubtitleArchive.Pick(ZipText("../../evil.S01E02.srt","folder\\Release.S01E03.ass","folder/Release.S02E03.srt"),episode,"Release",CancellationToken.None);check(picked.Name=="Release.S01E03.ass","Archive ignores traversal paths and selects requested season/episode");
-        foreach(var name in new[]{"Show.1x03.srt","Show.E03.srt","Show.ep03.srt","Show.Episode 03.srt","Show.S01.E03.srt"})check(SubtitleArchive.EpisodeMatches(name,1,3),"Archive recognizes episode naming "+name);
-        foreach(var name in new[]{"Show.S02E03.srt","Show.2x03.srt","Show.S01E04.srt","Show.S02.E03.srt","Show.E030.srt","Show.S01E03E04.srt","Show_S02_other_E03.srt","Show.S01E03-04.srt"})check(!SubtitleArchive.EpisodeMatches(name,1,3),"Archive refuses wrong or ambiguous episode "+name);
-        bool wrong=false;try{await SubtitleArchive.Pick(ZipText("Show.S02E03.srt","show.srt","show.S01E02.srt"),episode,"",CancellationToken.None);}catch(IOException){wrong=true;}check(wrong,"Season pack without requested episode is refused");
-        picked=await SubtitleArchive.Pick(ZipText("Other.BluRay.srt","Release.WEB.srt","Release.WEB.exe"),movie,"Release.WEB.mkv",CancellationToken.None);check(picked.Name=="Release.WEB.srt","Movie archive selects best release and ignores unsupported files");
-        foreach(var zip in new[]{Zip(("large.srt",new byte[4*1024*1024+1])),ZipText(Enumerable.Range(0,201).Select(i=>i+".srt").ToArray()),Zip(Enumerable.Range(0,5).Select(i=>(i+".srt",new byte[4*1024*1024])).ToArray())}){bool tooBig=false;try{await SubtitleArchive.Pick(zip,movie,"",CancellationToken.None);}catch(IOException){tooBig=true;}check(tooBig,"Archive enforces per-entry/count/total expanded caps");}
-        foreach(var zip in new[]{LieAboutSize(Zip(("large.srt",new byte[4*1024*1024+1]))),LieAboutSize(Zip(Enumerable.Range(0,5).Select(i=>(i+".srt",new byte[4*1024*1024])).ToArray()))}){bool tooBig=false;try{await SubtitleArchive.Pick(zip,movie,"",CancellationToken.None);}catch(Exception e)when(e is IOException or InvalidDataException){tooBig=true;}check(tooBig,"Archive stops at expanded caps or rejects inconsistent ZIP size headers");}
-        using var handler=new Handler();using var client=new HttpClient(handler);var api=new SubtitleProviders(client);var selection=Selection("opensubtitles") with{Username="FAKE_USER",Password="FAKE_PASSWORD"};int logins=0,searches=0;
-        handler.Reply=r=>r.Uri.AbsolutePath.EndsWith("/login")?Response("{\"token\":\"FAKE_TOKEN"+(++logins)+"\",\"base_url\":\"vip-api.opensubtitles.com\"}"):++searches==1?Response("{}",401):Response(SearchBody("opensubtitles","en",true));
-        await api.Search(selection,movie,"",["en"],"",CancellationToken.None);check(logins==2&&searches==2&&handler.Requests[0].Body=="{\"username\":\"FAKE_USER\",\"password\":\"FAKE_PASSWORD\"}"&&handler.Requests.Skip(1).Where(r=>!r.Uri.AbsolutePath.EndsWith("/login")).All(r=>r.Uri.Host=="vip-api.opensubtitles.com"&&r.Headers["Authorization"].StartsWith("Bearer FAKE_TOKEN")),"OpenSubtitles optional login uses allow-listed base and reauthenticates once on 401");
-        await api.Search(selection,movie,"",["en"],"",CancellationToken.None);check(logins==2,"OpenSubtitles token stays in session memory without repeated logins");
-        handler.Reply=_=>Response("{\"token\":\"FAKE_TOKEN\",\"base_url\":\"https://evil.example/api/v1\"}");bool badBase=false;try{await new SubtitleProviders(client).Search(selection,movie,"",["en"],"",CancellationToken.None);}catch(SubtitleSourceException){badBase=true;}check(badBase,"OpenSubtitles refuses unapproved login API base");
-        handler.Requests.Clear();handler.Reply=r=>r.Uri.AbsolutePath.EndsWith("/login")?Response("{\"token\":\"FAKE_TOKEN\"}"):Response("{}",401);bool once=false;try{await new SubtitleProviders(client).Search(selection,movie,"",["en"],"",CancellationToken.None);}catch(SubtitleSourceException e){once=e.Kind==SubtitleFailureKind.BadKey;}check(once&&handler.Requests.Count(r=>r.Uri.AbsolutePath.EndsWith("/login"))==2,"OpenSubtitles stops after one 401 relogin");
-        handler.Requests.Clear();handler.Reply=r=>r.Uri.AbsolutePath.EndsWith("/login")?Response("{\"token\":\"FAKE_TOKEN\"}"):Response("{}",403);try{await new SubtitleProviders(client).Search(selection,movie,"",["en"],"",CancellationToken.None);}catch(SubtitleSourceException){}check(handler.Requests.Count==2,"OpenSubtitles 403 does not trigger token relogin");
-        handler.Requests.Clear();handler.Reply=_=>Response("{}",403);var failedLogin=new SubtitleProviders(client);for(int i=0;i<2;i++){try{await failedLogin.Search(selection,movie,"",["en"],"",CancellationToken.None);}catch(SubtitleSourceException){}}check(handler.Requests.Count==2&&handler.Requests.All(r=>r.Uri.AbsolutePath.EndsWith("/login")),"Failed optional login is never cached as a successful anonymous session");
-        handler.Requests.Clear();handler.Reply=r=>r.Uri.AbsolutePath=="/a"?new(HttpStatusCode.Redirect){Headers={Location=new Uri("https://cdn.example/b")}}:Response(Subtitle);var bytes=await new SubtitleTransport(client).Send(Selection("wyzie"),"https://files.example/a");check(handler.Requests.Count==2&&Encoding.UTF8.GetString(bytes)==Subtitle&&handler.Requests.All(r=>!r.Headers.ContainsKey("Authorization")&&!r.Headers.ContainsKey("Api-Key")),"Unkeyed subtitle file redirects may cross validated hosts without credentials");
-        handler.Requests.Clear();handler.Reply=_=>new(HttpStatusCode.Redirect){Headers={Location=new Uri("/again",UriKind.Relative)}};try{await new SubtitleTransport(client).Send(Selection("wyzie"),"https://sub.wyzie.io/a",true);}catch(SubtitleSourceException){}check(handler.Requests.Count==4,"Subtitle redirects stop after three hops");
-        handler.Requests.Clear();handler.Reply=_=>new(HttpStatusCode.Redirect){Headers={Location=new Uri("https://10.0.0.1/stolen")}};try{await new SubtitleTransport(client).Send(Selection("wyzie"),"https://sub.wyzie.io/a");}catch(SubtitleSourceException){}check(handler.Requests.Count==1,"Unkeyed file redirect to a private literal is blocked before a second request");
-        foreach(var source in new[]{"opensubtitles","subdl","subsource","wyzie","addon"}){
-            handler.Requests.Clear();bool forbidden=false;try{await new SubtitleTransport(client).Send(Selection(source),"https://other.example/a",true);}catch(SubtitleSourceException e){forbidden=e.Kind==SubtitleFailureKind.Unavailable;}check(forbidden&&handler.Requests.Count==0,source+" fixed credential host policy stops an unrelated API host");
-            handler.Reply=r=>Response(r.Uri.AbsolutePath.EndsWith("/movies/search")?"{\"data\":[{\"movieId\":7,\"imdbId\":\"tt0111161\",\"season\":1}]}":SearchBody(source,"en",false).Replace("S01E03","S02E03",StringComparison.Ordinal).Replace("Release.WEB","Release.S02E03.WEB",StringComparison.Ordinal));
-            check((await new SubtitleProviders(client).Search(Selection(source),episode,"",["en"],"",CancellationToken.None)).Count==0,source+" drops a result naming another season/episode");
+        foreach (
+            var address in new[]
+            {
+                "0.0.0.0",
+                "10.0.0.1",
+                "127.0.0.1",
+                "172.16.1.1",
+                "192.168.1.1",
+                "169.254.169.254",
+                "100.64.0.1",
+                "224.0.0.1",
+                "255.255.255.255",
+                "::",
+                "::1",
+                "fc00::1",
+                "fe80::1",
+                "ff02::1",
+                "::ffff:127.0.0.1",
+                "::ffff:192.168.1.1",
+            }
+        )
+            check(
+                !SubtitleTransport.PublicAddress(IPAddress.Parse(address)),
+                "Subtitle transport blocks private/special address " + address
+            );
+        check(
+            SubtitleTransport.PublicAddress(IPAddress.Parse("8.8.8.8"))
+                && SubtitleTransport.PublicAddress(IPAddress.Parse("2606:4700:4700::1111")),
+            "Subtitle transport accepts public v4 and v6"
+        );
+        foreach (
+            var url in new[]
+            {
+                "http://files.example/a",
+                "https://files.example:444/a",
+                "https://user:pass@files.example/a",
+                "https://127.0.0.1/a",
+                "https://[::ffff:10.0.0.1]/a",
+                "https://100.127.1.2/a",
+            }
+        )
+            check(
+                !SubtitleTransport.ValidUrl(url),
+                "Subtitle link literal/HTTPS validation rejects unsafe destination"
+            );
+        var context = new DnsEndPoint("rebind.example", 443);
+        bool blocked = false;
+        try
+        {
+            await SubtitleTransport.Connect(context, CancellationToken.None, (_, _) =>
+                Task.FromResult(new[] { IPAddress.Parse("8.8.8.8"), IPAddress.Loopback })
+            );
         }
-        var addon=Selection("addon");handler.Reply=r=>Response(r.Uri.AbsolutePath.Contains("/subtitles/")?SearchBody("addon","en",true).Replace("https://addon.example/config/file.srt","https://files.example/file.srt",StringComparison.Ordinal):Subtitle);var external=(await api.Search(addon,movie,"",["en"],"",CancellationToken.None))[0];handler.Requests.Clear();await api.Download(external,CancellationToken.None);check(handler.Requests.Single().Uri.Host=="files.example"&&!handler.Requests[0].Headers.ContainsKey("Authorization"),"Addon authorization is absent on cross-origin subtitle files");
-        foreach(var manifest in new[]{"not json","{\"resources\":[\"stream\"]}",new string('x',256*1024+1)}){handler.Requests.Clear();handler.Reply=_=>Response(manifest);bool refused=false;try{await api.Check(addon,CancellationToken.None);}catch(SubtitleSourceException e){refused=e.Kind==SubtitleFailureKind.Unavailable;}check(refused&&handler.Requests.Count==1,"Authorized addon manifest must provide subtitles within 256 KiB before a search");}
-        handler.Reply=r=>r.Uri.AbsolutePath.EndsWith("/movies/search")?Response("{\"data\":[{\"movieId\":7,\"imdbId\":\"tt0111161\",\"season\":1}]}"):Query(r.Uri).GetValueOrDefault("language")=="arabic"?Response("{}",429):Response(SearchBody("subsource","en",false));var failures=new Dictionary<string,SubtitleSourceException>();var partial=await api.Search(Selection("subsource"),episode,"",["en","ar"],"",CancellationToken.None,failures);check(partial.Count==1&&partial[0].Language=="en"&&failures["ar"].Kind==SubtitleFailureKind.Limit,"SubSource preserves English when the separate Arabic list hits its limit");
-        handler.Reply=r=>r.Uri.Host=="opensubtitles-v3.strem.io"?Response("{\"subtitles\":[{\"id\":\"free-en\",\"lang\":\"en\",\"url\":\"https://free.example/en.srt\"},{\"id\":\"free-ar\",\"lang\":\"ar\",\"url\":\"https://free.example/ar.srt\"}]}"):r.Uri.AbsolutePath.EndsWith("/movies/search")?Response("{\"data\":[{\"movieId\":7,\"imdbId\":\"tt0111161\",\"season\":1}]}"):Query(r.Uri).GetValueOrDefault("language")=="arabic"?Response("{}",429):Response(SearchBody("subsource","en",false));partial=await new SubtitleDownloads(profile,client,()=>Selection("subsource",false)).Search(episode,"",CancellationToken.None,false);check(partial.Count==2&&partial.Single(c=>c.Language=="en").Provider!=null&&partial.Single(c=>c.Language=="ar").Provider==null,"Fallback fills only a failed language and retains successful chosen-provider results");
-        handler.Requests.Clear();handler.Reply=r=>Response(r.Uri.AbsolutePath.Contains("/subtitles/")?SearchBody("addon","en",true):Subtitle);await new SubtitleDownloads(profile,client,()=>Selection("addon",false)).Fetch(movie,"English only",["en"],false,CancellationToken.None,streamTarget:new VideoItem{Path=Path.Combine(profile,"english-only","video.mkv")});check(handler.Requests.All(r=>r.Uri.Host!="opensubtitles-v3.strem.io"),"Requesting only English does not trigger fallback for unrequested Arabic");
-        check(!client.DefaultRequestHeaders.Any(),"Provider calls leave shared HttpClient default headers untouched");
-        using var counted=new Counted(new byte[1000]);handler.Reply=_=>{var response=new HttpResponseMessage(HttpStatusCode.OK){Content=new StreamContent(counted)};response.Content.Headers.ContentLength=1;return response;};bool capped=false;try{await new SubtitleTransport(client).Send(Selection("wyzie"),"https://files.example/cap",cap:32);}catch(SubtitleSourceException e){capped=e.Kind==SubtitleFailureKind.Unavailable;}check(capped&&counted.BytesRead==33,"Response reading stops at the cap plus one byte even when Content-Length lies");
-        foreach(var source in new[]{"subdl","wyzie","addon"}){handler.Reply=_=>Response(SearchBody(source,"en",true).Replace(source=="subdl"?"/subtitle/1-2.zip":source=="wyzie"?"FAKE_SIGNED_LINK":"https://addon.example/config/file.srt",source=="subdl"?"/subtitle/1-2.zip?api_key="+Key:source=="wyzie"?Key:"https://addon.example/file.srt?token=FAKE_ADDON_AUTH",StringComparison.Ordinal));check((await api.Search(Selection(source),movie,"",["en"],"",CancellationToken.None)).Count==0,source+" refuses returned links echoing the site key or addon bearer secret");}
-        handler.Reply=_=>Response(SearchBody("opensubtitles","en",true));var exchange=(await api.Search(Selection("opensubtitles"),movie,"",["en"],"",CancellationToken.None))[0];handler.Requests.Clear();handler.Reply=_=>Response("{\"link\":\"https://files.example/sub.srt?api_key="+Key+"\"}");try{await api.Download(exchange,CancellationToken.None);}catch(SubtitleSourceException){}check(handler.Requests.Count==1,"OpenSubtitles refuses a file link echoing the API key before contacting it");
-        var legacy=JsonSerializer.Deserialize<DownloadCredentials>("{\"SubtitleAddonUrl\":\"https://addon.example/config\"}")!;check(SubtitleSelection.From(legacy).Source=="addon"&&SubtitleSelection.From(legacy).Only,"Legacy encrypted addon settings migrate to addon selection");var phone=JsonSerializer.Deserialize<PhoneDownloadSettingsPayload>("{\"SubtitleAddonUrl\":\"https://addon.example/config\"}")!;check(phone.SubtitleSource=="addon"&&phone.SubtitleApiKey==""&&phone.SubtitleAddonOnly,"Older phone payloads import with safe optional subtitle defaults");
-        var oldDirectory=Path.Combine(profile,"old-encrypted");Directory.CreateDirectory(oldDirectory);File.WriteAllBytes(Path.Combine(oldDirectory,"downloads-settings.dpapi"),ProtectedData.Protect(Encoding.UTF8.GetBytes("{\"SubtitleAddonUrl\":\"https://addon.example/config\",\"SubtitleAddonOnly\":false}"),null,DataProtectionScope.CurrentUser));using(var old=new PcDownloads(new LibraryStore(oldDirectory),start:false))check(old.Config.SubtitleSource=="addon"&&!SubtitleSelection.From(old.Config).Only,"Reopening an actual legacy DPAPI envelope migrates the addon choice and keeps its Only flag");
-        var store=new LibraryStore(Path.Combine(profile,"settings"));using(var downloads=new PcDownloads(store,start:false)){downloads.ConfigureSubtitleSource(Selection("subdl"));downloads.ConfigureSubtitleSource(Selection("wyzie") with{ApiKey="FAKE_WYZIE_KEY"});check(downloads.Config.SubtitleSiteKeys["subdl"]==Key&&downloads.Config.SubtitleSiteKeys["wyzie"]=="FAKE_WYZIE_KEY","Encrypted settings retain keys separately for each subtitle site");}
-        using(var downloads=new PcDownloads(store,start:false))check(downloads.Config.SubtitleSiteKeys["subdl"]==Key,"Per-site subtitle keys survive encrypted settings reopen");
-        foreach(var source in new[]{"opensubtitles","subdl","subsource","wyzie","addon"}){bool blank=false;try{new SubtitleSelection(source).Validate();}catch(IOException){blank=true;}check(blank,source+" refuses blank chosen credentials");}check(!new SubtitleSelection().Validate().Chosen,"Free default needs no credentials");
-        foreach(var account in new[]{Selection("opensubtitles") with{Username="FAKE_USER"},Selection("opensubtitles") with{Password="FAKE_PASSWORD"}}){bool refused=false;try{account.Validate();}catch(IOException){refused=true;}check(refused,"OpenSubtitles optional account requires both username and password");}
-        foreach(var invalid in new[]{Selection("subdl") with{ApiKey="FAKE\r\nKEY"},Selection("addon") with{AddonAuth="Bearer FAKE\nAUTH"}}){bool refused=false;try{invalid.Validate();}catch(IOException){refused=true;}check(refused,"Subtitle API key and authorization reject header control characters");}
-        var creds=new DownloadCredentials{SubtitleApiKey=Key,SubtitlePassword="FAKE_PASSWORD",SubtitleAddonAuth=Auth,SubtitleSiteKeys=new(){{"subdl","FAKE_STORED_KEY"}}};var safe=DownloadSecurity.SafeText(Key+" FAKE_PASSWORD "+Auth+" FAKE_STORED_KEY https://api.subdl.com/search?api_key="+Key,creds);check(!safe.Contains("FAKE_")&&!safe.Contains("https://"),"Subtitle redaction removes active/stored keys, password, authorization and query links from log text");
+        catch (IOException)
+        {
+            blocked = true;
+        }
+        check(blocked, "Connection-time resolver rejects mixed public/private DNS before opening a socket");
+        int resolves = 0,
+            connections = 0;
+        Task<IPAddress[]> Resolve(string host, CancellationToken ct) =>
+            Task.FromResult(new[] { IPAddress.Parse(++resolves == 1 ? "8.8.8.8" : "127.0.0.1") });
+        Task<Stream> Open(IPAddress address, int port, CancellationToken ct)
+        {
+            connections++;
+            return Task.FromResult<Stream>(new MemoryStream());
+        }
+        using (await SubtitleTransport.Connect(context, CancellationToken.None, Resolve, Open)) { }
+        try
+        {
+            await SubtitleTransport.Connect(context, CancellationToken.None, Resolve, Open);
+        }
+        catch (IOException) { }
+        check(
+            resolves == 2 && connections == 1,
+            "Subtitle transport revalidates public-to-private DNS rebinding before opening another connection"
+        );
+        var episode = Item(false);
+        var movie = Item(true);
+        var picked = await SubtitleArchive.Pick(
+            ZipText("../../evil.S01E02.srt", "folder\\Release.S01E03.ass", "folder/Release.S02E03.srt"),
+            episode,
+            "Release",
+            CancellationToken.None
+        );
+        check(
+            picked.Name == "Release.S01E03.ass",
+            "Archive ignores traversal paths and selects requested season/episode"
+        );
+        foreach (
+            var name in new[]
+            {
+                "Show.1x03.srt",
+                "Show.E03.srt",
+                "Show.ep03.srt",
+                "Show.Episode 03.srt",
+                "Show.S01.E03.srt",
+            }
+        )
+            check(SubtitleArchive.EpisodeMatches(name, 1, 3), "Archive recognizes episode naming " + name);
+        foreach (
+            var name in new[]
+            {
+                "Show.S02E03.srt",
+                "Show.2x03.srt",
+                "Show.S01E04.srt",
+                "Show.S02.E03.srt",
+                "Show.E030.srt",
+                "Show.S01E03E04.srt",
+                "Show_S02_other_E03.srt",
+                "Show.S01E03-04.srt",
+            }
+        )
+            check(!SubtitleArchive.EpisodeMatches(name, 1, 3), "Archive refuses wrong or ambiguous episode " + name);
+        bool wrong = false;
+        try
+        {
+            await SubtitleArchive.Pick(
+                ZipText("Show.S02E03.srt", "show.srt", "show.S01E02.srt"),
+                episode,
+                "",
+                CancellationToken.None
+            );
+        }
+        catch (IOException)
+        {
+            wrong = true;
+        }
+        check(wrong, "Season pack without requested episode is refused");
+        picked = await SubtitleArchive.Pick(
+            ZipText("Other.BluRay.srt", "Release.WEB.srt", "Release.WEB.exe"),
+            movie,
+            "Release.WEB.mkv",
+            CancellationToken.None
+        );
+        check(picked.Name == "Release.WEB.srt", "Movie archive selects best release and ignores unsupported files");
+        foreach (
+            var zip in new[]
+            {
+                Zip(("large.srt", new byte[4 * 1024 * 1024 + 1])),
+                ZipText(Enumerable.Range(0, 201).Select(i => i + ".srt").ToArray()),
+                Zip(Enumerable.Range(0, 5).Select(i => (i + ".srt", new byte[4 * 1024 * 1024])).ToArray()),
+            }
+        )
+        {
+            bool tooBig = false;
+            try
+            {
+                await SubtitleArchive.Pick(zip, movie, "", CancellationToken.None);
+            }
+            catch (IOException)
+            {
+                tooBig = true;
+            }
+            check(tooBig, "Archive enforces per-entry/count/total expanded caps");
+        }
+        foreach (
+            var zip in new[]
+            {
+                LieAboutSize(Zip(("large.srt", new byte[4 * 1024 * 1024 + 1]))),
+                LieAboutSize(
+                    Zip(Enumerable.Range(0, 5).Select(i => (i + ".srt", new byte[4 * 1024 * 1024])).ToArray())
+                ),
+            }
+        )
+        {
+            bool tooBig = false;
+            try
+            {
+                await SubtitleArchive.Pick(zip, movie, "", CancellationToken.None);
+            }
+            catch (Exception e) when (e is IOException or InvalidDataException)
+            {
+                tooBig = true;
+            }
+            check(tooBig, "Archive stops at expanded caps or rejects inconsistent ZIP size headers");
+        }
+        using var handler = new Handler();
+        using var client = new HttpClient(handler);
+        var api = new SubtitleProviders(client);
+        var selection = Selection("opensubtitles") with { Username = "FAKE_USER", Password = "FAKE_PASSWORD" };
+        int logins = 0,
+            searches = 0;
+        handler.Reply = r =>
+            r.Uri.AbsolutePath.EndsWith("/login")
+                ? Response("{\"token\":\"FAKE_TOKEN" + (++logins) + "\",\"base_url\":\"vip-api.opensubtitles.com\"}")
+            : ++searches == 1 ? Response("{}", 401)
+            : Response(SearchBody("opensubtitles", "en", true));
+        await api.Search(selection, movie, "", ["en"], "", CancellationToken.None);
+        check(
+            logins == 2
+                && searches == 2
+                && handler.Requests[0].Body == "{\"username\":\"FAKE_USER\",\"password\":\"FAKE_PASSWORD\"}"
+                && handler
+                    .Requests.Skip(1)
+                    .Where(r => !r.Uri.AbsolutePath.EndsWith("/login"))
+                    .All(r =>
+                        r.Uri.Host == "vip-api.opensubtitles.com"
+                        && r.Headers["Authorization"].StartsWith("Bearer FAKE_TOKEN")
+                    ),
+            "OpenSubtitles optional login uses allow-listed base and reauthenticates once on 401"
+        );
+        await api.Search(selection, movie, "", ["en"], "", CancellationToken.None);
+        check(logins == 2, "OpenSubtitles token stays in session memory without repeated logins");
+        handler.Reply = _ => Response("{\"token\":\"FAKE_TOKEN\",\"base_url\":\"https://evil.example/api/v1\"}");
+        bool badBase = false;
+        try
+        {
+            await new SubtitleProviders(client).Search(selection, movie, "", ["en"], "", CancellationToken.None);
+        }
+        catch (SubtitleSourceException)
+        {
+            badBase = true;
+        }
+        check(badBase, "OpenSubtitles refuses unapproved login API base");
+        handler.Requests.Clear();
+        handler.Reply = r =>
+            r.Uri.AbsolutePath.EndsWith("/login") ? Response("{\"token\":\"FAKE_TOKEN\"}") : Response("{}", 401);
+        bool once = false;
+        try
+        {
+            await new SubtitleProviders(client).Search(selection, movie, "", ["en"], "", CancellationToken.None);
+        }
+        catch (SubtitleSourceException e)
+        {
+            once = e.Kind == SubtitleFailureKind.BadKey;
+        }
+        check(
+            once && handler.Requests.Count(r => r.Uri.AbsolutePath.EndsWith("/login")) == 2,
+            "OpenSubtitles stops after one 401 relogin"
+        );
+        handler.Requests.Clear();
+        handler.Reply = r =>
+            r.Uri.AbsolutePath.EndsWith("/login") ? Response("{\"token\":\"FAKE_TOKEN\"}") : Response("{}", 403);
+        try
+        {
+            await new SubtitleProviders(client).Search(selection, movie, "", ["en"], "", CancellationToken.None);
+        }
+        catch (SubtitleSourceException) { }
+        check(handler.Requests.Count == 2, "OpenSubtitles 403 does not trigger token relogin");
+        handler.Requests.Clear();
+        handler.Reply = _ => Response("{}", 403);
+        var failedLogin = new SubtitleProviders(client);
+        for (int i = 0; i < 2; i++)
+        {
+            try
+            {
+                await failedLogin.Search(selection, movie, "", ["en"], "", CancellationToken.None);
+            }
+            catch (SubtitleSourceException) { }
+        }
+        check(
+            handler.Requests.Count == 2 && handler.Requests.All(r => r.Uri.AbsolutePath.EndsWith("/login")),
+            "Failed optional login is never cached as a successful anonymous session"
+        );
+        handler.Requests.Clear();
+        handler.Reply = r =>
+            r.Uri.AbsolutePath == "/a"
+                ? new(HttpStatusCode.Redirect) { Headers = { Location = new Uri("https://cdn.example/b") } }
+                : Response(Subtitle);
+        var bytes = await new SubtitleTransport(client).Send(Selection("wyzie"), "https://files.example/a");
+        check(
+            handler.Requests.Count == 2
+                && Encoding.UTF8.GetString(bytes) == Subtitle
+                && handler.Requests.All(r =>
+                    !r.Headers.ContainsKey("Authorization") && !r.Headers.ContainsKey("Api-Key")
+                ),
+            "Unkeyed subtitle file redirects may cross validated hosts without credentials"
+        );
+        handler.Requests.Clear();
+        handler.Reply = _ =>
+            new(HttpStatusCode.Redirect) { Headers = { Location = new Uri("/again", UriKind.Relative) } };
+        try
+        {
+            await new SubtitleTransport(client).Send(Selection("wyzie"), "https://sub.wyzie.io/a", true);
+        }
+        catch (SubtitleSourceException) { }
+        check(handler.Requests.Count == 4, "Subtitle redirects stop after three hops");
+        handler.Requests.Clear();
+        handler.Reply = _ =>
+            new(HttpStatusCode.Redirect) { Headers = { Location = new Uri("https://10.0.0.1/stolen") } };
+        try
+        {
+            await new SubtitleTransport(client).Send(Selection("wyzie"), "https://sub.wyzie.io/a");
+        }
+        catch (SubtitleSourceException) { }
+        check(
+            handler.Requests.Count == 1,
+            "Unkeyed file redirect to a private literal is blocked before a second request"
+        );
+        foreach (var source in new[] { "opensubtitles", "subdl", "subsource", "wyzie", "addon" })
+        {
+            handler.Requests.Clear();
+            bool forbidden = false;
+            try
+            {
+                await new SubtitleTransport(client).Send(Selection(source), "https://other.example/a", true);
+            }
+            catch (SubtitleSourceException e)
+            {
+                forbidden = e.Kind == SubtitleFailureKind.Unavailable;
+            }
+            check(
+                forbidden && handler.Requests.Count == 0,
+                source + " fixed credential host policy stops an unrelated API host"
+            );
+            handler.Reply = r =>
+                Response(
+                    r.Uri.AbsolutePath.EndsWith("/movies/search")
+                        ? "{\"data\":[{\"movieId\":7,\"imdbId\":\"tt0111161\",\"season\":1}]}"
+                        : SearchBody(source, "en", false)
+                            .Replace("S01E03", "S02E03", StringComparison.Ordinal)
+                            .Replace("Release.WEB", "Release.S02E03.WEB", StringComparison.Ordinal)
+                );
+            check(
+                (
+                    await new SubtitleProviders(client).Search(
+                        Selection(source),
+                        episode,
+                        "",
+                        ["en"],
+                        "",
+                        CancellationToken.None
+                    )
+                ).Count == 0,
+                source + " drops a result naming another season/episode"
+            );
+        }
+        var addon = Selection("addon");
+        handler.Reply = r =>
+            Response(
+                r.Uri.AbsolutePath.Contains("/subtitles/")
+                    ? SearchBody("addon", "en", true)
+                        .Replace(
+                            "https://addon.example/config/file.srt",
+                            "https://files.example/file.srt",
+                            StringComparison.Ordinal
+                        )
+                    : Subtitle
+            );
+        var external = (await api.Search(addon, movie, "", ["en"], "", CancellationToken.None))[0];
+        handler.Requests.Clear();
+        await api.Download(external, CancellationToken.None);
+        check(
+            handler.Requests.Single().Uri.Host == "files.example"
+                && !handler.Requests[0].Headers.ContainsKey("Authorization"),
+            "Addon authorization is absent on cross-origin subtitle files"
+        );
+        foreach (var manifest in new[] { "not json", "{\"resources\":[\"stream\"]}", new string('x', 256 * 1024 + 1) })
+        {
+            handler.Requests.Clear();
+            handler.Reply = _ => Response(manifest);
+            bool refused = false;
+            try
+            {
+                await api.Check(addon, CancellationToken.None);
+            }
+            catch (SubtitleSourceException e)
+            {
+                refused = e.Kind == SubtitleFailureKind.Unavailable;
+            }
+            check(
+                refused && handler.Requests.Count == 1,
+                "Authorized addon manifest must provide subtitles within 256 KiB before a search"
+            );
+        }
+        handler.Reply = r =>
+            r.Uri.AbsolutePath.EndsWith("/movies/search")
+                ? Response("{\"data\":[{\"movieId\":7,\"imdbId\":\"tt0111161\",\"season\":1}]}")
+            : Query(r.Uri).GetValueOrDefault("language") == "arabic" ? Response("{}", 429)
+            : Response(SearchBody("subsource", "en", false));
+        var failures = new Dictionary<string, SubtitleSourceException>();
+        var partial = await api.Search(
+            Selection("subsource"),
+            episode,
+            "",
+            ["en", "ar"],
+            "",
+            CancellationToken.None,
+            failures
+        );
+        check(
+            partial.Count == 1 && partial[0].Language == "en" && failures["ar"].Kind == SubtitleFailureKind.Limit,
+            "SubSource preserves English when the separate Arabic list hits its limit"
+        );
+        handler.Reply = r =>
+            r.Uri.Host == "opensubtitles-v3.strem.io"
+                ? Response(
+                    "{\"subtitles\":[{\"id\":\"free-en\",\"lang\":\"en\",\"url\":\"https://free.example/en.srt\"},{\"id\":\"free-ar\",\"lang\":\"ar\",\"url\":\"https://free.example/ar.srt\"}]}"
+                )
+            : r.Uri.AbsolutePath.EndsWith("/movies/search")
+                ? Response("{\"data\":[{\"movieId\":7,\"imdbId\":\"tt0111161\",\"season\":1}]}")
+            : Query(r.Uri).GetValueOrDefault("language") == "arabic" ? Response("{}", 429)
+            : Response(SearchBody("subsource", "en", false));
+        partial = await new SubtitleDownloads(profile, client, () => Selection("subsource", false)).Search(
+            episode,
+            "",
+            CancellationToken.None,
+            false
+        );
+        check(
+            partial.Count == 2
+                && partial.Single(c => c.Language == "en").Provider != null
+                && partial.Single(c => c.Language == "ar").Provider == null,
+            "Fallback fills only a failed language and retains successful chosen-provider results"
+        );
+        handler.Requests.Clear();
+        handler.Reply = r =>
+            Response(r.Uri.AbsolutePath.Contains("/subtitles/") ? SearchBody("addon", "en", true) : Subtitle);
+        await new SubtitleDownloads(profile, client, () => Selection("addon", false)).Fetch(
+            movie,
+            "English only",
+            ["en"],
+            false,
+            CancellationToken.None,
+            streamTarget: new VideoItem { Path = Path.Combine(profile, "english-only", "video.mkv") }
+        );
+        check(
+            handler.Requests.All(r => r.Uri.Host != "opensubtitles-v3.strem.io"),
+            "Requesting only English does not trigger fallback for unrequested Arabic"
+        );
+        check(!client.DefaultRequestHeaders.Any(), "Provider calls leave shared HttpClient default headers untouched");
+        using var counted = new Counted(new byte[1000]);
+        handler.Reply = _ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(counted) };
+            response.Content.Headers.ContentLength = 1;
+            return response;
+        };
+        bool capped = false;
+        try
+        {
+            await new SubtitleTransport(client).Send(Selection("wyzie"), "https://files.example/cap", cap: 32);
+        }
+        catch (SubtitleSourceException e)
+        {
+            capped = e.Kind == SubtitleFailureKind.Unavailable;
+        }
+        check(
+            capped && counted.BytesRead == 33,
+            "Response reading stops at the cap plus one byte even when Content-Length lies"
+        );
+        foreach (var source in new[] { "subdl", "wyzie", "addon" })
+        {
+            handler.Reply = _ =>
+                Response(
+                    SearchBody(source, "en", true)
+                        .Replace(
+                            source == "subdl" ? "/subtitle/1-2.zip"
+                                : source == "wyzie" ? "FAKE_SIGNED_LINK"
+                                : "https://addon.example/config/file.srt",
+                            source == "subdl" ? "/subtitle/1-2.zip?api_key=" + Key
+                                : source == "wyzie" ? Key
+                                : "https://addon.example/file.srt?token=FAKE_ADDON_AUTH",
+                            StringComparison.Ordinal
+                        )
+                );
+            check(
+                (await api.Search(Selection(source), movie, "", ["en"], "", CancellationToken.None)).Count == 0,
+                source + " refuses returned links echoing the site key or addon bearer secret"
+            );
+        }
+        handler.Reply = _ => Response(SearchBody("opensubtitles", "en", true));
+        var exchange = (await api.Search(Selection("opensubtitles"), movie, "", ["en"], "", CancellationToken.None))[0];
+        handler.Requests.Clear();
+        handler.Reply = _ => Response("{\"link\":\"https://files.example/sub.srt?api_key=" + Key + "\"}");
+        try
+        {
+            await api.Download(exchange, CancellationToken.None);
+        }
+        catch (SubtitleSourceException) { }
+        check(
+            handler.Requests.Count == 1,
+            "OpenSubtitles refuses a file link echoing the API key before contacting it"
+        );
+        var legacy = JsonSerializer.Deserialize<DownloadCredentials>(
+            "{\"SubtitleAddonUrl\":\"https://addon.example/config\"}"
+        )!;
+        check(
+            SubtitleSelection.From(legacy).Source == "addon" && SubtitleSelection.From(legacy).Only,
+            "Legacy encrypted addon settings migrate to addon selection"
+        );
+        var phone = JsonSerializer.Deserialize<PhoneDownloadSettingsPayload>(
+            "{\"SubtitleAddonUrl\":\"https://addon.example/config\"}"
+        )!;
+        check(
+            phone.SubtitleSource == "addon" && phone.SubtitleApiKey == "" && phone.SubtitleAddonOnly,
+            "Older phone payloads import with safe optional subtitle defaults"
+        );
+        var oldDirectory = Path.Combine(profile, "old-encrypted");
+        Directory.CreateDirectory(oldDirectory);
+        File.WriteAllBytes(
+            Path.Combine(oldDirectory, "downloads-settings.dpapi"),
+            ProtectedData.Protect(
+                Encoding.UTF8.GetBytes(
+                    "{\"SubtitleAddonUrl\":\"https://addon.example/config\",\"SubtitleAddonOnly\":false}"
+                ),
+                null,
+                DataProtectionScope.CurrentUser
+            )
+        );
+        using (var old = new PcDownloads(new LibraryStore(oldDirectory), start: false))
+            check(
+                old.Config.SubtitleSource == "addon" && !SubtitleSelection.From(old.Config).Only,
+                "Reopening an actual legacy DPAPI envelope migrates the addon choice and keeps its Only flag"
+            );
+        var store = new LibraryStore(Path.Combine(profile, "settings"));
+        using (var downloads = new PcDownloads(store, start: false))
+        {
+            downloads.ConfigureSubtitleSource(Selection("subdl"));
+            downloads.ConfigureSubtitleSource(Selection("wyzie") with { ApiKey = "FAKE_WYZIE_KEY" });
+            check(
+                downloads.Config.SubtitleSiteKeys["subdl"] == Key
+                    && downloads.Config.SubtitleSiteKeys["wyzie"] == "FAKE_WYZIE_KEY",
+                "Encrypted settings retain keys separately for each subtitle site"
+            );
+        }
+        using (var downloads = new PcDownloads(store, start: false))
+            check(
+                downloads.Config.SubtitleSiteKeys["subdl"] == Key,
+                "Per-site subtitle keys survive encrypted settings reopen"
+            );
+        foreach (var source in new[] { "opensubtitles", "subdl", "subsource", "wyzie", "addon" })
+        {
+            bool blank = false;
+            try
+            {
+                new SubtitleSelection(source).Validate();
+            }
+            catch (IOException)
+            {
+                blank = true;
+            }
+            check(blank, source + " refuses blank chosen credentials");
+        }
+        check(!new SubtitleSelection().Validate().Chosen, "Free default needs no credentials");
+        foreach (
+            var account in new[]
+            {
+                Selection("opensubtitles") with
+                {
+                    Username = "FAKE_USER",
+                },
+                Selection("opensubtitles") with
+                {
+                    Password = "FAKE_PASSWORD",
+                },
+            }
+        )
+        {
+            bool refused = false;
+            try
+            {
+                account.Validate();
+            }
+            catch (IOException)
+            {
+                refused = true;
+            }
+            check(refused, "OpenSubtitles optional account requires both username and password");
+        }
+        foreach (
+            var invalid in new[]
+            {
+                Selection("subdl") with
+                {
+                    ApiKey = "FAKE\r\nKEY",
+                },
+                Selection("addon") with
+                {
+                    AddonAuth = "Bearer FAKE\nAUTH",
+                },
+            }
+        )
+        {
+            bool refused = false;
+            try
+            {
+                invalid.Validate();
+            }
+            catch (IOException)
+            {
+                refused = true;
+            }
+            check(refused, "Subtitle API key and authorization reject header control characters");
+        }
+        var creds = new DownloadCredentials
+        {
+            SubtitleApiKey = Key,
+            SubtitlePassword = "FAKE_PASSWORD",
+            SubtitleAddonAuth = Auth,
+            SubtitleSiteKeys = new() { { "subdl", "FAKE_STORED_KEY" } },
+        };
+        var safe = DownloadSecurity.SafeText(
+            Key + " FAKE_PASSWORD " + Auth + " FAKE_STORED_KEY https://api.subdl.com/search?api_key=" + Key,
+            creds
+        );
+        check(
+            !safe.Contains("FAKE_") && !safe.Contains("https://"),
+            "Subtitle redaction removes active/stored keys, password, authorization and query links from log text"
+        );
     }
 }

@@ -1,79 +1,168 @@
 using System.Net.Http;
 using System.Text.RegularExpressions;
+
 namespace Noir;
+
 // Sends Noir's watches and un-checks to Nuvio in batches, retrying while offline.
-public sealed class NuvioSync:IDisposable
+public sealed class NuvioSync : IDisposable
 {
-    readonly LibraryStore store;readonly Action changed;bool busy,again,disposed;
+    readonly LibraryStore store;
+    readonly Action changed;
+    bool busy,
+        again,
+        disposed;
 #if !NOIR_HEADLESS
     readonly System.Windows.Threading.DispatcherTimer timer;
 #endif
-    readonly HttpClient http=new(){Timeout=TimeSpan.FromSeconds(30)};
-    public string Message {get;private set;}="";
+    readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(30) };
+    public string Message { get; private set; } = "";
+
 #if NOIR_HEADLESS
-    internal NuvioSync(LibraryStore library,HttpClient client){store=library;changed=()=>{};http=client;}
-#else
-    public NuvioSync(LibraryStore library,Action onChanged)
+    internal NuvioSync(LibraryStore library, HttpClient client)
     {
-        store=library;changed=onChanged;
-        timer=new(TimeSpan.FromMinutes(5),System.Windows.Threading.DispatcherPriority.Background,(_,_)=>Wake(),System.Windows.Application.Current.Dispatcher);
-        store.WatchCompleted+=Wake;store.HistoryChanged+=WakeIfDeletes;timer.Start();Wake();
+        store = library;
+        changed = () => { };
+        http = client;
+    }
+#else
+    public NuvioSync(LibraryStore library, Action onChanged)
+    {
+        store = library;
+        changed = onChanged;
+        timer = new(
+            TimeSpan.FromMinutes(5),
+            System.Windows.Threading.DispatcherPriority.Background,
+            (_, _) => Wake(),
+            System.Windows.Application.Current.Dispatcher
+        );
+        store.WatchCompleted += Wake;
+        store.HistoryChanged += WakeIfDeletes;
+        timer.Start();
+        Wake();
     }
 #endif
-    void WakeIfDeletes(){if(store.State.NuvioDeletes.Count>0)Wake();}
+
+    void WakeIfDeletes()
+    {
+        if (store.State.NuvioDeletes.Count > 0)
+            Wake();
+    }
+
     public void Wake()
     {
-        if(disposed)return;if(busy){again=true;return;}
-        _=Run();
+        if (disposed)
+            return;
+        if (busy)
+        {
+            again = true;
+            return;
+        }
+        _ = Run();
     }
+
     internal async Task Run()
     {
-        busy=true;again=false;
+        busy = true;
+        again = false;
         try
         {
-            if(!store.State.SyncNuvio||NuvioStorage.Load(store.DataDirectory) is not {Profile:>0} session)return;
-            var client=new NuvioClient(http,session,s=>NuvioStorage.Save(store.DataDirectory,s));
-            List<WatchSyncJob> jobs;List<string> deletes;
-            lock(store.State)
+            if (!store.State.SyncNuvio || NuvioStorage.Load(store.DataDirectory) is not { Profile: > 0 } session)
+                return;
+            var client = new NuvioClient(http, session, s => NuvioStorage.Save(store.DataDirectory, s));
+            List<WatchSyncJob> jobs;
+            List<string> deletes;
+            lock (store.State)
             {
-                jobs=store.State.WatchSync.Values.Where(j=>j.Provider=="Nuvio"&&j.SyncedAt==null&&j.RetryAt<=DateTimeOffset.UtcNow).ToList();
-                deletes=store.State.NuvioDeletes.ToList();
+                jobs = store
+                    .State.WatchSync.Values.Where(j =>
+                        j.Provider == "Nuvio" && j.SyncedAt == null && j.RetryAt <= DateTimeOffset.UtcNow
+                    )
+                    .ToList();
+                deletes = store.State.NuvioDeletes.ToList();
             }
-            if(jobs.Count==0&&deletes.Count==0)return;
-            var items=new List<(WatchSyncJob Job,NuvioWatched Item)>();
-            foreach(var job in jobs)
+            if (jobs.Count == 0 && deletes.Count == 0)
+                return;
+            var items = new List<(WatchSyncJob Job, NuvioWatched Item)>();
+            foreach (var job in jobs)
             {
-                if(store.State.Catalog.GetValueOrDefault(job.ItemId)?.Item is not {} item){store.State.WatchSync.Remove("Nuvio:"+job.ItemId);continue;}
-                if(!Regex.IsMatch(item.ImdbId,@"^tt\d+$")){job.Message="Waiting for a verified title ID.";continue;}
-                items.Add((job,new(item.ImdbId,item.IsMovie?"movie":"series",item.Title,item.IsMovie?null:item.Season,item.IsMovie?null:item.Episode,job.WatchedAt.ToUnixTimeMilliseconds())));
-            }
-            if(items.Count>0)
-            {
-                foreach(var chunk in items.Chunk(200))
+                if (store.State.Catalog.GetValueOrDefault(job.ItemId)?.Item is not { } item)
                 {
-                    await client.PushWatched(session.Profile,chunk.Select(c=>c.Item),CancellationToken.None);
+                    store.State.WatchSync.Remove("Nuvio:" + job.ItemId);
+                    continue;
+                }
+                if (!Regex.IsMatch(item.ImdbId, @"^tt\d+$"))
+                {
+                    job.Message = "Waiting for a verified title ID.";
+                    continue;
+                }
+                items.Add(
+                    (
+                        job,
+                        new(
+                            item.ImdbId,
+                            item.IsMovie ? "movie" : "series",
+                            item.Title,
+                            item.IsMovie ? null : item.Season,
+                            item.IsMovie ? null : item.Episode,
+                            job.WatchedAt.ToUnixTimeMilliseconds()
+                        )
+                    )
+                );
+            }
+            if (items.Count > 0)
+            {
+                foreach (var chunk in items.Chunk(200))
+                {
+                    await client.PushWatched(session.Profile, chunk.Select(c => c.Item), CancellationToken.None);
                     store.CompleteNuvioUpload(chunk);
                 }
             }
-            if(deletes.Count>0)
+            if (deletes.Count > 0)
             {
-                await client.DeleteWatched(session.Profile,deletes.Select(NuvioClient.ParseKey),CancellationToken.None);
-                lock(store.State)store.State.NuvioDeletes.ExceptWith(deletes);
+                await client.DeleteWatched(
+                    session.Profile,
+                    deletes.Select(NuvioClient.ParseKey),
+                    CancellationToken.None
+                );
+                lock (store.State)
+                    store.State.NuvioDeletes.ExceptWith(deletes);
             }
-            Message=items.Count+deletes.Count>0?$"Sent {items.Count} watch{(items.Count==1?"":"es")}{(deletes.Count>0?$" and {deletes.Count} removal{(deletes.Count==1?"":"s")}":"")} to Nuvio.":"";
-            store.Save();if(items.Count+deletes.Count>0)changed();
+            Message =
+                items.Count + deletes.Count > 0
+                    ? $"Sent {items.Count} watch{(items.Count == 1 ? "" : "es")}{(deletes.Count > 0 ? $" and {deletes.Count} removal{(deletes.Count == 1 ? "" : "s")}" : "")} to Nuvio."
+                    : "";
+            store.Save();
+            if (items.Count + deletes.Count > 0)
+                changed();
         }
-        catch(NuvioExpiredException e){Message=e.Message;changed();}
-        catch(Exception e)
+        catch (NuvioExpiredException e)
         {
-            store.Log(e);Message="Nuvio couldn't be reached. Noir will retry.";
-            foreach(var job in store.State.WatchSync.Values.Where(j=>j.Provider=="Nuvio"&&j.SyncedAt==null))job.RetryAt=DateTimeOffset.UtcNow.AddMinutes(5);
+            Message = e.Message;
+            changed();
         }
-        finally{busy=false;if(again&&!disposed)Wake();}
+        catch (Exception e)
+        {
+            store.Log(e);
+            Message = "Nuvio couldn't be reached. Noir will retry.";
+            foreach (var job in store.State.WatchSync.Values.Where(j => j.Provider == "Nuvio" && j.SyncedAt == null))
+                job.RetryAt = DateTimeOffset.UtcNow.AddMinutes(5);
+        }
+        finally
+        {
+            busy = false;
+            if (again && !disposed)
+                Wake();
+        }
     }
-    public void Dispose(){disposed=true;
+
+    public void Dispose()
+    {
+        disposed = true;
 #if !NOIR_HEADLESS
         timer.Stop();
 #endif
-        store.WatchCompleted-=Wake;store.HistoryChanged-=WakeIfDeletes;http.Dispose();}
+        store.WatchCompleted -= Wake;
+        store.HistoryChanged -= WakeIfDeletes;
+        http.Dispose();
+    }
 }
