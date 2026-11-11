@@ -425,7 +425,7 @@ public partial class MainWindow
                 await Shot(language+"-home-hover","Hero follows a focused Cinemeta card");
 
                 DismissJustWatched(false);trackerTab="Up next";Navigate("History");await Settle(900);
-                ContentScroll.ScrollToTop();await Shot(language+"-history-top","Watch next");
+                ContentScroll.ScrollToTop();await Shot(language+"-history-top","Up next");
                 await AtHeader(T("Recently watched","شاهدت مؤخراً"));await Shot(language+"-history-recent","Recently watched with inline Just watched / Favourites");
 
                 var episode=RecentHistoryViewings().Select(v=>v.Item).FirstOrDefault(i=>!i.IsMovie)

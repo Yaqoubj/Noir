@@ -58,7 +58,7 @@ public final class TvTest {
         TvActivity a=(TvActivity)test.startActivitySync(new Intent(test.getTargetContext(),TvActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK));
         try{long end=SystemClock.elapsedRealtime()+10000;boolean[] ready={false};while(SystemClock.elapsedRealtime()<end){test.runOnMainSync(()->ready[0]=a.model!=null&&a.body!=null);if(ready[0])break;Thread.sleep(25);}assertTrue("Home model arrives",ready[0]);
             JSONObject item=NoirApp.data.itemsShared().getJSONObject(0);
-            test.runOnMainSync(()->{TvRows.Row row=new TvRows.Row("hint-test","Continue Watching",true,true);row.add(new TvRows.Tile(item,""));a.addHomeRow(row);LinearLayout wrapper=(LinearLayout)a.visibleRows.get(a.visibleRows.size()-1).view;assertTrue("hold-OK rows say so",((TextView)wrapper.getChildAt(0)).getText().toString().contains(Loc.t("Hold OK for options")));
+            test.runOnMainSync(()->{TvRows.Row row=new TvRows.Row("hint-test","Continue watching",true,true);row.add(new TvRows.Tile(item,""));a.addHomeRow(row);LinearLayout wrapper=(LinearLayout)a.visibleRows.get(a.visibleRows.size()-1).view;assertTrue("hold-OK rows say so",((TextView)wrapper.getChildAt(0)).getText().toString().contains(Loc.t("Hold OK for options")));
                 TvRows.Row plain=new TvRows.Row("plain-test","Recently added",false,false);plain.add(new TvRows.Tile(item,""));a.addHomeRow(plain);wrapper=(LinearLayout)a.visibleRows.get(a.visibleRows.size()-1).view;assertFalse("rows without a menu stay quiet",((TextView)wrapper.getChildAt(0)).getText().toString().contains(Loc.t("Hold OK for options")));
                 a.showPage("My List",true);a.body.removeAllViews();a.visibleRows.clear();a.gridTiles=new ArrayList<>();a.gridCount=0;a.appendGrid();a.restoreFocus(false);});
             test.waitForIdleSync();View f=focused(a);assertTrue("empty My List focuses its Search button: "+f,f instanceof TextView&&((TextView)f).getText().toString().equals(Loc.t("Search")));
@@ -67,6 +67,42 @@ public final class TvTest {
             test.runOnMainSync(()->f.requestFocus());test.waitForIdleSync();key(KeyEvent.KEYCODE_DPAD_CENTER);test.runOnMainSync(()->assertEquals("Search button opens Search","Search",a.page));
             test.runOnMainSync(()->{a.query="";a.showPage("Search",true);});test.waitForIdleSync();assertFalse("no 'No results' before typing",textOf(a.body).contains(Loc.t("No results yet")));
         }finally{test.runOnMainSync(a::finish);}
+    }
+
+    /** D9: Arabic Home is mirrored like the title page: rail on the right, rows right to left, Left/Right swapped. English stays as it was. */
+    @Test public void arabicHomeIsMirroredWithSwappedArrows()throws Exception{
+        Assume.assumeTrue("needs the paired fixture library",hasLibrary());DataStore data=NoirApp.data;String before=data.prefs().optString("language","");boolean chosen=TvProfilesActivity.chosen;TvProfilesActivity.chosen=true;TvActivity[] open={null};
+        try{for(boolean arabic:new boolean[]{false,true}){
+                data.pref("language",arabic?"ar":"en");Loc.use(data);String where=arabic?"Arabic":"English";
+                TvActivity a=(TvActivity)test.startActivitySync(new Intent(test.getTargetContext(),TvActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK));open[0]=a;
+                long end=SystemClock.elapsedRealtime()+10000;boolean[] ready={false};while(SystemClock.elapsedRealtime()<end){test.runOnMainSync(()->ready[0]=a.model!=null&&!a.visibleRows.isEmpty()&&a.visibleRows.get(0).tiles.size()>=2&&a.getCurrentFocus()==a.visibleRows.get(0).tiles.get(0));if(ready[0])break;Thread.sleep(25);}assertTrue(where+": Home rows arrive and the first tile has focus",ready[0]);test.waitForIdleSync();
+                View[] tiles=new View[2];
+                test.runOnMainSync(()->{tiles[0]=a.visibleRows.get(0).tiles.get(0);tiles[1]=a.visibleRows.get(0).tiles.get(1);
+                    assertEquals(where+": Home layout direction",arabic?View.LAYOUT_DIRECTION_RTL:View.LAYOUT_DIRECTION_LTR,a.root.getLayoutDirection());
+                    int[] rail=new int[2],content=new int[2],first=new int[2],second=new int[2];a.rail.getLocationOnScreen(rail);a.content.getLocationOnScreen(content);tiles[0].getLocationOnScreen(first);tiles[1].getLocationOnScreen(second);
+                    assertEquals(where+": the rail is on the right only in Arabic (rail x "+rail[0]+", content x "+content[0]+")",arabic,rail[0]>content[0]);
+                    assertEquals(where+": the second tile is left of the first only in Arabic (first x "+first[0]+", second x "+second[0]+")",arabic,second[0]<first[0]);
+                    assertEquals(where+": rail names Home in the chosen language",arabic?"الرئيسية":"Home",a.nav.get(0).getContentDescription().toString());
+                    assertEquals(where+": rail label text",arabic?"الرئيسية":"Home",((TextView)a.nav.get(0).getChildAt(1)).getText().toString());});
+                int along=arabic?KeyEvent.KEYCODE_DPAD_LEFT:KeyEvent.KEYCODE_DPAD_RIGHT,toRail=arabic?KeyEvent.KEYCODE_DPAD_RIGHT:KeyEvent.KEYCODE_DPAD_LEFT;
+                key(along);assertSame(where+": the arrow pointing away from the rail moves to the second tile",tiles[1],focused(a));
+                key(toRail);assertSame(where+": the arrow pointing at the rail moves back to the first tile",tiles[0],focused(a));
+                key(toRail);assertTrue(where+": the same arrow on the first tile opens the rail",TvActivity.inside(a.rail,focused(a)));
+                key(toRail);assertTrue(where+": pressing it again stays on the rail",TvActivity.inside(a.rail,focused(a)));
+                key(along);test.waitForIdleSync();assertTrue(where+": the other arrow returns to the content",TvActivity.inside(a.content,focused(a)));
+                /* Walk the longest row to its end: every tile must scroll fully into view in either direction. */
+                int[] longest={0};test.runOnMainSync(()->{for(int n=0;n<a.visibleRows.size();n++)if(!a.visibleRows.get(n).grid&&a.visibleRows.get(n).tiles.size()>a.visibleRows.get(longest[0]).tiles.size())longest[0]=n;a.visibleRows.get(longest[0]).tiles.get(0).requestFocus();});test.waitForIdleSync();
+                /* A Discover row is rebuilt when its catalog arrives, so the row is looked up by id and the tile by index at every step. */
+                String[] rowId={""};int[] count={0};boolean[] wider={false};test.runOnMainSync(()->{rowId[0]=a.visibleRows.get(longest[0]).id;count[0]=a.visibleRows.get(longest[0]).tiles.size();});
+                for(int n=1;n<count[0];n++){key(along);Thread.sleep(200);test.waitForIdleSync();int index=n;
+                    test.runOnMainSync(()->{TvActivity.RowViews row=null;for(TvActivity.RowViews r:a.visibleRows)if(r.id.equals(rowId[0]))row=r;assertNotNull(where+": row "+rowId[0]+" is still on Home",row);count[0]=row.tiles.size();if(index>=row.tiles.size())return;View tile=row.tiles.get(index);
+                        assertSame(where+": tile "+index+" of row "+rowId[0]+" takes focus",tile,a.getCurrentFocus());
+                        Rect seen=new Rect(),area=new Rect();assertTrue(tile.getGlobalVisibleRect(seen));a.content.getGlobalVisibleRect(area);int[] at=new int[2];View first=row.tiles.get(0);first.getLocationOnScreen(at);if(at[0]+first.getWidth()<area.left||at[0]>area.right)wider[0]=true;
+                        assertTrue(where+": focused tile is scrolled into view (sees "+seen.width()+" of "+tile.getWidth()+" px)",seen.width()>=tile.getWidth()*9/10);});}
+                Bundle walked=new Bundle();walked.putString("stream","home_row_walk "+where+" row="+rowId[0]+" tiles="+count[0]+" scrolled_past_first="+wider[0]+"\n");test.sendStatus(2,walked);
+                test.runOnMainSync(a::finish);test.waitForIdleSync();open[0]=null;
+            }
+        }finally{TvActivity a=open[0];test.runOnMainSync(()->{if(a!=null)a.finish();});data.pref("language",before);Loc.use(data);TvProfilesActivity.chosen=chosen;}
     }
 
     @Test public void titlePageSignpostsEpisodeOptionsAndStreamChoice()throws Exception{
@@ -83,16 +119,32 @@ public final class TvTest {
 
     /** Opt-in (-e tvMedia …): audio/subtitles are a visible, focusable control, not only the ▲ key. */
     @Test public void playerTracksButtonIsReachableWithArrows()throws Exception{
-        String base=InstrumentationRegistry.getArguments().getString("tvMedia");Assume.assumeTrue(base!=null&&hasLibrary());
-        String id=NoirApp.data.itemsShared().getJSONObject(0).optString("id");
-        PlayerActivity p=(PlayerActivity)test.startActivitySync(new Intent(test.getTargetContext(),PlayerActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("id",id).putExtra("streamUrl",base+"i-avc-aac-srt.mkv").putExtra("streamRelease","tracks test").putExtra("restart",true));
-        try{long end=SystemClock.elapsedRealtime()+15000;while(SystemClock.elapsedRealtime()<end&&!p.firstVideo)Thread.sleep(25);assertTrue("video starts",p.firstVideo);
+        String path=InstrumentationRegistry.getArguments().getString("tvLocalMedia");assertNotNull("runner supplies pushed local TV media",path);assertTrue("local TV fixture exists",new File(path).isFile());
+        String id="tv-local-tracks-fixture";NoirApp.data.rememberPhoneItem(new JSONObject().put("id",id).put("title","TV local tracks fixture").put("duration",600));NoirApp.data.localFile(id,android.net.Uri.fromFile(new File(path)).toString());
+        PlayerActivity p=(PlayerActivity)test.startActivitySync(new Intent(test.getTargetContext(),PlayerActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("id",id).putExtra("restart",true));
+        try{String outcome=waitForVideoOutcome(p,20000);assertEquals("Local video starts before testing arrows: "+outcome,"frame",outcome);
             test.runOnMainSync(()->{assertNotNull("TV has an Audio & subtitles button",p.tvTracksButton);assertTrue(p.tvTracksButton.isFocusable());assertTrue("remote hint shown",textOf(p.controls).contains("▼"));p.tvPlay(false);p.pause.requestFocus();});test.waitForIdleSync();
             for(int n=0;n<6&&focused(p)!=p.tvTracksButton;n++)key(KeyEvent.KEYCODE_DPAD_RIGHT);
             assertSame("→ from Pause reaches Audio & subtitles",p.tvTracksButton,focused(p));
             key(KeyEvent.KEYCODE_DPAD_CENTER);test.runOnMainSync(()->assertEquals("OK opens the tracks menu",1,p.tvPanelDepth));
             key(KeyEvent.KEYCODE_BACK);test.runOnMainSync(()->assertEquals("Back closes it",0,p.tvPanelDepth));
         }finally{test.runOnMainSync(p::finish);}
+    }
+
+    String waitForVideoOutcome(PlayerActivity p,long timeout)throws Exception{
+        long end=SystemClock.elapsedRealtime()+timeout;String[] outcome={"pending"};
+        while(SystemClock.elapsedRealtime()<end){test.runOnMainSync(()->{if(p.firstVideo)outcome[0]="frame";else if(p.playbackError&&p.message.getText().length()>0&&p.player!=null&&!p.player.isPlaying())outcome[0]="error";else if(p.destroyed||p.isFinishing())outcome[0]="unexpected finish";});if(!outcome[0].equals("pending"))return outcome[0];Thread.sleep(25);}
+        return "hang";
+    }
+    @Test public void coldHttpStartReportsTiming()throws Exception{
+        String base=InstrumentationRegistry.getArguments().getString("tvMedia");assertNotNull("runner supplies HTTP media",base);assertTrue("paired fixture library",hasLibrary());
+        String id=DataStore.objects(NoirApp.data.itemsShared()).stream().filter(i->i.optString("title").equals("Bright pattern fixture")).findFirst().orElseThrow(()->new AssertionError("Missing bright fixture")).optString("id");
+        String local=NoirApp.data.localFile(id);NoirApp.data.localFile(id,"");long start=SystemClock.elapsedRealtime();
+        PlayerActivity p=(PlayerActivity)test.startActivitySync(new Intent(test.getTargetContext(),PlayerActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("id",id).putExtra("streamUrl",base+"i-avc-aac-srt.mkv").putExtra("streamRelease","cold HTTP timing").putExtra("restart",true));
+        try{String outcome=waitForVideoOutcome(p,20000);Bundle status=new Bundle();test.runOnMainSync(()->{
+                status.putString("stream","cold_http outcome="+outcome+" elapsed_ms="+(SystemClock.elapsedRealtime()-start)+" since_create_ms="+(SystemClock.elapsedRealtime()-p.createAt)+" first_vout="+p.firstVideo+" vouts="+p.vouts+" startup_failed="+p.tvStreamFailed+" buffer_since="+p.tvBufferSince+" state="+(p.player==null?-1:p.player.getPlayerState())+" message="+p.message.getText()+"\n");
+            });test.sendStatus(2,status); /* 2 = progress note; 0 would be counted as an extra passed test by the runner ("Test count mismatch") */assertTrue("Cold HTTP ends in first Vout or a visible, stopped error: "+outcome,outcome.equals("frame")||outcome.equals("error"));
+        }finally{test.runOnMainSync(p::finish);NoirApp.data.localFile(id,local);}
     }
 
     @Test public void artworkCoalescesAndCancelsReusedOrDetachedTargets()throws Exception{

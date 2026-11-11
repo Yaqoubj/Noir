@@ -254,7 +254,7 @@ public partial class MainWindow
             if(nextItem!=null)
             {
                 NextTitle.Text=nextItem.EpisodeLabel+(nextItem.EpisodeTitle.Length>0?" · "+nextItem.EpisodeTitle:"");
-                ShowUpNext(nextItem,PL("Watched · Credits are still playing","تمت المشاهدة · الشارة ما زالت تعمل"));NextPanel.Visibility=Visibility.Collapsed;
+                ShowUpNext(nextItem,PL($"{(current.IsMovie?current.Title:current.EpisodeLabel)} marked watched",$"تم تسجيل مشاهدة {(current.IsMovie?current.Title:current.EpisodeLabel)}"));/* U78: about the episode that ended */NextPanel.Visibility=Visibility.Collapsed;
                 if(Prefs.SkipCredits==SkipMode.Auto&&store.State.AutoNext) StartCountdown();
             }
         }
@@ -338,12 +338,12 @@ public partial class MainWindow
         if(up is {Kind:UpNextKind.NotOnPc} missing)
         {
             var job=ActiveDownload(missing.Item);
-            NextLabel.Text="UP NEXT · NOT ON THIS PC";NextTitle.Text=missing.Item.EpisodeLabel+(missing.Item.EpisodeTitle.Length>0&&!store.State.HideSpoilers?" · "+missing.Item.EpisodeTitle:"");
+            NextLabel.Text=PL("UP NEXT · NOT ON THIS PC","التالي · ليس على هذا الحاسوب");NextTitle.Text=missing.Item.EpisodeLabel+(missing.Item.EpisodeTitle.Length>0&&!store.State.HideSpoilers?" · "+missing.Item.EpisodeTitle:"");
             var item=missing.Item;
             if(job==null&&CanStream)
             {
                 // Streaming continues the evening without waiting for a download.
-                NextCountdown.Text="Stream it now through AIOStreams, or download it from the title page.";NextPlay.Content="▶ Stream next";endAction=()=>StreamItem(item);
+                NextCountdown.Text="Stream it now through AIOStreams, or download it from the title page.";NextPlay.Content="[[play]] Stream next";endAction=()=>StreamItem(item);
                 SetNextStill(item);if(currentStream!=null&&store.State.AutoNext&&!creditsPromptDismissed){nextItem=null;streamNext=item;StartCountdown();}
                 return;
             }
@@ -353,15 +353,15 @@ public partial class MainWindow
         }
         else if(up is {Kind:UpNextKind.Upcoming} soon)
         {
-            NextLabel.Text="YOU'RE CAUGHT UP";NextTitle.Text=soon.Item.EpisodeLabel+" airs "+(soon.AirsAt?.ToLocalTime().ToString("dddd, d MMM")??"soon");
+            NextLabel.Text=PL("YOU'RE CAUGHT UP","أنت على اطلاع");NextTitle.Text=soon.Item.EpisodeLabel+PL(" airs "," يُعرض ")+(soon.AirsAt?.ToLocalTime().ToString("dddd, d MMM",Loc.Culture)??PL("soon","قريبًا"));
             NextCountdown.Text="It will wait for you on Home under Waiting for new episodes.";NextPlay.Content="Back to library";endAction=ReturnToLibrary;
         }
         else
         {
-            NextLabel.Text=finished.IsMovie?"MOVIE FINISHED":"SERIES FINISHED";NextTitle.Text=finished.Title;
+            NextLabel.Text=finished.IsMovie?PL("MOVIE FINISHED","انتهى الفيلم"):PL("SERIES FINISHED","انتهى المسلسل");NextTitle.Text=finished.Title;
             var rated=store.State.PersonalReviews.GetValueOrDefault(finished.Id)?.Rating??0;
             NextCountdown.Text=rated>0?"You rated it "+new string('★',rated)+".":"How was it? Your rating and note stay private on this PC.";
-            NextPlay.Content=rated>0?"View diary":"Rate it";endAction=()=>OpenDiary(finished);
+            NextPlay.Content=rated>0?PL("View diary","عرض اليوميات"):PL("Rate it","قيّمه");endAction=()=>OpenDiary(finished);
         }
     }
     void NextNow_Click(object sender,RoutedEventArgs e) { stillWatching.UserInput();if(endAction!=null&&ended){endAction();return;}var stream=streamNext;if(stream!=null){CancelNext();StreamItem(stream);return;}var next=nextItem;if(next!=null) _ = PlayVideo(next); }
@@ -421,6 +421,16 @@ public partial class MainWindow
     }
     void Audio_Click(object sender,RoutedEventArgs e)
         =>OpenTrackMenu(BuildAudioMenu(),(Button)sender);
+    // A language is written once: "English - [English]" becomes "English", "SDH - [English]" becomes "English (SDH)" (U60).
+    static string TrackLabel(string name)
+    {
+        var m=System.Text.RegularExpressions.Regex.Match(name??"",@"^\s*(?<a>.*?)\s+-\s+\[(?<b>[^\]]+)\]\s*$");
+        if(!m.Success)return name??"";
+        var a=m.Groups["a"].Value.Trim();var b=m.Groups["b"].Value.Trim();
+        if(a.Length==0||a.Equals(b,StringComparison.CurrentCultureIgnoreCase)||System.Text.RegularExpressions.Regex.IsMatch(a,@"^(Track|مسار)\s*\d+$",System.Text.RegularExpressions.RegexOptions.IgnoreCase))return b;
+        if(a.StartsWith(b,StringComparison.CurrentCultureIgnoreCase)){var rest=a[b.Length..].Trim(' ','-','(',')');return rest.Length==0?b:b+" ("+rest+")";}
+        return b+" ("+a+")";
+    }
     ContextMenu BuildAudioMenu()
     {
         var menu=new ContextMenu();
@@ -428,7 +438,7 @@ public partial class MainWindow
         foreach(var track in player.AudioTrackDescription)
         {
             if(track.Id<0) continue;
-            var entry=new MenuItem { Header=track.Name,IsCheckable=true,IsChecked=track.Id==player.AudioTrack };
+            var entry=new MenuItem { Header=TrackLabel(track.Name),IsCheckable=true,IsChecked=track.Id==player.AudioTrack };
             int id=track.Id;entry.Click+=(_,_)=>SelectTrack(false,id,track.Name);menu.Items.Add(entry);
         }
         if(menu.Items.Count==0) menu.Items.Add(new MenuItem { Header=PL("Tracks are still loading","ما زالت المسارات قيد التحميل"),IsEnabled=false });
@@ -444,7 +454,7 @@ public partial class MainWindow
         foreach(var track in player.SpuDescription)
         {
             if(track.Id<0) continue;
-            var entry=new MenuItem { Header=track.Name,IsCheckable=true,IsChecked=track.Id==player.Spu };
+            var entry=new MenuItem { Header=TrackLabel(track.Name),IsCheckable=true,IsChecked=track.Id==player.Spu };
             int id=track.Id;entry.Click+=(_,_)=>SelectTrack(true,id,track.Name);menu.Items.Add(entry);
         }
         menu.Items.Add(new Separator());
@@ -482,6 +492,7 @@ public partial class MainWindow
         Add(store.State.FillVideo?"Picture · Fill (switch to Fit)":"Picture · Fit (switch to Fill)",()=>PictureMode_Click(sender,e));
         Add(SleepButton.Content?.ToString()??"Sleep timer",()=>Sleep_Click(sender,e));
         Add("Edit intro & credits times",()=>Intro_Click(sender,e));
+        var boost=new MenuItem{Header=PL("Volume boost (up to 200%)","تعزيز الصوت (حتى ٢٠٠٪)"),IsCheckable=true,IsChecked=Prefs.VolumeBoost};boost.Click+=(_,_)=>Boost_Click(sender,e);menu.Items.Add(boost);// U79: Boost lives here as a switch
         if(chapterMarks.Count>1){Add(PL("Previous chapter  (Shift+←)","الفصل السابق  (Shift+←)"),()=>JumpChapter(-1));Add(PL("Next chapter  (Shift+→)","الفصل التالي  (Shift+→)"),()=>JumpChapter(1));}
         if(currentStream!=null&&current is {} streamItem)Add("Choose another stream…",()=>StreamItem(streamItem,true));
         menu.Items.Add(new Separator());var keys=new MenuItem{Header=PL("Keyboard shortcuts","اختصارات لوحة المفاتيح"),InputGestureText="?"};keys.Click+=(_,_)=>ToggleShortcutSheet(true);menu.Items.Add(keys);OpenTrackMenu(menu,(Button)sender);
@@ -592,7 +603,7 @@ public partial class MainWindow
             case Key.OemComma when Keyboard.Modifiers==ModifierKeys.Shift: StepSpeed(-1);break;
             case Key.F: ToggleFullscreen();break;
             case Key.Escape: if(fullscreen) ToggleFullscreen();else ReturnToLibrary();break;
-            case Key.M: muted=!muted;if(player!=null) player.Mute=muted;break;
+            case Key.M: ToggleMute();break;
             case Key.I: SkipKnownIntro();break;
             case Key.OemOpenBrackets: AdjustSubtitleDelay(-.5);break;
             case Key.OemCloseBrackets: AdjustSubtitleDelay(.5);break;

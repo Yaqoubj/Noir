@@ -35,7 +35,7 @@ public final class StreamingSubtitleTest {
             for(int n=0;n<150&&active[0]==null;n++){test.runOnMainSync(()->{for(android.app.Activity a:androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED))if(a instanceof PlayerActivity)active[0]=(PlayerActivity)a;});Thread.sleep(100);}
             assertNotNull(active[0]);PlayerActivity reopened=active[0];for(int n=0;n<200&&(reopened.player==null||!reopened.player.isPlaying());n++)Thread.sleep(100);
             assertTrue(reopened.player.isPlaying());Thread.sleep(3000);assertEquals(-1,reopened.player.getSpuTrack());assertEquals(500000,reopened.player.getSpuDelay());
-        }finally{if(active[0]!=null)test.runOnMainSync(active[0]::finish);Thread.sleep(500);data.dropPending(id);}
+        }finally{if(active[0]!=null)test.runOnMainSync(active[0]::finish);for(int n=0;n<25;n++){Thread.sleep(200);data.dropPending(id);}}// the player saves progress as it closes, sometimes after finish returns; keep it out of later tests' outbox
     }
     @Test public void streamingWithoutPcKeepsReleaseAndLanguage()throws Exception{
         DataStore data=NoirApp.data;String id="stream-subs-"+System.nanoTime();

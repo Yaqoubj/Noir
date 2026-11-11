@@ -110,7 +110,7 @@ public partial class MainWindow
             ChoiceRows(stack,plan);ReviewGroups(stack,plan);
             var kept=plan.Titles.Where(t=>!importExcluded.Contains(t.Title.Id)).Sum(t=>t.Views.Count);
             var row=new WrapPanel{Margin=new(0,12,0,0)};stack.Children.Add(row);
-            var go=BigButton($"✓   Add {kept:N0} viewings",()=>ApplyImport(plan),true);go.IsEnabled=kept>0&&ImportReady(plan);
+            var go=BigButton($"[[check]]   Add {kept:N0} viewings",()=>ApplyImport(plan),true);go.IsEnabled=kept>0&&ImportReady(plan);
             if(!ImportReady(plan))go.ToolTip="Choose when you watched the undated ones first";row.Children.Add(go);
             row.Children.Add(BigButton("Cancel",()=>{importPlan=null;importMessage="";Render();},false));
             if(plan.Unmatched.Count>0)
@@ -129,7 +129,7 @@ public partial class MainWindow
     }
     void ChooseImportFile(string service)
     {
-        var dialog=new Microsoft.Win32.OpenFileDialog{Title="Import history from "+service,Filter="History exports and backups (*.csv;*.json;*.zip;*.noirbackup)|*.csv;*.json;*.zip;*.noirbackup|All files (*.*)|*.*"};
+        var dialog=new Microsoft.Win32.OpenFileDialog{Title="Import from "+service,Filter="History exports and backups (*.csv;*.json;*.zip;*.noirbackup)|*.csv;*.json;*.zip;*.noirbackup|All files (*.*)|*.*"};
         if(dialog.ShowDialog(this)==true)_=ImportFile(dialog.FileName);
     }
     async Task ImportFile(string path)
@@ -145,18 +145,18 @@ public partial class MainWindow
     {
         if(rows.Count==0){Status.Text="There's nothing new to import from "+service+".";return;}
         importBusy=true;importPlan=null;importProgress=(0,0);importMessage=$"Matching {rows.Count:N0} {service} records…";importCancel=new();var token=importCancel.Token;
-        if(page=="History"&&trackerTab=="Add history")Render();
+        if(page=="History"&&trackerTab=="Import")Render();
         try
         {
             using var discovery=DiscoverClient();var importer=new HistoryImporter(store,discovery);
-            var progress=new Progress<(int Done,int Total)>(p=>{importProgress=p;if(page=="History"&&trackerTab=="Add history"&&!logging)Render();});
+            var progress=new Progress<(int Done,int Total)>(p=>{importProgress=p;if(page=="History"&&trackerTab=="Import"&&!logging)Render();});
             var plan=await importer.Resolve(service,rows,progress,token);
             importPlan=plan;importMessage="";importExcluded.Clear();importWhen="";
         }
         catch(OperationCanceledException)when(token.IsCancellationRequested){importMessage="";Status.Text="Import cancelled.";}
         catch(Exception e){store.Log(e);importMessage="";Status.Text="Import couldn't finish. Check your connection and try again.";}
         // Imports started from Settings → Connections continue on the review in History → Add history.
-        finally{importBusy=false;if(page=="History"&&!logging){trackerTab="Add history";Render();}else if(importPlan!=null&&page=="Settings"){historyType="All";trackerTab="Add history";Navigate("History");}}
+        finally{importBusy=false;if(page=="History"&&!logging){trackerTab="Import";Render();}else if(importPlan!=null&&page=="Settings"){historyType="All";trackerTab="Import";Navigate("History");}}
     }
     void ApplyImport(ImportPlan plan)
     {
@@ -204,7 +204,7 @@ public partial class MainWindow
                     e.ResultFilePath=target;e.Handled=true;
                     e.DownloadOperation.StateChanged+=(_,_)=>
                     {
-                        if(e.DownloadOperation.State==CoreWebView2DownloadState.Completed){window.Close();trackerTab="Add history";if(page=="History")Render();_=ImportFile(target);}
+                        if(e.DownloadOperation.State==CoreWebView2DownloadState.Completed){window.Close();trackerTab="Import";if(page=="History")Render();_=ImportFile(target);}
                         else if(e.DownloadOperation.State==CoreWebView2DownloadState.Interrupted)Status.Text="The download from "+service.Name+" was interrupted. Try again.";
                     };
                 };

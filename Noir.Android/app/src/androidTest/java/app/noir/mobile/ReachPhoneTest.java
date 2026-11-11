@@ -24,7 +24,7 @@ public final class ReachPhoneTest {
 
  @Test public void continueWatchingCardHasVisibleOptions()throws Exception{
   show("home");MainActivity a=f.launch(MainActivity.class);
-  f.ui(()->{a.page="Home";a.detail="";a.render();View more=options(a.body,"Reach home");assertNotNull("Continue Watching card shows ⋯",more);assertTrue(more.performClick());assertNotNull(a.titleActions.dialog);assertTrue("⋯ opens the episode actions",a.titleActions.dialog.isShowing());a.titleActions.dismiss();});
+  f.ui(()->{a.page="Home";a.detail="";a.render();View more=options(a.body,"Reach home");assertNotNull("Continue watching card shows ⋯",more);assertTrue(more.performClick());assertNotNull(a.titleActions.dialog);assertTrue("⋯ opens the episode actions",a.titleActions.dialog.isShowing());a.titleActions.dismiss();});
  }
  @Test public void upNextRowHasVisibleOptions()throws Exception{
   show("track");f.data.phoneSetting("historyOnly",true);MainActivity a=f.launch(MainActivity.class);

@@ -47,7 +47,7 @@ public final class PremiumUiTest {
         JSONObject missing=DataStore.copy(item);DataStore.put(missing,"id","ui-unavailable");DataStore.put(missing,"group","show:ui-unavailable");DataStore.put(missing,"imdb","tt993305");DataStore.put(missing,"available",false);DataStore.put(missing,"inLibrary",false);DataStore.put(missing,"libraryAt",0);data.rememberPhoneItem(missing);
         test.runOnMainSync(()->home.options(missing));test.waitForIdleSync();View unavailable=home.titleActions.dialog.getWindow().getDecorView();
         assertTrue("Unavailable PC media can still discover downloads",find(unavailable,"Download…").isEnabled());
-        assertFalse("Unavailable video cannot restart",find(unavailable,"Start over").isEnabled());
+        assertNull("Unavailable video has no Start over (U72: options that cannot work are hidden)",find(unavailable,"Start over"));
         Instrumentation.ActivityMonitor downloads=test.addMonitor(PhoneDownloadsActivity.class.getName(),null,false);
         test.runOnMainSync(()->find(unavailable,"Download…").performClick());
         PhoneDownloadsActivity discovery=(PhoneDownloadsActivity)test.waitForMonitorWithTimeout(downloads,5000);test.removeMonitor(downloads);assertNotNull("Download discovery opens for unavailable PC media",discovery);test.waitForIdleSync();

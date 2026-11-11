@@ -46,7 +46,7 @@ public partial class MainWindow
             await Settle(6000);ContentScroll.ScrollToVerticalOffset(700);await Settle(800);Shot("discover-personal");
             Check(Descendants(ContentPanel).OfType<TextBlock>().Any(t=>t.Text.StartsWith("Because you watched")||t.Text=="Picked for you"),"Discover shows personal recommendation rows");
             var title=discoverResults!.Titles.First(t=>!t.IsMovie);await OpenDiscover(title);await Settle(3000);
-            Check(Descendants(ContentPanel).OfType<Button>().Any(b=>b.Content as string=="▶  Stream in Stremio"),"Title pages offer Stream in Stremio");Shot("discover-detail");
+            Check(Descendants(ContentPanel).OfType<Button>().Any(b=>IconSet.Src(b.Content)=="[[play]]  Stream in Stremio"),"Title pages offer Stream in Stremio");Shot("discover-detail");
             ContentScroll.ScrollToEnd();await Settle(2500);Shot("discover-more-like-this");
         }
         catch(Exception error){results.Add("FAIL: "+error);}

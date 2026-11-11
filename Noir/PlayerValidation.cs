@@ -33,13 +33,13 @@ public partial class MainWindow
             Loc.Use("ar");Press(System.Windows.Input.Key.F1);PlayerOverlay.UpdateLayout();
             Assert(shortcutSheet!=null&&Descendants(shortcutSheet.Overlay).OfType<System.Windows.Controls.Border>().Any(b=>b.FlowDirection==FlowDirection.RightToLeft&&b.CornerRadius.TopLeft==16)&&Descendants(shortcutSheet.Overlay).OfType<System.Windows.Controls.TextBlock>().Any(t=>t.Text=="[  ]"&&t.FlowDirection==FlowDirection.LeftToRight),"Arabic player shortcut sheet is right to left with left-to-right key caps");Shot("shortcuts-ar");Press(System.Windows.Input.Key.Escape);
             Assert(BuildSubtitleMenu().Items.OfType<System.Windows.Controls.MenuItem>().Any(m=>m.Header?.ToString()?.StartsWith("التوقيت")==true),"Arabic subtitle menu translates Timing");Loc.Use(store.State.Language);
-            Prefs.VolumeBoost=true;VolumeBar.Value=80;ApplyVolume();await Until(()=>player.Volume==160,"Volume boost sends up to twice the slider volume to VLC");Prefs.VolumeBoost=false;VolumeBar.Value=0;ApplyVolume();await Until(()=>player.Volume==0,"Turning boost off restores the plain slider volume");
+            Prefs.VolumeBoost=true;VolumeBar.Value=80;ApplyVolume();await Until(()=>player.Volume==160,"Volume boost sends up to twice the slider volume to VLC");Assert(BoostButton.Visibility!=Visibility.Visible&&VolumeIcon.Stroke is SolidColorBrush{Color:{R:0xE4,G:0xC0,B:0x84}},"Boost is not a word in the bar; the speaker turns gold while it is on (U79)");ApplyVolumeWidth(true);Assert(PlayerVolume.Visibility==Visibility.Visible&&VolumeBar.Visibility==Visibility.Collapsed,"At narrow widths the speaker stays and only the inline slider is dropped (U80)");ApplyVolumeWidth(ActualWidth<1000);Prefs.VolumeBoost=false;VolumeBar.Value=0;ApplyVolume();await Until(()=>player.Volume==0,"Turning boost off restores the plain slider volume");
             chapterMarks.Clear();chapterMarks.AddRange([(0d,"Previously"),(currentDuration*.3,"Act One"),(currentDuration*.7,"Act Two")]);DrawChapterTicks();
             Assert(ChapterTicks.Children.Count==2,"Chapter ticks are drawn on the seek bar");Assert(ChapterAt(currentDuration*.5)=="Act One","Hover label knows the chapter under the pointer");
             JumpChapter(1);await Until(()=>pendingTarget==null&&player.Time/1000d>=currentDuration*.3-2,"Next chapter jumps to the following chapter start");
             SeekAbsolute(5);await Until(()=>pendingTarget==null,"Seek back to the recap");
             recapSegment=new(){Start=0,End=40};handledSegments.Clear();ShowControls();
-            await Until(()=>SkipIntro.Visibility==Visibility.Visible&&Equals(SkipIntro.Content,SkipButtonText(SegmentKind.Recap)),"Manual mode shows a Skip recap button");Shot("skip-recap");
+            await Until(()=>SkipIntro.Visibility==Visibility.Visible&&IconSet.Src(SkipIntro.Content)==SkipButtonText(SegmentKind.Recap),"Manual mode shows a Skip recap button");Shot("skip-recap");
             Prefs.SkipRecap=SkipMode.Auto;
             await Until(()=>(SkipIntro.Content as string)?.StartsWith(SkipNoticeText(SegmentKind.Recap))==true,"Auto mode first shows a Skipping recap notice with Undo");Shot("skip-notice");
             TogglePause();await Until(()=>player!.State==LibVLCSharp.Shared.VLCState.Paused,"Playback pauses during an automatic skip notice");
@@ -55,7 +55,7 @@ public partial class MainWindow
             await Until(()=>creditsReached&&NextPanel.Visibility==Visibility.Visible,"The Up Next card appears when credits start");
             Assert(nextTimer?.IsEnabled!=true,"Manual credits mode waits for the viewer");await Until(()=>{PlayerOverlay.UpdateLayout();return NextMedia.Visibility==Visibility.Visible&&NextMedia.ActualHeight>150;},"Up Next reserves a 16:9 still box");
             await Task.Delay(600);Shot("upnext");
-            StartCountdown();await Task.Delay(2500);Assert(NextRing.Data!=null&&((string)NextCountdown.Text).Contains('6'),"The ring counts down around the play button");Shot("upnext-ring");
+            StartCountdown();await Task.Delay(2500);Assert(NextRingHost.Visibility==Visibility.Collapsed&&((string)NextCountdown.Text).Contains('6'),"The Up next card counts down in words, with no play circle over the thumbnail (U77)");Shot("upnext-ring");
             TogglePause();await Until(()=>player!.State==LibVLCSharp.Shared.VLCState.Paused,"Playback pauses during Up Next");
             var countdownRemaining=pausedCountdown;var countdownText=NextCountdown.Text;await Task.Delay(8500);
             Assert(countdownRemaining is {TotalSeconds:>0}&&pausedCountdown==countdownRemaining&&nextTimer?.IsEnabled!=true&&current==episode&&NextCountdown.Text==countdownText,"Pause freezes Up Next beyond its original deadline");

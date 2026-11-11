@@ -31,8 +31,8 @@ public partial class MainWindow
         Button Tab(string label,string glyph,string tab){var button=new Button{Style=(Style)FindResource("SideNav")};var row=new StackPanel{Orientation=Orientation.Horizontal};row.Children.Add(Icon(glyph,19));row.Children.Add(Text(label,14));((FrameworkElement)row.Children[1]).Margin=new(14,0,0,0);button.Content=row;button.ToolTip=label;System.Windows.Automation.AutomationProperties.SetName(button,label);button.Click+=(_,_)=>{trackerTab=tab;logging=false;Navigate("History");};return button;}
         trackerDiaryNav??=Tab(T("Diary","اليوميات"),DiaryGlyph,"Diary");trackerStatsNav??=Tab(T("Stats","الإحصاءات"),StatsGlyph,"Stats");
         foreach(var pair in new[]{(trackerDiaryNav,T("Diary","اليوميات")),(trackerStatsNav,T("Stats","الإحصاءات"))})if(pair.Item1.Content is StackPanel row&&row.Children[1] is TextBlock text){text.Text=pair.Item2;text.Visibility=railCompact?Visibility.Collapsed:Visibility.Visible;pair.Item1.HorizontalContentAlignment=railCompact?HorizontalAlignment.Center:HorizontalAlignment.Left;pair.Item1.ToolTip=pair.Item2;}
-        if(trackerLogNav==null){trackerLogNav=ActionButton(T("＋  Log","＋  سجّل"),()=>OpenLog(null),true);trackerLogNav.Margin=new(12,8,12,12);trackerLogNav.Padding=new(8,12,8,12);DockPanel.SetDock(trackerLogNav,Dock.Top);if(NavScroll.Parent is DockPanel dock)dock.Children.Insert(Math.Max(0,dock.Children.IndexOf(NavScroll)),trackerLogNav);}
-        trackerLogNav.Visibility=TrackerOnly?Visibility.Visible:Visibility.Collapsed;trackerLogNav.Content=T("＋  Log","＋  سجّل");
+        if(trackerLogNav==null){trackerLogNav=ActionButton(T("[[plus]]  Log","[[plus]]  سجّل"),()=>OpenLog(null),true);trackerLogNav.Margin=new(12,8,12,12);trackerLogNav.Padding=new(8,12,8,12);DockPanel.SetDock(trackerLogNav,Dock.Top);if(NavScroll.Parent is DockPanel dock)dock.Children.Insert(Math.Max(0,dock.Children.IndexOf(NavScroll)),trackerLogNav);}
+        trackerLogNav.Visibility=Visibility.Collapsed;
         DiscoverNav.Click-=TrackerDiscover_Click;DiscoverNav.Click-=Discover_Click;DiscoverNav.Click+=TrackerOnly?TrackerDiscover_Click:Discover_Click;
         if(TrackerOnly)
         {
@@ -73,10 +73,10 @@ public partial class MainWindow
         }
         grid.Children.Add(Card(T("TRACKER","متتبع المشاهدة"),T("Just track what I watch","تتبّع ما أشاهده فقط"),T("Keep every show and movie in one place, wherever you watch.","احتفظ بكل مسلسل وفيلم في مكان واحد، أينما شاهدته."),
             ["Check off episodes in one click","See what's next and when new episodes air","Alerts when a show you follow has a new episode","Stats, diary and ratings · syncs with your phone"],
-            "✓   Start tracking",()=>ChooseAppMode("Tracker"),true,("⇅  Import from TV Time, Trakt, Netflix…",()=>{trackerTab="Add history";ChooseAppMode("Tracker");})));
+            "[[check]]   Start tracking",()=>ChooseAppMode("Tracker"),true,("[[swap]]  Import from TV Time, Trakt, Netflix…",()=>{trackerTab="Import";ChooseAppMode("Tracker");})));
         grid.Children.Add(Card(T("LIBRARY & TRACKER","المكتبة والمتتبع"),T("Play & track","شغّل وتتبّع"),"Point Noir at your movie and show folders. It plays them, remembers where you stopped and tracks everything automatically.",
             ["Resume anywhere, skip intros, subtitles","Stream to your phone over home Wi-Fi","Download what's missing","Everything in the tracker, too"],
-            "▶   Add my folders",()=>ChooseAppMode("Library"),false));
+            "[[play]]   Add my folders",()=>ChooseAppMode("Library"),false));
         ContentPanel.Children.Add(grid);
     }
     void RenderModeSettings()

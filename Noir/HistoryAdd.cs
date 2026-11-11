@@ -24,7 +24,7 @@ public partial class MainWindow
     void RenderAddHistory()
     {
         if(importBusy||importPlan!=null||importMessage.Length>0)ContentPanel.Children.Add(ImportPanel());
-        ContentPanel.Children.Add(Heading("Add your history","Tap through popular titles, paste a list, or bring it in from another app. Logged history fills your stats and diary but never crowds Up next or Recently watched."));
+        ContentPanel.Children.Add(Body("Pick from popular titles, paste a list, or bring it in from another app. Logged history fills your stats and diary but never crowds Up next or Recently watched.",14));
         RenderQuickAdd();RenderPasteList();RenderServerImports();RenderImportSync();
     }
 
@@ -38,7 +38,7 @@ public partial class MainWindow
         var hint=new TextBlock{Text="Search a title, then press Enter",Foreground=Brush("#817E78"),FontSize=14,Margin=new(20,0,0,0),VerticalAlignment=VerticalAlignment.Center,IsHitTestVisible=false,Visibility=addQuery.Length>0?Visibility.Collapsed:Visibility.Visible};
         search.TextChanged+=(_,_)=>hint.Visibility=search.Text.Length>0?Visibility.Collapsed:Visibility.Visible;
         var field=new Grid{Width=320};field.Children.Add(search);field.Children.Add(hint);DockPanel.SetDock(field,Dock.Right);head.Children.Add(field);
-        var title=new StackPanel();title.Children.Add(Text("Quick add",19,weight:FontWeights.SemiBold));title.Children.Add(Body("Tap what you've seen. For shows, “Up to…” picks the last episode you reached.",12));head.Children.Add(title);
+        var title=new StackPanel();title.Children.Add(Text("Quick add",19,weight:FontWeights.SemiBold));title.Children.Add(Body("Pick what you've seen. For shows, “Up to…” picks the last episode you reached.",12));head.Children.Add(title);
         ContentPanel.Children.Add(head);
         ContentPanel.Children.Add(Chips(["TV shows","Movies"],addKind,v=>{addKind=v;addTitles=null;addSkip=0;Render();}));
         if(picks.Count>0)
@@ -70,7 +70,7 @@ public partial class MainWindow
         catch(OperationCanceledException)when(token.IsCancellationRequested){return;}
         catch(Exception e){store.Log(e);addTitles=[];Status.Text="Couldn't load titles. Check your connection.";}
         finally{addLoading=false;}
-        if(page=="History"&&trackerTab=="Add history")RenderQuiet();
+        if(page=="History"&&trackerTab=="Import")RenderQuiet();
     }
     FrameworkElement QuickCard(DiscoverTitle t)
     {
@@ -87,11 +87,11 @@ public partial class MainWindow
         body.Children.Add(Text(t.Years,11,"#9F9A93"));
         var row=new WrapPanel{Margin=new(0,6,0,0)};body.Children.Add(row);
         Button Small(string text,Action act,bool on){var b=ActionButton(text,act,on);b.Padding=new(10,5,10,5);b.FontSize=12;b.Margin=new(0,0,6,0);if(!on)b.Background=Brush("#26FFFFFF");row.Children.Add(b);return b;}
-        if(t.IsMovie)Small(picked!=null?"✓ Seen":"Seen it",()=>{if(!picks.Remove(t.Id))picks[t.Id]=new(t,0,0);RenderQuiet();},picked!=null);
+        if(t.IsMovie)Small(picked!=null?"[[check]] Seen":"Seen it",()=>{if(!picks.Remove(t.Id))picks[t.Id]=new(t,0,0);RenderQuiet();},picked!=null);
         else
         {
-            Small(picked is {Season:0}?"✓ All":"All",()=>{if(picks.GetValueOrDefault(t.Id) is {Season:0})picks.Remove(t.Id);else picks[t.Id]=new(t,0,0);RenderQuiet();},picked is {Season:0});
-            Small(picked is {Season:>0}?"✓ Up to…":"Up to…",()=>_=PickUpTo(t),picked is {Season:>0});
+            Small(picked is {Season:0}?"[[check]] All":"All",()=>{if(picks.GetValueOrDefault(t.Id) is {Season:0})picks.Remove(t.Id);else picks[t.Id]=new(t,0,0);RenderQuiet();},picked is {Season:0});
+            Small(picked is {Season:>0}?"[[check]] Up to…":"Up to…",()=>_=PickUpTo(t),picked is {Season:>0});
         }
         return Lift(body,edge);
     }

@@ -47,7 +47,10 @@ static class FastPlanChecks
         check(plan.Entries.Count==6&&plan.Episodes.All(e=>e.Reason.StartsWith("Season pack covers 6")),"The same torrent found for every episode is recognized as one season pack");
         check(plan.Episodes.All(e=>e.Alternatives.Count==2&&e.Alternatives.Any(a=>a.Resolution=="720p")),"Each episode keeps the single-episode release as an alternative");
         check(plan.Episodes.All(e=>e.Chosen!.File.Name.Contains($"S01E0{e.Episode}")&&e.Chosen.File.Size==1000+e.Episode),"Each choice carries the episode's own file name and size for the download to match");
-        check(steps.Any(s=>s.Contains("of 6 episodes searched")),"Planning reports how many episodes have been searched");
+        // Progress<T> reports arrive later on the thread pool; wait (bounded) instead of racing them.
+        bool Searched(){lock(steps)return steps.Any(s=>s.Contains("of 6 episodes searched"));}
+        for(int i=0;i<100&&!Searched();i++)await Task.Delay(20);
+        check(Searched(),"Planning reports how many episodes have been searched");
         var ids=manager.EnqueuePlan(new(){RequestId=Guid.NewGuid().ToString(),PlanId=plan.Id,FileIds=plan.Entries.Select(e=>e.File.Id).ToList()});
         check(ids.Count==6&&manager.Jobs().All(j=>j.Hash==new string('a',40)&&j.RemoteName.Contains("1080p")),"Confirming the plan queues each episode from the pack by name and size");
         var directStore=new LibraryStore(Path.Combine(root,"directplan-"+Guid.NewGuid().ToString("N")));directStore.State.Roots=[new(){Path=shows,Movies=false}];directStore.State.Catalog[item.Id]=new(){Item=item};directStore.State.EpisodeSchedules[item.GroupKey]=store.State.EpisodeSchedules[item.GroupKey];directStore.Save();

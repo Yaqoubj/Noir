@@ -50,10 +50,10 @@ public sealed class ReviewBrowser : Window
         var header=new StackPanel{Margin=new(24,20,24,12)};hero.Children.Add(header);
         var titleRow=new DockPanel();header.Children.Add(titleRow);
         var tools=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Top};DockPanel.SetDock(tools,Dock.Right);titleRow.Children.Add(tools);
-        tools.Children.Add(Icon("←","Back",()=>{if(web.CoreWebView2?.CanGoBack==true) web.GoBack();}));
-        tools.Children.Add(Icon("↻","Reload",()=>{web.CoreWebView2?.Reload();}));
-        styleToggle=Icon("◐","Noir style is on · click to show the site's own look",ToggleStyle);tools.Children.Add(styleToggle);
-        tools.Children.Add(Icon("↗","Open in your web browser",()=>System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(targetUrl){UseShellExecute=true})));
+        tools.Children.Add(Icon("[[back]]","Back",()=>{if(web.CoreWebView2?.CanGoBack==true) web.GoBack();}));
+        tools.Children.Add(Icon("[[sync]]","Reload",()=>{web.CoreWebView2?.Reload();}));
+        styleToggle=Icon("[[contrast]]","Noir style is on · click to show the site's own look",ToggleStyle);tools.Children.Add(styleToggle);
+        tools.Children.Add(Icon("[[external]]","Open in your web browser",()=>System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(targetUrl){UseShellExecute=true})));
         var titles=new StackPanel();titleRow.Children.Add(titles);
         titles.Children.Add(MainWindow.Text("REVIEWS & DISCUSSION",10,"#E4C084",FontWeights.SemiBold));
         var name=MainWindow.Text(video.IsMovie?video.Title:video.Title+" · "+video.EpisodeLabel,26,weight:FontWeights.Bold);name.Margin=new(0,4,0,2);titles.Children.Add(name);
@@ -343,7 +343,7 @@ public partial class MainWindow
         panel.Children.Add(Body(string.Join(" · ",ReviewLinks.Sources(item).Keys),12));
         dialog.Action("Viewing diary & my rating",()=>{dialog.Close(true);OpenDiary(item);});
         dialog.Action("Reviews & comments",()=>{dialog.Close(true);OpenReviews(item);});
-        var play=dialog.Action(bookmark is {Completed:false,Position:>0}?"▶ Resume":"▶ Play",()=>{dialog.Close(true);_ = PlayVideo(item);},true);
+        var play=dialog.Action(bookmark is {Completed:false,Position:>0}?"[[play]] Resume":"[[play]] Play",()=>{dialog.Close(true);_ = PlayVideo(item);},true);
         play.IsEnabled=item.Available&&File.Exists(item.Path);
     }
 }

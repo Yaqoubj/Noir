@@ -108,8 +108,8 @@ public partial class MainWindow
     {
         var host=new StackPanel{Margin=new(0,6,0,8)};
         var row=new WrapPanel();host.Children.Add(Text("WHERE TO WATCH",10.5,"#817E78",FontWeights.SemiBold));host.Children.Add(row);row.Margin=new(0,8,0,0);
-        var stremio=ActionButton("▶  Stream in Stremio",()=>OpenInStremio(imdb,movie,season,episode),true);stremio.Padding=new(16,9,18,9);stremio.Margin=new(0,0,10,8);stremio.ToolTip="Opens this "+(movie?"movie":"show")+" in Stremio with your add-ons";row.Children.Add(stremio);
-        var nuvio=ActionButton("▶  Stream in Nuvio",()=>OpenInNuvio(imdb,movie,name));nuvio.Padding=new(16,9,18,9);nuvio.Margin=new(0,0,10,8);nuvio.ToolTip="Opens this "+(movie?"movie":"show")+" in Nuvio — on this PC with Nuvio Desktop, or on your phone with a QR code";row.Children.Add(nuvio);
+        var stremio=ActionButton("[[play]]  Stream in Stremio",()=>OpenInStremio(imdb,movie,season,episode));stremio.Padding=new(16,9,18,9);stremio.Margin=new(0,0,10,8);stremio.ToolTip="Opens this "+(movie?"movie":"show")+" in Stremio with your add-ons";row.Children.Add(stremio);
+        var nuvio=ActionButton("[[play]]  Stream in Nuvio",()=>OpenInNuvio(imdb,movie,name));nuvio.Padding=new(16,9,18,9);nuvio.Margin=new(0,0,10,8);nuvio.ToolTip="Opens this "+(movie?"movie":"show")+" in Nuvio — on this PC with Nuvio Desktop, or on your phone with a QR code";row.Children.Add(nuvio);
         if(!Regex.IsMatch(imdb,@"^tt\d+$")){stremio.IsEnabled=nuvio.IsEnabled=false;return host;}
         var key=TmdbKey();
         if(key.Length==0)
@@ -222,20 +222,22 @@ public partial class MainWindow
     {
         ContentPanel.Children.Add(Heading("Recommendations & where to watch","Optional: a free TMDB key gives better “More like this” lists and shows which services stream a title in "+new System.Globalization.RegionInfo(Region()).DisplayName+"."));
         var key=TmdbKey();
-        ContentPanel.Children.Add(Body(key.Length>0?"TMDB is connected. Recommendations use it, and title pages list streaming services.":"Without a key, Noir recommends highly rated titles in the genres you watch, and “Find streaming services” opens JustWatch.",13));
-        var input=new PasswordBox{Width=460,HorizontalAlignment=HorizontalAlignment.Left,Padding=new(12,9,12,9),Background=Brush("#1C1C1F"),Foreground=Brush("#F4F1EB"),BorderBrush=Brush("#343437"),Margin=new(0,6,0,10)};
-        System.Windows.Automation.AutomationProperties.SetName(input,"TMDB API key or read access token");ContentPanel.Children.Add(input);
-        var row=new WrapPanel();ContentPanel.Children.Add(row);var message=Body("",12);ContentPanel.Children.Add(message);
-        row.Children.Add(ActionButton(key.Length>0?"Replace key":"Save key",async()=>
+        const string Connected="TMDB is connected. Recommendations use it, and title pages list streaming services.";
+        var info=Body(key.Length>0?Connected:"Without a key, Noir recommends highly rated titles in the genres you watch, and “Find streaming services” opens JustWatch.",13);ContentPanel.Children.Add(info);
+        var input=new PasswordBox{Padding=new(12,9,12,9),Background=Brush("#1C1C1F"),Foreground=Brush("#F4F1EB"),BorderBrush=Brush("#343437"),Margin=new(0,6,0,10)};
+        System.Windows.Automation.AutomationProperties.SetName(input,"TMDB API key or read access token");var field=FieldRow(input);ContentPanel.Children.Add(field.Row);
+        ContentPanel.Children.Add(Body("Paste the API key (v3) or API Read Access Token from your TMDB account settings, then press Enter.",11.5));
+        var row=new WrapPanel();ContentPanel.Children.Add(row);Button? remove=null;
+        CommitOn(input,()=>input.Password.Trim(),field.Tick,async()=>
         {
-            var value=input.Password.Trim();if(value.Length<16){message.Text="Paste the API key (v3) or API Read Access Token from your TMDB account settings.";return;}
-            message.Text="Checking…";
+            var value=input.Password.Trim();if(value.Length==0)return "";if(value.Length<16)return "Paste the API key (v3) or API Read Access Token from your TMDB account settings.";
+            field.Tick.Text=T("Checking…");field.Tick.Foreground=Brush("#9F9A93");field.Tick.Visibility=Visibility.Visible;
             var checkDir=Path.Combine(Path.GetTempPath(),"noir-tmdb-check-"+Guid.NewGuid().ToString("N"));
-            try{using(var tmdb=new TmdbClient(value,checkDir))await tmdb.Find("tt0111161",true,CancellationToken.None);try{Directory.Delete(checkDir,true);}catch(IOException){}File.WriteAllBytes(TmdbKeyPath,ProtectedData.Protect(Encoding.UTF8.GetBytes(value),null,DataProtectionScope.CurrentUser));recommendationCache.Clear();providerCache.Clear();Render();Status.Text="TMDB connected.";}
-            catch(Exception e){message.Text=e is IOException?e.Message:"Couldn't reach TMDB with that key.";}
-        },true));
+            try{using(var tmdb=new TmdbClient(value,checkDir))await tmdb.Find("tt0111161",true,CancellationToken.None);try{Directory.Delete(checkDir,true);}catch(IOException){}File.WriteAllBytes(TmdbKeyPath,ProtectedData.Protect(Encoding.UTF8.GetBytes(value),null,DataProtectionScope.CurrentUser));recommendationCache.Clear();providerCache.Clear();info.Text=T(Connected);if(remove!=null)remove.Visibility=Visibility.Visible;input.Clear();Status.Text="TMDB connected.";return null;}
+            catch(Exception e){return e is IOException?e.Message:"Couldn't reach TMDB with that key.";}
+        });
         var get=ActionButton("Get a free key",()=>System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("https://www.themoviedb.org/settings/api"){UseShellExecute=true}));get.Margin=new(10,0,0,0);row.Children.Add(get);
-        if(key.Length>0){var remove=ActionButton("Remove key",()=>{try{File.Delete(TmdbKeyPath);}catch(IOException){}recommendationCache.Clear();providerCache.Clear();Render();});remove.Margin=new(10,0,0,0);row.Children.Add(remove);}
+        remove=ActionButton("Remove key",()=>{try{File.Delete(TmdbKeyPath);}catch(IOException){}recommendationCache.Clear();providerCache.Clear();Render();});remove.Margin=new(10,0,0,0);remove.Visibility=key.Length>0?Visibility.Visible:Visibility.Collapsed;row.Children.Add(remove);
         ContentPanel.Children.Add(Body("This product uses the TMDB API but is not endorsed or certified by TMDB. Streaming data is provided by JustWatch. The key is encrypted for your Windows account.",11));
     }
 }

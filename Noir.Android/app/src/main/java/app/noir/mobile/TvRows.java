@@ -33,7 +33,7 @@ final class TvRows {
     Tile poster(List<JSONObject> g){JSONObject i=g.get(0);return new Tile(i,i.optInt("year")>0?String.valueOf(i.optInt("year")):Loc.t(i.optBoolean("movie")?"Movie":"TV show"));}
     Row shelf(String id,String title,List<List<JSONObject>> list){Row row=new Row(id,title,false,false);for(List<JSONObject> g:list)row.add(poster(g));return row;}
     void build(Map<String,List<String>> credits){
-        Row continuing=new Row("continue","Continue Watching",true,true),next=new Row("up-next","Up next",true,true);
+        Row continuing=new Row("continue","Continue watching",true,true),next=new Row("up-next","Up next",true,true);
         List<NoirUi.Next> candidates=new ArrayList<>();
         for(List<JSONObject> g:groups){
             JSONObject first=g.get(0);if(first.optBoolean("listed"))listed.add(poster(g));

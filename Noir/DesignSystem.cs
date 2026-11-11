@@ -13,6 +13,15 @@ public partial class MainWindow
     Popup? hoverCard;
     FrameworkElement? hoverOwner;
     bool hoverEvents;
+    // U47: the one "pick one of a few" control: the gold pill History uses. Selected = gold fill; others quiet.
+    void StylePillOption(Button button,bool selected)
+    {
+        button.Style=(Style)FindResource("Pill");button.Background=Brush(selected?"#E4C084":"#222225");button.Foreground=Brush(selected?"#16120C":"#C7C2BC");button.Padding=new(16,8,16,8);button.FontSize=13;button.Margin=new(0,0,8,6);
+    }
+    Button PillOption(string label,Action action,bool selected)
+    {
+        var button=ActionButton(label,action);StylePillOption(button,selected);return button;
+    }
     // The hover card is already under the pointer, so start the dwell without waiting for a fresh MouseEnter.
     void HoverPreview(Border media,VideoItem item){PreviewHost.Attach(media,item,700);media.Dispatcher.BeginInvoke(()=>{if(media.IsMouseOver)media.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice,0){RoutedEvent=Mouse.MouseEnterEvent});},System.Windows.Threading.DispatcherPriority.Loaded);}
     string TileStatus(VideoItem item)=>StatusLabels.For((store.State.EpisodeSchedules.GetValueOrDefault(item.GroupKey)??[]).Select(e=>new StatusEpisode(e.Season,e.Episode,e.AirsAt)),DateTimeOffset.UtcNow,item.ImdbId.Length>0?topTen?.FindIndex(t=>t.Id==item.ImdbId)+1??0:0);
@@ -39,7 +48,7 @@ public partial class MainWindow
         var info=new StackPanel{Margin=new(14)};body.Children.Add(info);info.Children.Add(Text(item.Title,17,weight:FontWeights.SemiBold));var label=TileStatus(item);if(label.Length>0){var pill=new Border{HorizontalAlignment=HorizontalAlignment.Left,CornerRadius=new(5),Padding=new(7,3,7,3),Margin=new(0,8,0,4),Background=Brush("#33E4C084"),Child=Text(StatusText(label),11,"#E4C084")};info.Children.Add(pill);}
         var facts=new List<string>();if(next.Duration>0)facts.Add(Loc.Runtime(next.Duration));if(item.Year>0)facts.Add(item.Year.ToString());facts.AddRange(item.Genres.Split('·',StringSplitOptions.TrimEntries|StringSplitOptions.RemoveEmptyEntries).Take(3).Select(T));var meta=Text(string.Join(" · ",facts),11,"#BDB6AC");meta.Margin=new(0,6,0,10);info.Children.Add(meta);
         var actions=new WrapPanel();info.Children.Add(actions);void Add(string text,string name,Action action,bool primary=false){var b=ActionButton(text,()=>{CloseHoverCard();action();},primary);b.Padding=new(10,7,10,7);b.FontSize=12;b.Margin=new(0,0,6,6);System.Windows.Automation.AutomationProperties.SetName(b,name);actions.Children.Add(b);}
-        Add("▶ "+T(store.GetProgress(next) is {Completed:false,Position:>0}?"Resume":"Play"),T("Play")+" "+item.Title,()=>{if(CanPlay(next))_=PlayVideo(next);else OpenDetails(group);},true);var listed=store.State.Watchlist.Contains(item.GroupKey);Add((listed?"✓ ":"＋ ")+T("My List"),T("My List")+" "+item.Title,()=>ToggleWatchlist(item));var seen=store.EverWatched(next);Add(T("✓ Watched","✓ تمت المشاهدة"),T("Watched")+" "+next.Title,()=>{if(seen)SmartWatchedClick(next);else SmartCheckOff(next,next.Label+" watched");});Add("ⓘ "+T("Details"),T("Details")+" "+item.Title,()=>OpenDetails(group));
+        Add("[[play]] "+T(store.GetProgress(next) is {Completed:false,Position:>0}?"Resume":"Play"),T("Play")+" "+item.Title,()=>{if(CanPlay(next))_=PlayVideo(next);else OpenDetails(group);},true);var listed=store.State.Watchlist.Contains(item.GroupKey);Add((listed?"[[check]] ":"[[plus]] ")+T("My List"),T("My List")+" "+item.Title,()=>ToggleWatchlist(item));var seen=store.EverWatched(next);Add(T("[[check]] Watched","[[check]] تمت المشاهدة"),T("Watched")+" "+next.Title,()=>{if(seen)SmartWatchedClick(next);else SmartCheckOff(next,next.Label+" watched");});Add("[[info]] "+T("Details"),T("Details")+" "+item.Title,()=>OpenDetails(group));
         var progress=store.GetProgress(next);var total=progress?.Duration??next.Duration;var watched=group.Count(store.EverWatched);var bar=new ProgressBar{Height=4,Maximum=total>0?total:Math.Max(1,group.Count),Value=total>0?progress?.Position??0:watched,Foreground=Brush("#E4C084"),Background=Brush("#2A2A30"),BorderThickness=new(0),Margin=new(0,8,0,0)};info.Children.Add(bar);
         var border=new Border{Width=width,Background=Brush("#141416"),BorderBrush=Brush("#33FFFFFF"),BorderThickness=new(1),CornerRadius=new(14),ClipToBounds=true,Child=body,Focusable=true};System.Windows.Automation.AutomationProperties.SetName(border,T("Title preview","معاينة العنوان")+" "+item.Title);
         hoverOwner=owner;hoverCard=new Popup{Child=border,PlacementTarget=anchor,Placement=PlacementMode.Center,AllowsTransparency=true,StaysOpen=false,IsOpen=true};var active=hoverCard;border.MouseLeave+=(_,_)=>{if(!owner.IsMouseOver&&!border.IsKeyboardFocusWithin&&hoverCard==active)CloseHoverCard();};border.IsKeyboardFocusWithinChanged+=(_,_)=>{if(!border.IsKeyboardFocusWithin&&!border.IsMouseOver&&!owner.IsMouseOver&&hoverCard==active)CloseHoverCard();};active.Closed+=(_,_)=>{if(hoverCard==active){hoverCard=null;hoverOwner=null;}};Motion.FadeIn(border);Motion.Pop(border);if(owner.IsKeyboardFocusWithin&&!owner.IsMouseOver)actions.Children.OfType<Button>().FirstOrDefault()?.Focus();
@@ -52,11 +61,7 @@ public partial class MainWindow
         var heading=new StackPanel();heading.Children.Add(Text(T(title),Density.SectionTitle,weight:FontWeights.SemiBold));if(subtitle.Length>0){var s=Body(subtitle,Density.SectionSubtitle);s.Margin=new(0,3,0,0);heading.Children.Add(s);}header.Children.Add(heading);
         var row=new StackPanel{Orientation=Orientation.Horizontal};foreach(var card in cards){row.Children.Add(card);if(page=="Home"&&detailKey==null)WireHomeRailCard(card);}
         if(row.Children.Count==0) return container;
-        if(seeAll!=null)
-        {
-            var tile=ActionButton(T("See all ›","عرض الكل ›"),seeAll);tile.Tag="HomeSeeAllTile";tile.Width=Density.Pick(132,156);tile.MinHeight=76;tile.VerticalAlignment=VerticalAlignment.Stretch;tile.Margin=new(0,0,Density.CardGap,8);tile.Background=Brush("#161618");tile.Foreground=Brush("#E4C084");tile.Template=TileTemplate();System.Windows.Automation.AutomationProperties.SetName(tile,T("See all {0}","عرض كل {0}",T(title)));row.Children.Add(tile);
-            row.Loaded+=(_,_)=>{tile.Height=Math.Max(76,row.Children.OfType<FrameworkElement>().Where(c=>c!=tile).Max(c=>c.ActualHeight));};
-        }
+        // U31: "See all" is the rail header link only; no trailing tile.
         var scroll=new ScrollViewer{Content=row,HorizontalScrollBarVisibility=ScrollBarVisibility.Hidden,VerticalScrollBarVisibility=ScrollBarVisibility.Disabled,PanningMode=PanningMode.HorizontalOnly,Padding=new(0,6,0,6),Margin=new(-6,-6,-6,0)};
         row.Margin=new(6,0,6,0);
         Button Arrow(string glyph,string tip,int direction)
@@ -65,7 +70,7 @@ public partial class MainWindow
             b.ToolTip=T(tip);System.Windows.Automation.AutomationProperties.SetName(b,T(tip)+" "+T(title));b.FontSize=20;b.Width=Density.Pick(32,38);b.Height=Density.Pick(30,34);b.Padding=new(0);b.Margin=new(8,0,0,0);b.Background=Brush("#1C1C1F");return b;
         }
         if(seeAll!=null){var all=ActionButton(seeAllLabel,seeAll);System.Windows.Automation.AutomationProperties.SetName(all,T("See all {0}","عرض كل {0}",T(title)));all.Padding=new(14,7,14,7);all.Background=Brush("Transparent");all.Foreground=Brush("#E4C084");arrows.Children.Add(all);}
-        var previous=Arrow("‹","Previous",-1);var next=Arrow("›","More",1);arrows.Children.Add(previous);arrows.Children.Add(next);
+        var previous=Arrow("[[chevron-left]]","Previous",-1);var next=Arrow("[[chevron]]","More",1);arrows.Children.Add(previous);arrows.Children.Add(next);
         void Update(){previous.IsEnabled=scroll.HorizontalOffset>1;next.IsEnabled=scroll.HorizontalOffset<scroll.ScrollableWidth-1;previous.Visibility=next.Visibility=scroll.ScrollableWidth>1?Visibility.Visible:Visibility.Collapsed;}
         scroll.ScrollChanged+=(_,_)=>Update();scroll.Loaded+=(_,_)=>Update();
         scroll.PreviewMouseWheel+=(_,e)=>{if(Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)){scroll.ScrollToHorizontalOffset(scroll.HorizontalOffset-e.Delta);e.Handled=true;}};
@@ -109,8 +114,8 @@ public partial class MainWindow
         var item=group[0];var overlay=new Grid{Opacity=0,VerticalAlignment=VerticalAlignment.Bottom,Background=new LinearGradientBrush(Colors.Transparent,Color.FromArgb(235,8,8,10),90)};
         var row=new StackPanel{Orientation=Orientation.Horizontal,Margin=new(10,30,10,12)};overlay.Children.Add(row);
         var next=store.ContinueFor(group)??store.UpNextFor(group)?.Item??item;
-        if(CanPlay(next)){var play=ActionButton("▶",()=>_=PlayVideo(next),true);play.ToolTip=T("Play");System.Windows.Automation.AutomationProperties.SetName(play,T("Play")+" "+item.Title);play.Padding=new(13,7,13,7);play.Margin=new(0,0,7,0);row.Children.Add(play);}
-        var listed=store.State.Watchlist.Contains(item.GroupKey);var list=ActionButton(listed?"✓":"＋",()=>ToggleWatchlist(item));list.ToolTip=T(listed?"In My List · click to remove":"Add to My List");System.Windows.Automation.AutomationProperties.SetName(list,(string)list.ToolTip+" "+item.Title);list.Padding=new(12,7,12,7);row.Children.Add(list);return overlay;
+        if(CanPlay(next)){var play=ActionButton("[[play]]",()=>_=PlayVideo(next),true);play.ToolTip=T("Play");System.Windows.Automation.AutomationProperties.SetName(play,T("Play")+" "+item.Title);play.Padding=new(13,7,13,7);play.Margin=new(0,0,7,0);row.Children.Add(play);}
+        var listed=store.State.Watchlist.Contains(item.GroupKey);var list=ActionButton(listed?"[[check]]":"[[plus]]",()=>ToggleWatchlist(item));list.ToolTip=T(listed?"In My List · click to remove":"Add to My List");System.Windows.Automation.AutomationProperties.SetName(list,(string)list.ToolTip+" "+item.Title);list.Padding=new(12,7,12,7);row.Children.Add(list);return overlay;
     }
     FrameworkElement PosterCard(List<VideoItem> group)
     {
@@ -125,7 +130,7 @@ public partial class MainWindow
         var edge=new Border{CornerRadius=new(10),ClipToBounds=true,Child=picture,BorderThickness=new(1.5),BorderBrush=Brush("#00000000")};panel.Children.Add(edge);
         var name=Text(item.Title,Density.CardTitle,weight:FontWeights.SemiBold);name.Margin=new(0,9,0,2);name.TextTrimming=TextTrimming.CharacterEllipsis;name.TextWrapping=TextWrapping.NoWrap;panel.Children.Add(name);
         var meta=item.IsMovie?(item.Year>0?item.Year.ToString():"Movie"):(watched>0?$"{watched} / {total} watched":$"{total} episodes");
-        if(!group.Any(CanPlay))meta+=" · Not on PC";
+        if(!group.Any(CanPlay))meta+=" · Not on this PC";
         var line=Text(meta,11,"#9F9A93");line.TextTrimming=TextTrimming.CharacterEllipsis;line.TextWrapping=TextWrapping.NoWrap;panel.Children.Add(line);
         if(page=="Home"&&detailKey==null&&!homePosterTitles){name.Visibility=Visibility.Collapsed;line.Visibility=Visibility.Collapsed;}
         LazyMenu(panel,item);return FollowHomeHero(HoverCard(Lift(panel,edge),group,edge),()=>item);
@@ -178,17 +183,17 @@ public partial class MainWindow
         // The main action depends on where you are with this title.
         var actions=new WrapPanel{Margin=new(0,10,0,0)};
         Button Action(string text,Action act,bool primary=false){var b=ActionButton(text,act,primary);b.Padding=new(12,7,12,7);b.FontSize=12.5;b.Margin=new(0,0,8,6);actions.Children.Add(b);return b;}
-        if(!finished&&CanPlay(item)) Action("▶  Resume",()=>_=PlayVideo(item),true);
-        else if(!finished) Action("↓  Get it again",()=>FindDownloads(item),true);
+        if(!finished&&CanPlay(item)) Action("[[play]]  Resume",()=>_=PlayVideo(item),true);
+        else if(!finished) Action("[[download]]  Get it again",()=>FindDownloads(item),true);
         else if(!item.IsMovie&&store.UpNextFor(store.EpisodesFor(item.GroupKey)) is {} up)
         {
-            if(up.Kind is UpNextKind.Ready or UpNextKind.Resume) Action("▶  "+up.Item.EpisodeLabel.Replace(" · ",""),()=>_=PlayVideo(up.Item),true);
-            else if(up.Kind==UpNextKind.NotOnPc) Action(ActiveDownload(up.Item)!=null?"Downloading "+up.Item.EpisodeLabel.Replace(" · ",""):"↓  Get "+up.Item.EpisodeLabel.Replace(" · ",""),()=>{if(ActiveDownload(up.Item)!=null)Navigate("Downloads");else FindDownloads(up.Item);},true);
+            if(up.Kind is UpNextKind.Ready or UpNextKind.Resume) Action("[[play]]  "+up.Item.EpisodeLabel.Replace(" · ",""),()=>_=PlayVideo(up.Item),true);
+            else if(up.Kind==UpNextKind.NotOnPc) Action(ActiveDownload(up.Item)!=null?"Downloading "+up.Item.EpisodeLabel.Replace(" · ",""):"[[download]]  Get "+up.Item.EpisodeLabel.Replace(" · ",""),()=>{if(ActiveDownload(up.Item)!=null)Navigate("Downloads");else FindDownloads(up.Item);},true);
             else Action("Airs "+(up.AirsAt?.ToLocalTime().ToString("ddd d MMM")??"soon"),()=>OpenDetails(store.EpisodesFor(item.GroupKey)));
         }
-        if(finished&&CanPlay(item)) Action("↻",()=>_=PlayVideo(item,true)).ToolTip="Watch again from the start";
+        if(finished&&CanPlay(item)) Action("[[sync]]",()=>_=PlayVideo(item,true)).ToolTip="Watch again from the start";
         var rating=store.State.PersonalReviews.GetValueOrDefault(item.Id)?.Rating??0;
-        Action(rating>0?new string('★',rating):"☆ Rate",()=>OpenDiary(item)).ToolTip="Your rating and note";
+        Action(rating>0?new string('★',rating):"[[star]] Rate",()=>OpenDiary(item)).ToolTip="Your rating and note";
         Action("💬",()=>OpenReviews(item)).ToolTip="Reviews & comments";
         panel.Children.Add(actions);LazyMenu(panel,item);
         return Lift(panel,edge);

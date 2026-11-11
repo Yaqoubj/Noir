@@ -10,13 +10,17 @@ public partial class App : Application
     [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(int processId);
     protected override void OnStartup(StartupEventArgs e)
     {
-        StartupTrace.Mark("App startup");base.OnStartup(e);
+        IconSet.Register();StartupTrace.Mark("App startup");base.OnStartup(e);
         if(e.Args.Contains("--build-vlc-cache")) { Shutdown(PlayerWarmup.BuildPluginCache()?0:1);return; }
         DispatcherUnhandledException += (_, args) =>
         {
             var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Noir");
             Directory.CreateDirectory(dir);
             File.AppendAllText(Path.Combine(dir,"errors.log"), args.Exception + "\n");
+#if NOIR_VALIDATE
+            // A validation run has nobody to close a message box: fail at once instead of hanging until the timeout.
+            if(e.Args.Contains("--validate"))Environment.Exit(3);
+#endif
             MessageBox.Show("Noir encountered an error. Your saved positions are kept.\n\n" + args.Exception.Message, "Noir");
             args.Handled = true;
         };
@@ -61,6 +65,11 @@ public partial class App : Application
                 ShutdownMode=ShutdownMode.OnMainWindowClose;current=picked;
             }
             current.LastUsed=DateTimeOffset.UtcNow;profiles.Current=current.Id;try{Profiles.Save(profiles);}catch(IOException){}
+            if(profiles.ReadFailurePath is {} unreadable)
+            {
+                Loc.Use(Profiles.ReadLanguage(current.Id));
+                MessageBox.Show(string.Format(Loc.T("The profile list could not be read. It was left untouched at {0}. Profile changes will not be saved until it is fixed or removed."),unreadable),"Noir",MessageBoxButton.OK,MessageBoxImage.Warning);
+            }
             dataDirectory=Profiles.Folder(current);
             if(dataDirectory!=null)Directory.CreateDirectory(dataDirectory);
         }

@@ -31,6 +31,7 @@ public partial class MainWindow
         StillWatchingPanel.Visibility=Visibility.Collapsed;askedNext=null;askedStream=null;
         if(item.GroupKey!=speedGroup){speedGroup=item.GroupKey;sessionSpeed=Prefs.DefaultSpeed;}
         UpdateSpeedButton();UpdateBoostButton();
+        PlayerBackButton.Content=PL("[[back]]  Library","[[back]]  المكتبة");PlayerEpisodesButton.Content=PL("Episodes","الحلقات");// U81
     }
     void LoadChapters(ChapterDescription[] chapters)
     {
@@ -91,7 +92,7 @@ public partial class MainWindow
         if(noticeKind!=SegmentKind.None) return;
         SkipIntro.Content=SkipButtonText(kind);SkipIntro.Visibility=Visibility.Visible;
     }
-    static string SkipButtonText(SegmentKind kind)=>kind switch{SegmentKind.Recap=>PL("Skip recap  →","تخطَّ الملخص  ←"),SegmentKind.Credits=>PL("Skip credits  →","تخطَّ الشارة  ←"),_=>PL("Skip intro  →","تخطَّ المقدمة  ←")};
+    static string SkipButtonText(SegmentKind kind)=>kind switch{SegmentKind.Recap=>PL("Skip recap  [[forward]]","تخطَّ الملخص  [[back]]"),SegmentKind.Credits=>PL("Skip credits  [[forward]]","تخطَّ الشارة  [[back]]"),_=>PL("Skip intro  [[forward]]","تخطَّ المقدمة  [[back]]")};
     static string SkipNoticeText(SegmentKind kind)=>kind switch{SegmentKind.Recap=>PL("Skipping recap…","جارٍ تخطي الملخص…"),SegmentKind.Credits=>PL("Skipping credits…","جارٍ تخطي الشارة…"),_=>PL("Skipping intro…","جارٍ تخطي المقدمة…")};
     void NoticeElapsed(object? sender,EventArgs e)
     {
@@ -129,7 +130,8 @@ public partial class MainWindow
         NextLabel.Text=PL("UP NEXT","التالي");NextPlay.Content=PL("Play now","شغّل الآن");NextCancel.Content=PL("Cancel","إلغاء");endAction=null;
         var hide=store.State.HideSpoilers&&store.GetProgress(next) is not {Completed:true};
         NextTitle.Text=next.EpisodeLabel+(next.EpisodeTitle.Length>0&&!hide?" · "+next.EpisodeTitle:"");
-        NextCountdown.Text=message;NextRingHost.Visibility=Visibility.Visible;SetRing(0);SetNextStill(next);
+        NextCountdown.Text=message;NextRingHost.Visibility=Visibility.Collapsed;SetRing(0);// U77: Play now is the action; the thumbnail is clickable
+        SetNextStill(next);
     }
     // The still loads off the UI thread into a reserved box, so the card never changes size.
     async void SetNextStill(VideoItem item)
@@ -179,7 +181,7 @@ public partial class MainWindow
         SavePlayback();askedNext=item;askedStream=stream;streamNext=null;NextPanel.Visibility=Visibility.Collapsed;
         StillWatchingTitle.Text=PL("Still watching "+(current?.Title??"")+"?","هل ما زلت تشاهد "+(current?.Title??"")+"؟");
         StillWatchingBody.Text=PL("You've watched "+stillWatching.Count+" episodes in a row. The next one waits for you.","شاهدت "+stillWatching.Count+" حلقات متتالية. الحلقة التالية بانتظارك.");
-        StillWatchingContinue.Content=PL("Continue watching","متابعة المشاهدة");StillWatchingBack.Content=PL("Back to Noir","العودة إلى Noir");
+        StillWatchingContinue.Content=PL("Continue watching","متابعة المشاهدة");StillWatchingBack.Content=PL("Back to Library","العودة إلى المكتبة");// U82
         StillWatchingPanel.Visibility=Visibility.Visible;ShowControls();StillWatchingContinue.Focus();
     }
     void StillWatchingContinue_Click(object sender,RoutedEventArgs e)
@@ -201,7 +203,14 @@ public partial class MainWindow
         OpenTrackMenu(menu,(Button)sender);
     }
     void ApplyVolume(){if(player!=null) player.Volume=PlaybackPrefs.NativeVolume(VolumeBar.Value,Prefs.VolumeBoost);UpdateBoostButton();}
-    void UpdateBoostButton(){BoostButton.Content=Prefs.VolumeBoost?PL("Boost on","التعزيز يعمل"):PL("Boost","تعزيز");BoostButton.Foreground=Brush(Prefs.VolumeBoost?"#E4C084":"#B8B2AA");}
+    void UpdateBoostButton(){BoostButton.Content=Prefs.VolumeBoost?PL("Boost on","التعزيز يعمل"):PL("Boost","تعزيز");BoostButton.Foreground=Brush(Prefs.VolumeBoost?"#E4C084":"#B8B2AA");VolumeIcon.Stroke=Brush(Prefs.VolumeBoost?"#E4C084":"#F4F1EB");}// U79: the bar has no Boost word; a gold speaker shows boost is on
+    // U80: at narrow widths only the inline slider is dropped; the speaker mutes on click and shows the slider on hover.
+    bool narrowVolume;
+    void ApplyVolumeWidth(bool narrow){narrowVolume=narrow;VolumeBar.Visibility=narrow?Visibility.Collapsed:Visibility.Visible;}
+    void PlayerVolume_MouseEnter(object sender,System.Windows.Input.MouseEventArgs e){if(narrowVolume)VolumeBar.Visibility=Visibility.Visible;}
+    void PlayerVolume_MouseLeave(object sender,System.Windows.Input.MouseEventArgs e){if(narrowVolume)VolumeBar.Visibility=Visibility.Collapsed;}
+    void Mute_Click(object sender,RoutedEventArgs e){stillWatching.UserInput();ToggleMute();ShowControls();}
+    void ToggleMute(){muted=!muted;if(player!=null)player.Mute=muted;if(VolumeIcon.Parent is Button mute)System.Windows.Automation.AutomationProperties.SetName(mute,muted?PL("Unmute","إلغاء الكتم"):PL("Mute","كتم"));VolumeIcon.Opacity=muted?.45:1;}
     void Boost_Click(object sender,RoutedEventArgs e)
     {
         stillWatching.UserInput();Prefs.VolumeBoost=!Prefs.VolumeBoost;SavePrefs();ApplyVolume();ShowControls();

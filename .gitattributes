@@ -1,0 +1,10 @@
+# Stored line endings are LF; working copies are LF too, so git prints no per-file conversion warnings.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.mkv binary
+*.npz binary
+*.ico binary
+*.png binary
+*.jpg binary
+*.apk binary

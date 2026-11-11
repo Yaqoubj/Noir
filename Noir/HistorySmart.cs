@@ -135,7 +135,7 @@ public partial class MainWindow
         body.Children.Add(Text(item.IsMovie?item.Title:$"{item.Title} {Short(item)}",15,weight:FontWeights.SemiBold));
         body.Children.Add(Body(last==null?"Watched":"Watched "+(last.DateUnknown?"(date unknown)":last.WatchedAt.ToLocalTime().ToString("d MMM yyyy"))+(views.Count>1?$" · {views.Count} times":""),12));
         var row=new WrapPanel();body.Children.Add(row);
-        SmartButton(row,"↻  Log a rewatch",()=>{CloseSmart();var before=store.Snapshot([item]);var rewards=RewardState();store.LogRewatch(new(item,DateTimeOffset.UtcNow),"Rewatch");RenderQuiet();Undoable($"Rewatch of {Short(item)} logged",()=>{store.Restore(before);RenderQuiet();});CelebrateHistory(rewards);},true);
+        SmartButton(row,"[[sync]]  Log a rewatch",()=>{CloseSmart();var before=store.Snapshot([item]);var rewards=RewardState();store.LogRewatch(new(item,DateTimeOffset.UtcNow),"Rewatch");RenderQuiet();Undoable($"Rewatch of {Short(item)} logged",()=>{store.Restore(before);RenderQuiet();});CelebrateHistory(rewards);},true);
         SmartButton(row,"Remove from history",()=>{CloseSmart();SmartUncheck(item);});
     }
     void SmartUncheck(VideoItem item)

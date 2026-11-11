@@ -141,6 +141,8 @@ dotnet build Noir.csproj -c Release
 dotnet publish Noir.csproj -c Release -r win-x64 --self-contained true -o publish
 ```
 
+Automatic subtitle timing uses a separate tool that is not stored in git. Build it once with `build_subtitle_tools.ps1` from the repository root (needs Python 3 and `ffmpeg` on the PATH); it writes `work/subtitle-runtime`, which the Noir build copies to `Tools/subtitle-sync`. Without it the build warns (`NOIR001`) and the app works without automatic timing.
+
 Core regression tests live in the neighboring `Noir.Checks` project. They cover timestamp persistence, watched-state transitions, season ordering, extras exclusion and real native MKV playback/track selection. A desktop integration validation is compiled only with `NOIR_VALIDATE`; its isolated data folder is mandatory and it never modifies the normal library. The recorded validation output lives in `NoirValidation` in the workspace.
 
 ## Third-party components

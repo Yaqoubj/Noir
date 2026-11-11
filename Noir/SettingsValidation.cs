@@ -23,14 +23,16 @@ public partial class MainWindow
             {
                 settingsSection=section;Navigate("Settings");await Settle();
                 var buttons=Descendants(ContentPanel).OfType<Button>().ToList();
-                Check(SettingsSections.All(s=>buttons.Any(b=>Name(b)==s.Name)),$"{section}: the section list names all ten sections");
+                Check(SettingsSections.All(s=>buttons.Any(b=>Name(b)==s.Name)),$"{section}: the section list names all nine sections");
                 Check(Descendants(ContentPanel).OfType<TextBlock>().Any(t=>t.Text==section&&t.FontSize==28),$"{section}: the right pane opens with its title");
                 Check(Descendants(ContentPanel).OfType<FrameworkElement>().Count()>12,$"{section}: the section has content");
+                Check(!Descendants(ContentPanel).OfType<TextBlock>().Any(t=>t.FontSize==13&&t.Text==T(SettingsSections.First(x=>x.Name==section).Hint))&&Descendants(ContentPanel).OfType<TextBlock>().Count(t=>t.Text==T(section)&&t.FontSize==28)==1&&!Descendants(ContentPanel).OfType<StackPanel>().Any(g=>g.Parent is not DockPanel{Parent:Button}&&g.Children.Count>0&&g.Children[0] is TextBlock h&&h.Text==T(section)&&h.FontSize!=28),$"{section}: the section title appears once and its list hint is not repeated (U52)");
+                Check(!Descendants(ContentPanel).OfType<Button>().Any(b=>b.Content as string is "Your stats" or "Your diary"),$"{section}: no Your stats / Your diary card (U54)");
                 Shot(section.ToLowerInvariant().Replace(" & ","-").Replace(' ','-'));
             }
-            settingsSection="History";Navigate("Settings");await Settle();
-            var afterWatching=ContentPanel;var ask=Descendants(afterWatching).OfType<ComboBox>().Single(c=>Name(c)=="After watching, ask how it was");var savedAsk=HistoryPrefs.AfterWatching;
-            Check(ask.Items.Count==3&&Descendants(afterWatching).OfType<TextBlock>().Any(t=>t.Text=="After watching, ask how it was"),"Settings → History contains the after-watching row with all three choices");
+            settingsSection="History";Navigate("Settings");await Settle();Check(settingsSection=="Playback"&&!SettingsSections.Any(x=>x.Name=="History"),"History is not a settings section any more; an old link opens Playback (U53)");
+            var afterWatching=ContentPanel;var ask=Descendants(afterWatching).OfType<ComboBox>().Single(c=>Name(c)=="Ask me how it was");var savedAsk=HistoryPrefs.AfterWatching;
+            Check(ask.Items.Count==3&&Descendants(afterWatching).OfType<TextBlock>().Any(t=>t.Text=="Ask me how it was")&&Descendants(afterWatching).OfType<TextBlock>().Any(t=>t.Text=="After watching"),"Settings → Playback holds the After watching group with all three choices (U53)");
             foreach(var (index,value) in new[]{(2,"Never"),(1,"Finales"),(0,"Always")}){ask.SelectedIndex=index;Check(HistorySettings.Load(store.DataDirectory).AfterWatching==value,"After-watching setting saves "+value+" per profile");}SetAfterWatching(savedAsk);
             settingsSection="Downloads";Navigate("Settings");await Settle();
             Check(!Descendants(ContentPanel).OfType<Expander>().Any(e=>e.Header as string=="Add Jellyfin / Emby"),"Downloads no longer carries the media-server form");
@@ -44,7 +46,7 @@ public partial class MainWindow
             foreach(var card in new[]{"Trakt","Serializd","Nuvio","Stremio","Kodi","IMDb","Netflix","Letterboxd","TV Time","TorBox","Real-Debrid","AIOStreams"})Check(names.Contains(card),$"Connections has a {card} card");
             var queue=Descendants(ContentPanel).OfType<Expander>().FirstOrDefault(e=>e.Header is TextBlock t&&t.Text.StartsWith($"{waiting} waiting"));
             Check(queue!=null&&!queue.IsExpanded,"The Trakt queue is one folded line with its count");
-            Check(Descendants(ContentPanel).OfType<TextBlock>().Any(t=>t.Text==PendingSync().ToString()),"The Connections entry shows the waiting count");
+            Check(Descendants(ContentPanel).OfType<TextBlock>().Any(t=>t.Text.Contains($"{PendingSync()} waiting to sync"))&&!Descendants(ContentPanel).OfType<Border>().Any(b=>b.Child is TextBlock c&&c.Text==PendingSync().ToString()&&c.FontSize==11),"Connections has no count badge in the list; its page says how many are waiting (U55)");
             Shot("connections-queue-folded");
             double Top(string card){var b=Descendants(ContentPanel).OfType<Border>().First(x=>Name(x)==card);return b.TransformToAncestor(ContentPanel).Transform(new Point()).Y;}
             Check(Math.Abs(Top("Trakt")-Top("Serializd"))<1,"Cards sit two to a row at 1320 px");
@@ -55,7 +57,7 @@ public partial class MainWindow
             var listed=Descendants((DependencyObject)queue.Content).OfType<TextBlock>().Select(t=>t.Text).ToList();
             Check(listed.Any(t=>t.StartsWith(episodes[0].Label)),"Opening the queue lists each waiting episode · looked for "+episodes[0].Label+" in: "+string.Join(" | ",listed.Take(12)));
             ContentScroll.ScrollToVerticalOffset(0);await Settle();Shot("connections-queue-open");
-            var skip=Descendants(ContentPanel).OfType<Button>().First(b=>b.Content as string=="✕");skip.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));await Settle();
+            var skip=Descendants(ContentPanel).OfType<Button>().First(b=>IconSet.Src(b.Content)=="[[close]]");skip.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));await Settle();
             Check(store.State.WatchSync.Values.Count(j=>j.Provider=="Trakt"&&j.SyncedAt==null)==waiting-1,"✕ drops one waiting watch");
             Check(Descendants(ContentPanel).OfType<Expander>().Any(e=>e.IsExpanded&&e.Header is TextBlock t&&t.Text.StartsWith($"{waiting-1} waiting")),"The queue stays open after a change");
             ContentScroll.ScrollToVerticalOffset(900);await Settle();Shot("connections-servers");
@@ -75,7 +77,7 @@ public partial class MainWindow
             store.State.RailMode="Icons";ApplyRailWidth();Check(railCompact,"Icons only folds the rail");store.State.RailMode="Auto";ApplyRailWidth();
             // Nuvio watch option beside Stremio.
             var watch=WatchOptions("tt0944947",false,"Game of Thrones");
-            Check(Descendants(watch).OfType<Button>().Any(b=>b.Content as string=="▶  Stream in Nuvio"),"Where to watch offers Stream in Nuvio");
+            Check(Descendants(watch).OfType<Button>().Any(b=>IconSet.Src(b.Content)=="[[play]]  Stream in Nuvio"),"Where to watch offers Stream in Nuvio");
             using(var handler=Microsoft.Win32.Registry.ClassesRoot.OpenSubKey("nuvio"))
                 if(handler==null){OpenInNuvio("tt0944947",false,"Game of Thrones");await Settle();Check(smartPopup?.IsOpen==true,"Without Nuvio Desktop, Stream in Nuvio shows a QR code for the phone");CloseSmart();}
                 else results.Add("SKIP: Nuvio Desktop is installed; not opening it during validation");
@@ -93,7 +95,7 @@ public partial class MainWindow
             Check(Profiles.CheckPin(guest,"1234")&&!Profiles.CheckPin(guest,"9999"),"PINs are checked");
             DoSwitch(guest);Check(Profiles.Load().Current==guest.Id,"Switching records the profile to open next");
             var reset=Profiles.Load();reset.Current="default";Profiles.Save(reset);
-            ShowProfileSwitcher();await Settle();Check(smartPopup?.IsOpen==true&&Descendants(((Border)smartPopup.Child).Child).OfType<Button>().Any(b=>Name(b)=="Switch to Guest"),"The rail's profile card opens the switcher");
+            ShowProfileSwitcher();await Settle();Check(smartPopup?.IsOpen==true&&Descendants(((Border)smartPopup.Child).Child).OfType<Button>().Any(b=>Name(b)=="Switch to Guest"),"The rail's profile card opens the switcher");Check(!Descendants(((Border)smartPopup!.Child).Child).OfType<Button>().Any(b=>b.Content as string=="Your stats"),"The profile menu no longer has Your stats (U54)");
             Shot("profile-switcher");CloseSmart();
         }
         catch(Exception error){results.Add("FAIL: "+error);}

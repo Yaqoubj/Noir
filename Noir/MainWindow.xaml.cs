@@ -80,7 +80,7 @@ public partial class MainWindow : Window
         var pad=Density.PageSide(ActualWidth);sidePad=pad;
         ApplyRailWidth();ApplyPageLayout();
         var content=ActualWidth-RailColumn.Width.Value;SearchHost.Width=Math.Clamp(content-260,200,440);TopBarContent.Margin=new Thickness(Math.Max(16,pad-16),0,Math.Max(16,pad-20),0);
-        if(PlayerSurfaceBuilt)PlayerVolume.Visibility=ActualWidth<1000?Visibility.Collapsed:Visibility.Visible;
+        if(PlayerSurfaceBuilt)ApplyVolumeWidth(ActualWidth<1000);// U80
     }
     VideoItem? ResolveStartupPath(string path)
     {
@@ -104,8 +104,8 @@ public partial class MainWindow : Window
             if (closing) return;
             items = result.found;
             UpdateLibraryCount();
-            Status.Text = result.warnings.Count > 0 ? string.Join("  ·  ",result.warnings) : $"{items.Count} videos ready";
-            if (!string.IsNullOrEmpty(store.LoadWarning)) Status.Text = store.LoadWarning;
+            warningToast=result.warnings.Count>0;Status.Text = result.warnings.Count > 0 ? string.Join("  ·  ",result.warnings) : $"{items.Count} videos ready";warningToast=false;
+            if (!string.IsNullOrEmpty(store.LoadWarning)) {warningToast=true;Status.Text = store.LoadWarning;warningToast=false;}
             if(!before.SequenceEqual(CatalogStamp())&&current==null&&!pageEditInProgress&&page is not ("Settings" or "Downloads")&&!logging) {RenderQuiet();StartupTrace.Mark("Changed scan rendered");}
             if(!validationMode) WatchLibraryFolders();
             if(!validationMode&&refreshMetadata) _=RefreshMetadata();StartupTrace.Mark("Scan applied");
@@ -129,7 +129,7 @@ public partial class MainWindow : Window
         searchDebounce??=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(220)};
         searchDebounce.Stop();searchDebounce.Tick-=CommitSearch;searchDebounce.Tick+=CommitSearch;searchDebounce.Start();
     }
-    void CommitSearch(object? sender,EventArgs e){searchDebounce?.Stop();if(page=="Discover"){discoverTitle=null;_=SearchDiscover();return;}detailKey=null;detailOrigin=null;if(page=="Settings")page="Home";Render();ContentScroll.ScrollToTop();}
+    void CommitSearch(object? sender,EventArgs e){searchDebounce?.Stop();if(page=="Discover"){discoverTitle=null;_=SearchDiscover();return;}detailKey=null;detailOrigin=null;if(page=="Settings"||page=="Downloads"&&SearchBox.Text.Trim().Length>0)page="Home";Render();ContentScroll.ScrollToTop();}
     void Navigate(string target)
     {
         if(TrackerOnly&&target is "Home" or "Shows" or "Movies"){if(target!="Home")trackerTab=target;target="History";}
@@ -150,10 +150,10 @@ public partial class MainWindow : Window
         var focused=Keyboard.FocusedElement as FrameworkElement;var focusName=focused!=null?System.Windows.Automation.AutomationProperties.GetName(focused):"";
         try{
         CloseHoverCard();downloadPageUpdate=null;SmoothScrolling.Stop(ContentScroll);ContentPanel.Children.Clear();
-        SearchHost.Visibility=page=="Downloads"?Visibility.Collapsed:Visibility.Visible;
+        SearchHost.Visibility=Visibility.Visible;
         SearchPlaceholder.Text=T(page=="Discover"?"Search new movies & shows":"Search your library");
         SearchBox.ToolTip=T(page=="Discover"?"Find new movies and shows online":"Search your library");
-        PageEyebrow.Text=T(page switch{"Discover"=>"FIND YOUR NEXT WATCH","Downloads"=>"SAVED TO YOUR PC","Settings"=>"PREFERENCES","History"=>"YOUR VIEWING LIFE","My List"=>"SAVED FOR LATER",_=>SearchBox.Text.Length>0?"SEARCH":"YOUR LIBRARY"});
+        PageEyebrow.Text=T(page switch{"Discover"=>"FIND YOUR NEXT WATCH","Downloads"=>"SAVED TO YOUR PC","Settings"=>"PREFERENCES","History"=>"","My List"=>"SAVED FOR LATER",_=>SearchBox.Text.Length>0?"SEARCH":"YOUR LIBRARY"});
         // Home and title pages open on a full-bleed hero beneath the floating top bar.
         var welcome=page=="Home"&&detailKey==null&&SearchBox.Text.Length==0&&NeedsWelcome;
         cinematic=(page=="Home"&&SearchBox.Text.Length==0||detailKey!=null)&&page is not ("Settings" or "Discover" or "Downloads")&&!welcome;ApplyPageLayout();
@@ -205,12 +205,12 @@ public partial class MainWindow : Window
                 // One shelf, most recent first: resumes, next episodes and downloads sit together;
                 // shows waiting for their next air date follow at the end.
                 var shelf=continuations.Where(x=>x.Kind!=UpNextKind.Upcoming).Concat(continuations.Where(x=>x.Kind==UpNextKind.Upcoming)).ToList();
-                ContentPanel.Children.Add(ContinueShelf(shelf,"Continue Watching",shelf.Any(x=>x.Kind==UpNextKind.NotOnPc)?"Resume, play the next episode, or get it on this PC in one click.":"Resume where you stopped or play the next episode."));
+                ContentPanel.Children.Add(ContinueShelf(shelf,"Continue watching",shelf.Any(x=>x.Kind==UpNextKind.NotOnPc)?"Resume, play the next episode, or get it on this PC in one click.":"Resume where you stopped or play the next episode."));
             }
-            else ContentPanel.Children.Add(Heading("Continue Watching","Start a movie or episode. It will appear here when you return."));
+            else ContentPanel.Children.Add(Heading("Continue watching","Start a movie or episode. It will appear here when you return."));
         }
         StartupTrace.Mark("Home continue section ended");
-        if(page=="Home"&&query.Length==0){StartupTrace.Mark("Home rows started");if(groups.Count==0)ContentPanel.Children.Add(Heading("Continue Watching","Start a movie or episode. It will appear here when you return."));RenderHomeRows(groups);StartupTrace.Mark("Home rows ended");return;}
+        if(page=="Home"&&query.Length==0){StartupTrace.Mark("Home rows started");if(groups.Count==0)ContentPanel.Children.Add(Heading("Continue watching","Start a movie or episode. It will appear here when you return."));RenderHomeRows(groups);StartupTrace.Mark("Home rows ended");return;}
         if (groups.Count == 0)
         {
             if(page=="My List") {ContentPanel.Children.Add(Heading("Your next watch","Use + My List on any title to keep it here."));return;}
@@ -279,7 +279,7 @@ public partial class MainWindow : Window
         if(!metadataRender.IsEnabled)metadataRender.Start();
     }
     bool MetadataFocusSafe=>Keyboard.FocusedElement is not DependencyObject focus||focus is not System.Windows.Controls.Primitives.TextBoxBase&&PresentationSource.FromDependencyObject(focus)==PresentationSource.FromVisual(this);
-    bool CanRenderMetadata=>!closing&&current==null&&!hiddenInTray&&IsActive&&MetadataFocusSafe&&!pageEditInProgress&&!SearchBox.IsKeyboardFocusWithin&&discoverPanel==null&&smartPopup==null&&hoverCard==null&&!logging&&(page is "Home" or "Movies" or "Shows" or "My List" or "Discover" or "History")&&!(page=="History"&&trackerTab=="Add history");
+    bool CanRenderMetadata=>!closing&&current==null&&!hiddenInTray&&IsActive&&MetadataFocusSafe&&!pageEditInProgress&&!SearchBox.IsKeyboardFocusWithin&&discoverPanel==null&&smartPopup==null&&hoverCard==null&&!logging&&(page is "Home" or "Movies" or "Shows" or "My List" or "Discover" or "History")&&!(page=="History"&&trackerTab=="Import");
     internal static SolidColorBrush Brush(string value) => (SolidColorBrush)new BrushConverter().ConvertFromString(value)!;
     internal static TextBlock Text(string value,double size=double.NaN,string color="#F4F1EB",FontWeight? weight=null) => new() { Text=value,FontSize=double.IsNaN(size)?Density.Text:size,Foreground=Brush(color),FontWeight=weight??FontWeights.Normal,TextWrapping=TextWrapping.Wrap };
     internal static TextBlock Body(string value,double size=double.NaN) { var t=Text(T(value),double.IsNaN(size)?Density.Body:size,"#AAA6A0"); t.Margin=Density.BodyMargin; return Bidi(t); }

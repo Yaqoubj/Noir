@@ -151,12 +151,17 @@ public sealed class PlaybackPreference
     public string AudioTrack { get; set; } = "";
     public double SubtitleDelay { get; set; }
 }
+// Some providers title-case every word, apostrophes included ("Let'S", "Don'T"); lower-case the letters of a contraction.
+public static class EpisodeText
+{
+    public static string Tidy(string? value)=>string.IsNullOrEmpty(value)?"":Regex.Replace(value,@"(?<=\p{L})(['’])(S|T|M|D|Ll|Re|Ve)(?![\p{L}\p{N}])",m=>m.Groups[1].Value+m.Groups[2].Value.ToLowerInvariant());
+}
 public sealed class KnownEpisode
 {
     public string Image {get;set;}="";
     public int Season { get; set; }
     public int Episode { get; set; }
-    public string Title { get; set; } = "";
+    public string Title { get => title; set => title=EpisodeText.Tidy(value); } string title="";
     public DateTimeOffset? AirsAt { get; set; }
     public int Runtime { get; set; }
 }
@@ -172,7 +177,7 @@ public sealed class MediaSeed
     public string ImdbId { get; set; } = "";
     public string EpisodeImdbId { get; set; } = "";
     public string Title { get; set; } = "";
-    public string EpisodeTitle { get; set; } = "";
+    public string EpisodeTitle { get => episodeTitle; set => episodeTitle=EpisodeText.Tidy(value); } string episodeTitle="";
     public string Summary { get; set; } = "";
     public string Poster { get; set; } = "";
     public string Backdrop { get; set; } = "";
@@ -202,7 +207,7 @@ public sealed class VideoItem
     public string ReviewTitle { get; set; } = "";
     public string Path { get; set; } = "";
     public string Title { get; set; } = "";
-    public string EpisodeTitle { get; set; } = "";
+    public string EpisodeTitle { get => episodeTitle; set => episodeTitle=EpisodeText.Tidy(value); } string episodeTitle="";
     public string Summary { get; set; } = "";
     public string Poster { get; set; } = "";
     public string Backdrop { get; set; } = "";

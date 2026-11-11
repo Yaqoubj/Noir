@@ -20,42 +20,52 @@ public partial class MainWindow
         return bar;
     }
     // Labelled icon buttons under the hero; the rarely used items stay in the final menu.
-    FrameworkElement DetailActions(VideoItem item,List<VideoItem> group,Button back)
+    // U27: this is the title page's one action row. RenderDetail puts it inside the hero (back is then null and placed by the hero); items that do not fit fold into More.
+    FrameworkElement DetailActions(VideoItem item,List<VideoItem> group,Button? back)
     {
-        var row=new WrapPanel{Margin=new(0,0,0,4)};
-        Button Tile(string glyph,string label,Action action,string? tip=null)
-        {
-            var stack=new StackPanel{Orientation=Orientation.Horizontal};stack.Children.Add(new TextBlock{Text=glyph,FontSize=16,Margin=new(0,0,9,0),VerticalAlignment=VerticalAlignment.Center,Foreground=Brush("#E4C084")});stack.Children.Add(Text(label.StartsWith(glyph)?label[glyph.Length..].TrimStart():label,13.5,"#E9E4DC"));
-            var b=new Button{Content=stack,Background=Brush("#1A1A1D"),Padding=new(16,10,18,10),Margin=new(0,0,10,10),ToolTip=tip??label};b.Click+=(_,_)=>action();
-            System.Windows.Automation.AutomationProperties.SetName(b,label);row.Children.Add(b);return b;
-        }
+        var row=new FoldRow{Margin=new(0,0,0,4)};
+        Button Tile(string glyph,string label,Action action,string? tip=null,bool primary=false){var b=DetailTile(glyph,label,action,tip,primary);row.Children.Add(b);return b;}
         var season=group.Where(i=>i.Season==(detailSeason??item.Season)).ToList();
+        var extras=new List<(string Header,Action Run)>();
         if(item.IsMovie)
         {
-            if(!CanPlay(item)){if(StreamOffered)Tile("▶","Stream",()=>StreamItem(item),"Stream it now through AIOStreams");Tile("↓","Download",()=>FindDownloads(item));}
-            Tile(store.EverWatched(item)?"✓":"○",store.EverWatched(item)?"Watched":"Mark watched",()=>{if(store.EverWatched(item))SmartWatchedClick(item);else SmartCheckOff(item,item.Title+" watched");});
+            if(CanPlay(item)){var resume=store.GetProgress(item) is {Completed:false,Position:>0};Tile("[[play]]",resume?"Resume":"Play",()=>{_=PlayVideo(item);},null,true);}
+            else{if(StreamOffered)Tile("[[play]]","Stream",()=>StreamItem(item),T("Stream it now through AIOStreams","بث الآن عبر AIOStreams"),true);Tile("[[download]]","Download",()=>FindDownloads(item),null,!StreamOffered);}
+            extras.Add((store.EverWatched(item)?"Watched":"Mark watched",()=>{if(store.EverWatched(item))SmartWatchedClick(item);else SmartCheckOff(item,item.Title+" watched");}));
         }
         else
         {
             // Streams the season's next aired episode that isn't on this PC, the first unwatched one if possible.
             var toStream=season.Where(e=>e.Season>0&&!CanPlay(e)&&store.Aired(e,DateTimeOffset.UtcNow)).OrderBy(e=>store.EverWatched(e)).ThenBy(e=>e.Episode).FirstOrDefault();
-            if(StreamOffered&&toStream!=null)Tile("▶","Stream "+toStream.EpisodeLabel.Replace(" · "," "),()=>StreamItem(toStream),"Stream it now through AIOStreams");
-            Tile("↓",T("Download…","تنزيل…"),()=>FindDownloads(season.FirstOrDefault()??item,true),T("Choose episodes to download on this PC","اختر الحلقات لتنزيلها على هذا الكمبيوتر"));
-            var keeping=downloads!=null&&NoirReadyPolicy.Enabled(downloads.SeasonPreferences(item.Id));Tile("⟳",keeping?T("Keeping ready · change","جاهزة · تغيير"):T("Keep ready","إبقاء الحلقات جاهزة"),()=>{if(downloads==null)Status.Text="Downloads are starting. Try again shortly.";else ShowKeepReady(season.FirstOrDefault()??item);},T("Keep the next episodes downloaded on this PC","إبقاء الحلقات التالية منزّلة على هذا الكمبيوتر"));
+            var playable=(store.ContinueFor(group) is {} cont&&CanPlay(cont)?cont:null)??(store.UpNextFor(group)?.Item is {} up&&CanPlay(up)?up:null)??season.Where(CanPlay).OrderBy(e=>e.Episode).FirstOrDefault();
+            if(playable!=null){var resume=store.GetProgress(playable) is {Completed:false,Position:>0};Tile("[[play]]",T(resume?"Resume":"Play")+" "+EpisodeTag(playable),()=>{_=PlayVideo(playable);},null,true);}
+            else if(StreamOffered&&toStream!=null)Tile("[[play]]",T("Stream")+" "+EpisodeTag(toStream),()=>StreamItem(toStream),T("Stream it now through AIOStreams","بث الآن عبر AIOStreams"),true);
+            // U26 (P4): nothing to play or stream here: the hero already offers "Get it on this PC" and the next button is "Download season", so no third download button.
+            var keeping=downloads!=null&&NoirReadyPolicy.Enabled(downloads.SeasonPreferences(item.Id));
+            var downloadTile=Tile("[[download]]",T("Download season","تنزيل الموسم"),()=>{},T("Choose episodes to download on this PC","اختر الحلقات لتنزيلها على هذا الكمبيوتر"),playable==null&&!(StreamOffered&&toStream!=null));
+            downloadTile.Click+=(_,_)=>{var menu=new ContextMenu{FlowDirection=LibraryRoot.FlowDirection};var choose=new MenuItem{Header=T("Download…","تنزيل…")};choose.Click+=(_,_)=>FindDownloads(season.FirstOrDefault()??item,true);menu.Items.Add(choose);var keep=new MenuItem{Header=keeping?T("Keeping ready · change","جاهزة · تغيير"):T("Keep ready","إبقاء الحلقات جاهزة"),ToolTip=T("Keep the next episodes downloaded on this PC","إبقاء الحلقات التالية منزّلة على هذا الكمبيوتر")};keep.Click+=(_,_)=>{if(downloads==null)Status.Text="Downloads are starting. Try again shortly.";else ShowKeepReady(season.FirstOrDefault()??item);};menu.Items.Add(keep);menu.PlacementTarget=downloadTile;menu.Placement=PlacementMode.Bottom;menu.IsOpen=true;};
             var released=season.Where(e=>e.Season>0&&store.Aired(e,DateTimeOffset.UtcNow)).ToList();var allSeen=released.Count>0&&released.All(store.EverWatched);
-            if(released.Count>0)Tile(allSeen?"✓":"○",allSeen?"Season watched":"Mark season watched",()=>{if(allSeen)UncheckAll(released,$"Season {released[0].Season} unmarked");else BulkCheckOff(released,$"{item.Title} season {released[0].Season} marked watched");},"Every released episode in this season");
+            if(released.Count>0)extras.Add((allSeen?"Season watched":"Mark season watched",()=>{if(allSeen)UncheckAll(released,$"Season {released[0].Season} unmarked");else BulkCheckOff(released,$"{item.Title} season {released[0].Season} marked watched");}));
             var whole=ShowEpisodes(item);var wholeSeen=whole.Count>0&&whole.All(store.EverWatched);
-            if(whole.Count>0&&!wholeSeen)Tile("✓","Mark show watched",()=>MarkWholeShow(item),"Every released episode of every season");
-            if(whole.Count>1)Tile("⇥","Watched up to…",()=>UpToPicker(item.Title,whole.Where(i=>i.Season>0).Select(i=>(i.Season,i.Episode)).Distinct().ToList(),(s,e)=>BulkCheckOff(whole.Where(i=>i.Season>0&&(i.Season<s||i.Season==s&&i.Episode<=e)).ToList(),$"{item.Title}: watched up to S{s:00}E{e:00}")),"Pick the last episode you reached");
-            var stars=ShowStars(item.GroupKey);
-            var rate=Tile("★",stars.Length>0?stars:"Rate show",()=>{},"Your rating for the whole show");rate.Click+=(_,_)=>{var body=SmartPopup(()=>{});body.Children.Add(Text("Rate "+item.Title,15,weight:FontWeights.SemiBold));body.Children.Add(RatingStrip("",item.GroupKey));};
+            if(whole.Count>0&&!wholeSeen)extras.Add(("Mark show watched",()=>MarkWholeShow(item)));
+            if(whole.Count>1)extras.Add(("Watched up to…",()=>UpToPicker(item.Title,whole.Where(i=>i.Season>0).Select(i=>(i.Season,i.Episode)).Distinct().ToList(),(s,e)=>BulkCheckOff(whole.Where(i=>i.Season>0&&(i.Season<s||i.Season==s&&i.Episode<=e)).ToList(),$"{item.Title}: watched up to S{s:00}E{e:00}"))));
         }
-        var status=store.TitleStatus(group);
-        var statusButton=Tile("◐",status,()=>{},"Viewing status");statusButton.Click+=(_,_)=>{var menu=new ContextMenu();foreach(var s in LibraryStore.Statuses){var v=s;var m=new MenuItem{Header=s,IsCheckable=true,IsChecked=store.State.TitleStatuses.GetValueOrDefault(item.GroupKey,"Automatic")==s};m.Click+=(_,_)=>{store.SetStatus(item,v);Render();};menu.Items.Add(m);}menu.PlacementTarget=statusButton;menu.Placement=PlacementMode.Bottom;menu.IsOpen=true;};
-        Tile(HistoryLiked(item)?"♥":"♡",HistoryFavouriteLabel(item),()=>ToggleHistoryFavourite(item));
-        Tile("▤","Collections",()=>CollectionDialog(item));
-        Tile("✎","Diary",()=>OpenDiary(item),"Viewing dates, rating and private note");
-        var more=Tile("⋯","More",()=>{});more.Click+=(_,_)=>{var menu=ItemMenu(item);menu.PlacementTarget=more;menu.Placement=PlacementMode.Bottom;menu.IsOpen=true;};
+        var listed=store.State.Watchlist.Contains(item.GroupKey);
+        Tile(listed?"[[check]]":"[[plus]]",listed?T("In My List","في قائمتي"):T("Add to My List","أضف إلى قائمتي"),()=>ToggleWatchlist(item),T(listed?"In My List · click to remove":"Add to My List",listed?"في قائمتي · انقر للإزالة":"أضف إلى قائمتي"));
+        Tile(HistoryLiked(item)?"[[heart-filled]]":"[[heart]]",HistoryFavouriteLabel(item),()=>ToggleHistoryFavourite(item));
+        if(!item.IsMovie)
+        {
+            var stars=ShowStars(item.GroupKey);
+            var rate=Tile("[[star-filled]]",stars.Length>0?stars:"Rate show",()=>{},T("Your rating for the whole show","تقييمك للمسلسل كله"));rate.Click+=(_,_)=>{var body=SmartPopup(()=>{});body.Children.Add(Text(T("Rate {0}","قيّم {0}",item.Title),15,weight:FontWeights.SemiBold));body.Children.Add(RatingStrip("",item.GroupKey));};
+        }
+        else{var mine=store.State.PersonalReviews.GetValueOrDefault(item.Id)?.Rating??0;Tile("[[star-filled]]",mine>0?new string('★',mine):"Rate",()=>OpenDiary(item),T("Your rating and note","تقييمك وملاحظتك"));}
+        row.Children.Add(TrailerTile(item));
+        if(CanPlay(item)&&store.GetProgress(item) is {Completed:false,Position:>=1})extras.Add(("Start over",()=>_=PlayVideo(item,true)));
+        // Viewing status, collections and diary are already in ItemMenu, so More shows them once, with the status check marks the old tile had.
+        var more=Tile("[[more]]","More",()=>{});row.More=more;more.Click+=(_,_)=>{var menu=ItemMenu(item);var at=0;foreach(var hidden in row.Folded()){var tile=hidden;var h=new MenuItem{Header=tile.Tag as string??""};h.Click+=(_,_)=>tile.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));menu.Items.Insert(at++,h);}foreach(var extra in extras){var run=extra.Run;var m=new MenuItem{Header=T(extra.Header)};m.Click+=(_,_)=>run();menu.Items.Insert(at++,m);}if(at>0)menu.Items.Insert(at,new Separator());
+            var current=store.State.TitleStatuses.GetValueOrDefault(item.GroupKey,"Automatic");foreach(var entry in menu.Items.OfType<MenuItem>().Where(m=>m.Header as string=="Viewing status"))foreach(var option in entry.Items.OfType<MenuItem>()){option.IsCheckable=true;option.IsChecked=option.Header as string==current;}
+            menu.PlacementTarget=more;menu.Placement=PlacementMode.Bottom;menu.IsOpen=true;};
+        if(back==null)return row;
         var wrap=new DockPanel();DockPanel.SetDock(back,Dock.Top);wrap.Children.Add(back);wrap.Children.Add(row);return wrap;
     }
     static string When(DateTimeOffset at)
@@ -106,12 +116,12 @@ public partial class MainWindow
             picture.Children.Add(new Border{Background=Brush("#99000000")});
             var watched=store.EverWatched(item);
             picture.Children.Add(new Border{Background=Brush("#E6101012"),CornerRadius=new(6),Padding=new(8,3,8,3),Margin=new(10),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Top,Child=Text(watched?"✓ Watched · file gone":"Not on this PC",10,"#E4C084",FontWeights.SemiBold)});
-            var get=ActionButton(ActiveDownload(item)!=null?"Downloading…":"↓  Get",()=>{if(ActiveDownload(item)!=null)Navigate("Downloads");else FindDownloads(item);},true);get.HorizontalAlignment=HorizontalAlignment.Center;get.VerticalAlignment=VerticalAlignment.Center;var getRow=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};if(StreamOffered&&ActiveDownload(item)==null){var stream=ActionButton("▶  Stream",()=>StreamItem(item),true);stream.Margin=new(0,0,8,0);getRow.Children.Add(stream);}get.HorizontalAlignment=HorizontalAlignment.Left;getRow.Children.Add(get);picture.Children.Add(getRow);
+            var get=ActionButton(ActiveDownload(item)!=null?"Downloading…":"[[download]]  Get",()=>{if(ActiveDownload(item)!=null)Navigate("Downloads");else FindDownloads(item);},true);get.HorizontalAlignment=HorizontalAlignment.Center;get.VerticalAlignment=VerticalAlignment.Center;var getRow=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};if(StreamOffered&&ActiveDownload(item)==null){var stream=ActionButton("[[play]]  Stream",()=>StreamItem(item),true);stream.Margin=new(0,0,8,0);getRow.Children.Add(stream);}get.HorizontalAlignment=HorizontalAlignment.Left;getRow.Children.Add(get);picture.Children.Add(getRow);
             panel.Children.Add(new Border{CornerRadius=new(10),ClipToBounds=true,Child=picture});
             var label=Text($"S{ep.Season:00} · E{ep.Episode:00}"+(!store.State.HideSpoilers&&ep.Title.Length>0?" · "+ep.Title:""),12.5,"#E9E4DC",FontWeights.SemiBold);label.Margin=new(0,8,0,0);label.TextTrimming=TextTrimming.CharacterEllipsis;label.TextWrapping=TextWrapping.NoWrap;panel.Children.Add(label);
             if(ep.AirsAt is {} aired)panel.Children.Add(Text("Aired "+aired.ToLocalTime().ToString("d MMM yyyy"),11,"#9F9A93"));
             cards.Add(panel);
         }
-        ContentPanel.Children.Add(Rail($"{missing.Count} released episode{(missing.Count==1?"":"s")} not on this PC","Dates and numbering from TVmaze. Specials are excluded.",cards,missing.Count>1?()=>FindDownloads(all.First(i=>i.Season==missing[0].Season),true):null,T("↓  Download…","↓  تنزيل…")));
+        ContentPanel.Children.Add(Rail($"{missing.Count} released episode{(missing.Count==1?"":"s")} not on this PC","Dates and numbering from TVmaze. Specials are excluded.",cards,missing.Count>1?()=>FindDownloads(all.First(i=>i.Season==missing[0].Season),true):null,T("[[download]]  Download…","[[download]]  تنزيل…")));
     }
 }

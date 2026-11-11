@@ -11,7 +11,7 @@ public partial class MainWindow
     string settingsSection="Profile";
     static readonly (string Name,string Hint)[] SettingsSections=
     [
-        ("Profile","You and how you use Noir"),("Playback","Auto-next, intros, subtitles"),("History","Rate, react and keep notes"),("Library & folders","Folders, artwork, organizing"),
+        ("Profile","You and how you use Noir"),("Playback","Auto-next, subtitles, after watching"),("Library & folders","Folders, artwork, organizing"),
         ("Connections","Trakt, Nuvio, Stremio, servers"),("Downloads","Sources, quality, folders"),("Phone","Pair and sync Android"),
         ("Appearance & language","Language, side rail, spoilers"),("Backup","Back up, restore, export"),("Advanced","Background, shortcuts, about"),
     ];
@@ -20,7 +20,7 @@ public partial class MainWindow
     void RenderSettings()
     {
         PageTitle.Text=T("Settings");
-        settingsSection=settingsSection switch{"Library"=>"Library & folders","Community" or "Discover"=>"Connections","Phone Sync"=>"Phone",_=>settingsSection};
+        settingsSection=settingsSection switch{"Library"=>"Library & folders","Community" or "Discover"=>"Connections","Phone Sync"=>"Phone","History"=>"Playback",_=>settingsSection};
         if(!SettingsSections.Any(s=>s.Name==settingsSection))settingsSection="Profile";
         var content=new StackPanel{MaxWidth=1240,HorizontalAlignment=HorizontalAlignment.Stretch};
         // Narrow windows keep the sections as a chip row above the content.
@@ -30,17 +30,15 @@ public partial class MainWindow
             var grid=new Grid{Margin=new(0,10,0,0)};grid.ColumnDefinitions.Add(new(){Width=new(224)});grid.ColumnDefinitions.Add(new(){Width=new(1,GridUnitType.Star)});
             grid.Children.Add(SettingsSectionList());content.Margin=new(32,0,0,0);Grid.SetColumn(content,1);grid.Children.Add(content);ContentPanel.Children.Add(grid);
         }
-        var hint=SettingsSections.First(s=>s.Name==settingsSection).Hint;
+        // U52: the section title appears once; its list hint is not repeated under it.
         content.Children.Add(Text(T(settingsSection),28,weight:FontWeights.Bold));
-        var sub=Body(hint,13);sub.Margin=new(0,4,0,0);content.Children.Add(sub);
         // The section renderers add to ContentPanel; point it at the right-hand column while they run.
         var outer=ContentPanel;ContentPanel=content;
         try
         {
             switch(settingsSection)
             {
-                case "Playback":RenderPlaybackSettings();break;
-                case "History":RenderHistorySettings();break;
+                case "Playback":RenderPlaybackSettings();RenderHistorySettings();break;
                 case "Library & folders":RenderLibrarySettings();break;
                 case "Connections":RenderConnections();break;
                 case "Downloads":RenderDownloadSettings();break;
@@ -52,18 +50,35 @@ public partial class MainWindow
             }
         }
         finally{ContentPanel=outer;}
+        TidySettingsSection(content);
+    }
+    // The section renderers live in other files; this applies the cross-section rules to what they drew.
+    void TidySettingsSection(StackPanel content)
+    {
+        var kids=content.Children;
+        // U52: a first group heading that repeats the section title is dropped (Playback / Playback).
+        if(kids.Count>1&&kids[1] is StackPanel first&&first.Children.Count>0&&first.Children[0] is TextBlock head&&head.Text==T(settingsSection))kids.RemoveAt(1);
+        // U56: "Organize filenames & folders" sits after the folder list, not above its first row.
+        if(settingsSection=="Library & folders"&&kids.OfType<Button>().FirstOrDefault(b=>b.Content as string==T("Organize filenames & folders")) is {} organize){kids.Remove(organize);organize.Margin=new(0,16,0,0);kids.Add(organize);}
+        // U57: the shortcut table is one line and a button that opens the same sheet "?" opens.
+        if(settingsSection=="Advanced")
+        {
+            var at=-1;for(var i=0;i<kids.Count;i++)if(kids[i] is StackPanel group&&group.Children.Count>0&&group.Children[0] is TextBlock h&&h.Text==T("Keyboard shortcuts")){at=i;break;}
+            var open=kids.OfType<Button>().FirstOrDefault(b=>b.Content as string==T("Shortcuts & tips","الاختصارات والنصائح"));
+            if(at>=0&&open!=null&&kids.IndexOf(open) is var to&&to>at)
+            {
+                for(var i=to-1;i>at;i--)kids.RemoveAt(i);
+                kids.Insert(at+1,Body(T("Press ? anywhere in Noir to see every shortcut.","اضغط ? في أي مكان في Noir لعرض كل الاختصارات.")));
+            }
+        }
     }
     FrameworkElement SettingsSectionList()
     {
-        var nav=new StackPanel();var waiting=PendingSync();
+        var nav=new StackPanel();
         foreach(var (name,hint) in SettingsSections)
         {
             var on=name==settingsSection;var row=new DockPanel();
-            if(name=="Connections"&&waiting>0)
-            {
-                var badge=new Border{Background=Brush("#E4C084"),CornerRadius=new(9),Padding=new(7,1,7,1),VerticalAlignment=VerticalAlignment.Center,Margin=new(8,0,0,0),Child=Text(waiting.ToString(),11,"#16120C",FontWeights.SemiBold),ToolTip=T("Waiting to sync")};
-                DockPanel.SetDock(badge,Dock.Right);row.Children.Add(badge);
-            }
+            // U55: no count badge on Connections; its page says how many are waiting to sync.
             var lines=new StackPanel();row.Children.Add(lines);
             lines.Children.Add(Text(T(name),14,on?"#E4C084":"#E9E4DC",on?FontWeights.SemiBold:FontWeights.Normal));
             var small=Text(T(hint),11.5,"#8F8A83");small.TextWrapping=TextWrapping.NoWrap;small.TextTrimming=TextTrimming.CharacterEllipsis;lines.Children.Add(small);
@@ -88,19 +103,7 @@ public partial class MainWindow
     // ---- Profile, appearance, backup ----
     void RenderProfileSettings()
     {
-        var name=ProfileName;
-        var titles=store.Archive.Select(i=>i.GroupKey).Distinct().Count();var watched=store.Archive.Count(store.EverWatched);
-        var card=new Border{CornerRadius=new(16),Padding=new(22,20,22,20),Margin=new(0,22,0,4),Background=new LinearGradientBrush(Brush("#2A241C").Color,Brush("#141416").Color,20),BorderBrush=Brush("#40E4C084"),BorderThickness=new(1)};
-        var row=new DockPanel();card.Child=row;
-        var avatar=Profiles.Avatar(DisplayProfile,64);avatar.VerticalAlignment=VerticalAlignment.Center;
-        DockPanel.SetDock(avatar,Dock.Left);row.Children.Add(avatar);
-        var lines=new StackPanel{Margin=new(18,0,0,0),VerticalAlignment=VerticalAlignment.Center};row.Children.Add(lines);
-        lines.Children.Add(Text(name,22,weight:FontWeights.Bold));
-        lines.Children.Add(Text($"{titles:N0} {T("titles")} · {watched:N0} {T("watched")} · "+T(TrackerOnly?"Tracker only":"Library & tracker"),13,"#C7C2BC"));
-        var actions=new WrapPanel{Margin=new(0,10,0,0)};lines.Children.Add(actions);
-        var stats=ActionButton("Your stats",()=>{historyType="All";trackerTab="Stats";Navigate("History");},true);stats.Margin=new(0,0,8,0);actions.Children.Add(stats);
-        actions.Children.Add(ActionButton("Your diary",()=>{historyType="All";trackerTab="Diary";Navigate("History");}));
-        ContentPanel.Children.Add(card);
+        // U54: the old top card (name, Your stats, Your diary) is gone; the Profiles list shows the same person.
         RenderProfiles();
         RenderModeSettings();
     }
@@ -110,7 +113,7 @@ public partial class MainWindow
     }
     static ControlTemplate DensityChoiceTemplate()
     {
-        var border=new FrameworkElementFactory(typeof(Border),"Chrome");border.SetValue(Border.CornerRadiusProperty,new CornerRadius(8));border.SetValue(Border.BorderThicknessProperty,new Thickness(1));border.SetValue(Border.BorderBrushProperty,Brushes.Transparent);
+        var border=new FrameworkElementFactory(typeof(Border),"Chrome");border.SetValue(Border.CornerRadiusProperty,new CornerRadius(18));border.SetValue(Border.BorderThicknessProperty,new Thickness(1));border.SetValue(Border.BorderBrushProperty,Brush("#2EFFFFFF"));
         border.SetBinding(Border.BackgroundProperty,new System.Windows.Data.Binding("Background"){RelativeSource=System.Windows.Data.RelativeSource.TemplatedParent});border.SetBinding(Border.PaddingProperty,new System.Windows.Data.Binding("Padding"){RelativeSource=System.Windows.Data.RelativeSource.TemplatedParent});
         var content=new FrameworkElementFactory(typeof(ContentPresenter));content.SetValue(FrameworkElement.HorizontalAlignmentProperty,HorizontalAlignment.Center);border.AppendChild(content);var template=new ControlTemplate(typeof(RadioButton)){VisualTree=border};
         var focus=new Trigger{Property=IsKeyboardFocusedProperty,Value=true};focus.Setters.Add(new Setter(Border.BorderBrushProperty,Brush("#F4F1EB"),"Chrome"));template.Triggers.Add(focus);return template;
@@ -118,12 +121,12 @@ public partial class MainWindow
     void RenderAppearanceSettings()
     {
         ContentPanel.Children.Add(Heading("Size","Compact fits more on screen. Comfortable gives everything more room. Applies only to this device."));
-        var sizes=new Border{CornerRadius=new(10),Background=Brush("#161618"),BorderBrush=Brush("#26FFFFFF"),BorderThickness=new(1),Padding=new(3),HorizontalAlignment=HorizontalAlignment.Left};
-        var choices=new System.Windows.Controls.Primitives.UniformGrid{Columns=2};sizes.Child=choices;
+        // U47: Compact / Comfortable are the same gold pills as everywhere else, with a gap between them.
+        var sizes=new WrapPanel{HorizontalAlignment=HorizontalAlignment.Left};
         foreach(var mode in new[]{UiDensity.Compact,UiDensity.Comfortable})
         {
-            var on=Density.Mode==mode;var choice=new RadioButton{Content=T(mode.ToString()),IsChecked=on,Padding=Density.ButtonPadding,FontSize=Density.ButtonFont,MinWidth=110,Margin=new(1),Background=Brush(on?"#E4C084":"Transparent"),Foreground=Brush(on?"#16120C":"#C7C2BC"),Template=DensityChoiceTemplate()};
-            System.Windows.Automation.AutomationProperties.SetName(choice,T("Size")+" · "+T(mode.ToString()));choice.Checked+=(_,_)=>{SetDensity(mode);ViewElements(ContentPanel).OfType<RadioButton>().FirstOrDefault(b=>Equals(b.Content,T(mode.ToString())))?.Focus();};choices.Children.Add(choice);
+            var on=Density.Mode==mode;var choice=new RadioButton{Content=T(mode.ToString()),IsChecked=on,Padding=new(16,8,16,8),FontSize=13,MinWidth=110,Margin=new(0,0,8,6),Background=Brush(on?"#E4C084":"#222225"),Foreground=Brush(on?"#16120C":"#C7C2BC"),Template=DensityChoiceTemplate()};
+            System.Windows.Automation.AutomationProperties.SetName(choice,T("Size")+" · "+T(mode.ToString()));choice.Checked+=(_,_)=>{SetDensity(mode);ViewElements(ContentPanel).OfType<RadioButton>().FirstOrDefault(b=>Equals(b.Content,T(mode.ToString())))?.Focus();};sizes.Children.Add(choice);
         }
         ContentPanel.Children.Add(sizes);
         ContentPanel.Children.Add(Heading("Language","Choose the app language. Arabic mirrors the layout right to left."));
@@ -159,7 +162,7 @@ public partial class MainWindow
         var connected=new[]{store.State.SyncTrakt,store.State.SyncSerializd,store.State.NuvioConnected,stremio,kodi!=null,HasKey("TorBox"),HasKey("Real-Debrid"),config?.Manifest.Length>0,tmdb}.Count(x=>x)+servers.Count;
         var waiting=PendingSync();
         var summary=new DockPanel{Margin=new(0,20,0,0)};
-        var all=ActionButton("⟳  Sync everything now",SyncAllNow,true);all.Padding=new(16,9,18,9);DockPanel.SetDock(all,Dock.Right);summary.Children.Add(all);
+        var all=ActionButton("[[sync]]  Sync everything now",SyncAllNow,true);all.Padding=new(16,9,18,9);DockPanel.SetDock(all,Dock.Right);summary.Children.Add(all);
         summary.Children.Add(Text($"{connected} {T("connected")}"+(waiting>0?$" · {waiting} {T("waiting to sync")}":" · "+T("everything is up to date")),14,waiting>0?"#E4C084":"#C7C2BC"));
         ((FrameworkElement)summary.Children[^1]).VerticalAlignment=VerticalAlignment.Center;ContentPanel.Children.Add(summary);
 
@@ -175,9 +178,14 @@ public partial class MainWindow
                 var check=new CheckBox{Content=T("Mark my watches on ")+provider,IsChecked=on,Margin=new(0,0,0,8)};
                 check.Click+=(_,_)=>{if(provider=="Trakt")store.State.SyncTrakt=check.IsChecked==true;else store.State.SyncSerializd=check.IsChecked==true;store.Save();watchSync?.Retry();RenderQuiet();};panel.Children.Add(check);
                 var row=Buttons(panel);
-                row.Add("Sign in",()=>OpenAccountSignIn(provider),!on);
-                if(on){row.Add("Sync now",()=>{watchSync?.Retry();Status.Text=provider+": "+T("syncing waiting watches…");},true);row.Add("Send earlier history",()=>{watchSync?.QueuePrevious();RenderQuiet();});}
-                if(provider=="Trakt")row.Add("Import Trakt export…",()=>ImportFromConnections(()=>ChooseImportFile("Trakt")));
+                if(!on){row.Add("Connect "+provider,()=>OpenAccountSignIn(provider),true);if(provider=="Trakt")row.Add("Import Trakt export…",()=>ImportFromConnections(()=>ChooseImportFile("Trakt")));}
+                else
+                {
+                    row.Add("Sync now",()=>{watchSync?.Retry();Status.Text=provider+": "+T("syncing waiting watches…");});
+                    var extra=new List<(string,Action)>{("Sign in again",()=>OpenAccountSignIn(provider)),("Send earlier history",()=>{watchSync?.QueuePrevious();RenderQuiet();})};
+                    if(provider=="Trakt")extra.Add(("Import Trakt export…",()=>ImportFromConnections(()=>ChooseImportFile("Trakt"))));
+                    row.More(extra.ToArray());
+                }
                 Queue(panel,provider);
             }));
         }
@@ -188,9 +196,9 @@ public partial class MainWindow
                 var row=Buttons(panel);
                 if(!stremio){row.Add("Connect Stremio",ConnectStremio,true);return;}
                 var auto=new CheckBox{Content=T("Check Stremio automatically"),IsChecked=store.State.StremioAutoImport,Margin=new(0,0,0,8)};auto.Click+=(_,_)=>{store.State.StremioAutoImport=auto.IsChecked==true;store.Save();};panel.Children.Insert(panel.Children.Count-1,auto);
-                row.Add("Sync now",async()=>{Status.Text=T("Checking Stremio for new watches…");await ImportStremio(true);if(Status.Text==T("Checking Stremio for new watches…"))Status.Text=T("Stremio is up to date.");RenderQuiet();},true);
+                row.Add("Sync now",async()=>{Status.Text=T("Checking Stremio for new watches…");await ImportStremio(true);if(Status.Text==T("Checking Stremio for new watches…"))Status.Text=T("Stremio is up to date.");RenderQuiet();});
                 row.Add("Review & import",()=>ImportFromConnections(()=>_=ImportStremio(false)));
-                row.Add("Disconnect",()=>{try{File.Delete(StremioKeyPath);}catch(IOException){}RenderQuiet();});
+                row.More(("Disconnect",()=>{try{File.Delete(StremioKeyPath);}catch(IOException){}RenderQuiet();}));
             }));
 
         Group("Media servers","Download original files and import what you've watched. Read-only: nothing on the server changes.");
@@ -202,13 +210,13 @@ public partial class MainWindow
             media.Children.Add(ConnectionCard(s.Name.Length>0?s.Name:s.Kind,s.Kind[..1],s.Kind switch{"Plex"=>"#E5A00D","Jellyfin"=>"#AA5CC3","Emby"=>"#52B54B",_=>"#7A5CC9"},"#FFFFFF",true,T("Connected")+" · "+s.Kind,MediaServers.Source(s),panel=>
             {
                 var row=Buttons(panel);var note=Body("",11);
-                row.Add("Import watched",()=>ImportFromConnections(()=>_=ImportServer(s)),true);
+                row.Add("Import watched",()=>ImportFromConnections(()=>_=ImportServer(s)));
                 row.Add("Test",async()=>{note.Text=T("Testing connection…");try{using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(45));await api.Test(s,timeout.Token);note.Text=T("Connection working");}catch(Exception){note.Text=T("Couldn't connect. Check the server address and account permissions.");}});
                 row.Add("Remove",()=>{downloads?.RemoveServer(s.Id);RenderQuiet();});
                 panel.Children.Add(note);
             }));
         }
-        media.Children.Add(ConnectionCard("Kodi","K","#17B2E7","#FFFFFF",kodi!=null,kodi!=null?T("Connected")+" · "+kodi.Value.Address:T("Not connected"),"Kodi's web control must be on (Settings → Services → Control → Allow remote control via HTTP).",KodiControls));
+        media.Children.Add(ConnectionCard("Kodi","K","#17B2E7","#FFFFFF",kodi!=null,kodi!=null?T("Connected")+" · "+kodi.Value.Address:T("Not connected"),"Kodi's web control must be on (Settings → Services → Control → Allow remote control via HTTP).",panel=>{KodiControls(panel);if(kodi!=null&&panel.Children[^1] is WrapPanel done)foreach(var b in done.Children.OfType<Button>().Where(b=>b.Content as string==T("Import watched")))b.ClearValue(FrameworkElement.StyleProperty);}));
         if(downloads!=null)media.Children.Add(ConnectionCard(T("Add a media server"),"+","#2A2A2E","#E4C084",false,"Plex · Jellyfin · Emby","Server accounts are saved securely on this PC; passwords are never stored.",panel=>AddServerControls(panel,RenderQuiet)));
 
         Group("Import history","Bring in what you watched elsewhere. You review everything before it's added, and re-importing never duplicates.");
@@ -217,13 +225,13 @@ public partial class MainWindow
             imports.Children.Add(ConnectionCard(s.Name,s.Mark,s.Color,s.Ink,false,s.What,s.How,panel=>
             {
                 var row=Buttons(panel);
-                if(s.CaptureUrl!=null)row.Add("Get from "+s.Name,()=>ImportFromConnections(()=>CaptureExport(s)),true);
-                row.Add("Choose file…",()=>ImportFromConnections(()=>ChooseImportFile(s.Name)),s.CaptureUrl==null);
+                if(s.CaptureUrl!=null)row.Add("Get from "+s.Name,()=>ImportFromConnections(()=>CaptureExport(s)));
+                row.Add("Choose file…",()=>ImportFromConnections(()=>ChooseImportFile(s.Name)));
             },compact:true));
 
         Group("Downloads & discovery","Where Noir finds releases, and what powers recommendations.");
         var sources=Cards();
-        void Source(string name,string mark,string color,bool on,string what)=>sources.Children.Add(ConnectionCard(name,mark,color,"#FFFFFF",on,on?T("Connected")+(config?.Service==name||name=="AIOStreams"&&config?.Service=="AIOStreams links"?" · "+T("in use for downloads"):""):T("Not connected"),what,panel=>Buttons(panel).Add(on?"Manage":"Set up",()=>OpenSettingsSection("Downloads"),!on)));
+        void Source(string name,string mark,string color,bool on,string what)=>sources.Children.Add(ConnectionCard(name,mark,color,"#FFFFFF",on,on?T("Connected")+(config?.Service==name||name=="AIOStreams"&&config?.Service=="AIOStreams links"?" · "+T("in use for downloads"):""):T("Not connected"),what,panel=>Buttons(panel).Add(on?"Manage":"Connect "+name,()=>OpenSettingsSection("Downloads"),!on)));
         Source("TorBox","TB","#05A57A",HasKey("TorBox"),"Your TorBox account supplies the files and searches your existing TorBox library.");
         Source("Real-Debrid","RD","#5E9A3A",HasKey("Real-Debrid"),"Your Real-Debrid account fetches the releases AIOStreams finds.");
         Source("AIOStreams","AIO","#3D6FD6",config?.Manifest.Length>0,"Finds releases with your AIOStreams add-ons; can also use the debrid services you added there.");
@@ -242,6 +250,13 @@ public partial class MainWindow
     sealed class ButtonRow(MainWindow owner,WrapPanel row)
     {
         public Button Add(string label,Action act,bool primary=false){var b=owner.ActionButton(label,act,primary);b.Padding=new(14,7,14,7);b.Margin=new(0,0,8,8);b.FontSize=12.5;row.Children.Add(b);return b;}
+        // The card's secondary actions, folded into a ⋯ menu.
+        public Button More(params (string Label,Action Act)[] items)
+        {
+            var b=owner.ActionButton("[[more]]",()=>{});b.Padding=new(11,3,11,8);b.Margin=new(0,0,8,8);b.FontSize=16;b.ToolTip=T("More");System.Windows.Automation.AutomationProperties.SetName(b,T("More"));
+            b.Click+=(_,_)=>{var menu=new ContextMenu();foreach(var (label,act) in items){var m=new MenuItem{Header=T(label)};var run=act;m.Click+=(_,_)=>run();menu.Items.Add(m);}b.ContextMenu=menu;menu.PlacementTarget=b;menu.Placement=System.Windows.Controls.Primitives.PlacementMode.Bottom;menu.IsOpen=true;};
+            row.Children.Add(b);return b;
+        }
     }
     ButtonRow Buttons(StackPanel panel){var row=new WrapPanel();panel.Children.Add(row);return new(this,row);}
     FrameworkElement ConnectionCard(string name,string mark,string color,string ink,bool on,string state,string what,Action<StackPanel> body,bool compact=false)
@@ -281,10 +296,10 @@ public partial class MainWindow
                 var row=new DockPanel{Margin=new(10,0,0,3)};var j=job;
                 if(provider is "Trakt" or "Serializd")
                 {
-                    var skip=new Button{Content="✕",Padding=new(7,1,7,1),Margin=new(4,0,0,0),FontSize=10.5,ToolTip=T("Don't send this one")};
+                    var skip=new Button{Content="[[close]]",Padding=new(7,1,7,1),Margin=new(4,0,0,0),FontSize=10.5,ToolTip=T("Don't send this one")};
                     skip.Click+=(_,_)=>{store.State.WatchSync.Remove(j.Provider+":"+j.ItemId);store.Save();RenderQuiet();};DockPanel.SetDock(skip,Dock.Right);row.Children.Add(skip);
                     var missingId=!System.Text.RegularExpressions.Regex.IsMatch(item.ImdbId,@"^tt\d+$");
-                    var open=new Button{Content=missingId?T("Fix match"):"↗",Padding=new(7,1,7,1),FontSize=10.5,ToolTip=missingId?T("Correct match / episode numbers"):T("Open on ")+provider};
+                    var open=new Button{Content=missingId?T("Fix match"):"[[external]]",Padding=new(7,1,7,1),FontSize=10.5,ToolTip=missingId?T("Correct match / episode numbers"):T("Open on ")+provider};
                     open.Click+=(_,_)=>{if(missingId)MatchDialog(item);else OpenReviews(item,provider);};DockPanel.SetDock(open,Dock.Right);row.Children.Add(open);
                 }
                 var label=Text(item.Label+(job.Attempts>1?$"  ·  ×{job.Attempts}":""),12,"#B8B2AA");label.TextTrimming=TextTrimming.CharacterEllipsis;label.TextWrapping=TextWrapping.NoWrap;label.VerticalAlignment=VerticalAlignment.Center;row.Children.Add(Bidi(label));
@@ -301,7 +316,7 @@ public partial class MainWindow
     }
     Button? QueueFix(string provider,string reason,List<WatchSyncJob> jobs)
     {
-        if(reason.Contains("session has expired"))return ActionButton("Sign in",()=>OpenAccountSignIn(provider),true);
+        if(reason.Contains("session has expired"))return ActionButton("Sign in again",()=>OpenAccountSignIn(provider));
         if(reason.Contains("verified title ID"))return ActionButton("Refresh information",()=>{_=RefreshMetadata(true);Status.Text=T("Refreshing information. Titles that still don't match need Fix match.");});
         if(reason.StartsWith("Specials")||reason.Contains("match needs checking"))return null;
         return ActionButton("Retry now",()=>
@@ -322,17 +337,15 @@ public partial class MainWindow
             var auto=new CheckBox{Content=T("Check Nuvio automatically"),IsChecked=store.State.NuvioAutoImport,Margin=new(0,0,0,2)};auto.Click+=(_,_)=>{store.State.NuvioAutoImport=auto.IsChecked==true;store.Save();};
             var send=new CheckBox{Content=T("Mark my Noir watches in Nuvio"),IsChecked=store.State.SyncNuvio,Margin=new(0,2,0,8)};send.Click+=(_,_)=>{store.State.SyncNuvio=send.IsChecked==true;store.Save();nuvioSync?.Wake();RenderQuiet();};
             panel.Children.Insert(panel.Children.Count-1,auto);panel.Children.Insert(panel.Children.Count-1,send);
-            row.Add("Sync now",async()=>{nuvioSync?.Wake();Status.Text=T("Checking Nuvio for new watches…");await ImportNuvio(true);if(Status.Text==T("Checking Nuvio for new watches…"))Status.Text=T("Nuvio is up to date.");RenderQuiet();},true).IsEnabled=!importBusy;
+            row.Add("Sync now",async()=>{nuvioSync?.Wake();Status.Text=T("Checking Nuvio for new watches…");await ImportNuvio(true);if(Status.Text==T("Checking Nuvio for new watches…"))Status.Text=T("Nuvio is up to date.");RenderQuiet();}).IsEnabled=!importBusy;
             row.Add("Review & import",()=>ImportFromConnections(()=>_=ImportNuvio(false))).IsEnabled=!importBusy;
-            row.Add("Send earlier history",()=>{foreach(var e in store.State.Catalog.Values.Where(e=>store.EverWatched(e.Item)))CommunityQueue.Enqueue(store.State,e.Item,store.ViewingHistory(e.Item).FirstOrDefault()?.WatchedAt??e.Progress?.UpdatedAt??DateTimeOffset.UtcNow);store.Save();nuvioSync?.Wake();RenderQuiet();});
-            row.Add("Switch profile",()=>_=PickNuvioProfile(session!));
-            row.Add("Disconnect",()=>{NuvioStorage.Forget(store.DataDirectory);store.State.NuvioConnected=false;store.Save();RenderQuiet();});
+            row.More(("Send earlier history",()=>{foreach(var e in store.State.Catalog.Values.Where(e=>store.EverWatched(e.Item)))CommunityQueue.Enqueue(store.State,e.Item,store.ViewingHistory(e.Item).FirstOrDefault()?.WatchedAt??e.Progress?.UpdatedAt??DateTimeOffset.UtcNow);store.Save();nuvioSync?.Wake();RenderQuiet();}),("Switch profile",()=>_=PickNuvioProfile(session!)),("Disconnect",()=>{NuvioStorage.Forget(store.DataDirectory);store.State.NuvioConnected=false;store.Save();RenderQuiet();}));
             if(nuvioSync?.Message is {Length:>0} m)panel.Children.Add(Body(m,11));
             Queue(panel,"Nuvio");
         });
     }
     // Imports finish on History → Add history, where the review card lives.
-    void ImportFromConnections(Action start){historyType="All";trackerTab="Add history";Navigate("History");start();}
+    void ImportFromConnections(Action start){historyType="All";trackerTab="Import";Navigate("History");start();}
     async void SyncAllNow()
     {
         watchSync?.Retry();nuvioSync?.Wake();Status.Text=T("Syncing everything…");

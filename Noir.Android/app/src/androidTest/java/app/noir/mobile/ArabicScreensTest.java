@@ -38,11 +38,29 @@ public final class ArabicScreensTest {
  /** Needs the paired fixture (run FixturePairTest first); the "« −10 ث" label keeps its arrow on the tapped side. */
  @Test public void doubleTapLabelKeepsItsDirection()throws Exception{
   f.close();f=null;boolean was=Loc.arabic;
-  DataStore data=NoirApp.data;Assume.assumeTrue("needs the paired fixture",data!=null&&data.paired());Optional<JSONObject> item=DataStore.objects(data.items()).stream().filter(i->i.optBoolean("available")).findFirst();Assume.assumeTrue(item.isPresent());
+  DataStore data=NoirApp.data;String pairUri=TestRunner.arguments.getString("pairUri");if(data!=null&&!data.paired()&&pairUri!=null)data.pair(pairUri);else if(data!=null&&data.paired())data.sync();Assume.assumeTrue("needs the paired fixture",data!=null&&data.paired());Optional<JSONObject> item=DataStore.objects(data.items()).stream().filter(i->i.optBoolean("available")).findFirst();Assume.assumeTrue(item.isPresent());
   PhoneTips.init();Loc.arabic=true;data.pref("tipPlayerGestures",true);PlayerActivity p=(PlayerActivity)test.startActivitySync(new Intent(test.getTargetContext(),PlayerActivity.class).putExtra("id",item.get().optString("id")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
   try{for(int n=0;n<240&&(p.player==null||!p.player.isPlaying()||!p.player.isSeekable()||p.duration<=0);n++)Thread.sleep(250);assertTrue("Player starts",p.player!=null&&p.player.isPlaying());
    test.runOnMainSync(()->{p.player.pause();p.seek(120);p.manualHidden=true;p.controls.setVisibility(View.GONE);p.tapSeek(-10);assertEquals(View.TEXT_DIRECTION_LTR,p.flash.getTextDirection());assertTrue(p.flash.getText().toString().startsWith("«"));p.flash(p.flash.getText().toString(),Gravity.LEFT,4000);});shot("phone-player-back-ar");
    Thread.sleep(1000);test.runOnMainSync(()->p.flash(Loc.t("Tip: double-tap left or right to skip 10 s"),Gravity.CENTER_HORIZONTAL,4000));shot("phone-player-tip-ar");
+  }finally{test.runOnMainSync(()->{if(!p.isFinishing())p.finish();});Loc.arabic=was;}
+ }
+ /** W5: in Arabic History is mirrored, its Undo bar and "Recently watched" age line are Arabic and right-aligned, and the Home hero's Play label keeps S01 · E01 left to right. */
+ @Test public void historyUndoAndHeroAreArabic()throws Exception{
+  show("ar2");MainActivity a=f.launch(MainActivity.class);
+  f.ui(()->{a.page="History";a.detail="";a.render();assertEquals("History is mirrored",View.LAYOUT_DIRECTION_RTL,a.getWindow().getDecorView().getLayoutDirection());a.undoable("x",()->{});View undo=AuditPhoneFixture.find(a.undoView,v->v instanceof TextView&&((TextView)v).getText().toString().equals("تراجع"));assertNotNull("Undo is translated",undo);
+   assertEquals("الآن",NoirUi.ago(System.currentTimeMillis()));assertTrue(NoirUi.ago(System.currentTimeMillis()-5*60000L).startsWith("قبل"));
+   
+   assertTrue(a.count(a.group("ar2")).startsWith("حلقتان"));assertTrue(a.count(a.group("ar2")).contains("تمت مشاهدة"));assertTrue(NoirUi.ltr("S01 · E01").startsWith("\u2066"));});
+  f.idle();/* text direction resolves only once the view is attached and laid out */f.ui(()->{View when=AuditPhoneFixture.find(a.body,v->"history-recent-when".equals(v.getTag()));if(when!=null){assertEquals(View.TEXT_DIRECTION_RTL,when.getTextDirection());assertFalse(((TextView)when).getText().toString().contains("ago"));}});
+ }
+ /** Needs the paired fixture: the phone player's controls row carries Arabic content descriptions. */
+ @Test public void phonePlayerControlsAreArabic()throws Exception{
+  f.close();f=null;boolean was=Loc.arabic;
+  DataStore data=NoirApp.data;String pairUri=TestRunner.arguments.getString("pairUri");if(data!=null&&!data.paired()&&pairUri!=null)data.pair(pairUri);else if(data!=null&&data.paired())data.sync();Assume.assumeTrue("needs the paired fixture",data!=null&&data.paired());Optional<JSONObject> item=DataStore.objects(data.items()).stream().filter(i->i.optBoolean("available")).findFirst();Assume.assumeTrue(item.isPresent());
+  Loc.arabic=true;PlayerActivity p=(PlayerActivity)test.startActivitySync(new Intent(test.getTargetContext(),PlayerActivity.class).putExtra("id",item.get().optString("id")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+  try{for(int n=0;n<240&&p.controls==null;n++)Thread.sleep(250);assertNotNull(p.controls);
+   test.runOnMainSync(()->{for(String arabic:new String[]{"رجوع ١٠ ثوانٍ","تقديم ١٠ ثوانٍ","التالي"})assertNotNull("Control "+arabic,AuditPhoneFixture.find(p.controls,v->v.getContentDescription()!=null&&arabic.contentEquals(v.getContentDescription())));assertNotNull("Play/Pause is Arabic",AuditPhoneFixture.find(p.controls,v->v.getContentDescription()!=null&&("تشغيل".contentEquals(v.getContentDescription())||"إيقاف مؤقت".contentEquals(v.getContentDescription()))));});
   }finally{test.runOnMainSync(()->{if(!p.isFinishing())p.finish();});Loc.arabic=was;}
  }
 }

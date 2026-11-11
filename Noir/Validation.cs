@@ -22,6 +22,7 @@ public partial class MainWindow
         if(Environment.GetCommandLineArgs().Contains("--removal-discover-only")){await ValidateRemovalDiscover();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--premium-redesign-only")){await ValidatePremiumRedesign();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--readme-shots")){await CaptureReadmeShots();Close();return;}
+        if(Environment.GetCommandLineArgs().Contains("--ui-shots")){await CaptureUiShots();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--navigation-only")){await ValidateNavigationDiscover();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--ux-only")){await ValidateUx();Close();return;}
         if(Environment.GetCommandLineArgs().Contains("--player-only")){await ValidatePlayer();Close();return;}
@@ -107,7 +108,7 @@ public partial class MainWindow
             Assert(PageTitle.Text=="Watch history" && ContentPanel.Children.Count>1,"The History tab displays the saved episode");Navigate("Home");
             var restored=new LibraryStore(store.DataDirectory);
             Assert(Math.Abs(restored.GetProgress(episode)!.Position-saved)<.01,"Saved time survives recreating the library from disk");
-            Assert(store.ContinueFor(items.Where(x=>x.GroupKey==episode.GroupKey))?.Episode==1,"Home Continue Watching points to this unfinished episode");
+            Assert(store.ContinueFor(items.Where(x=>x.GroupKey==episode.GroupKey))?.Episode==1,"Home Continue watching points to this unfinished episode");
             UpdateLayout();CaptureLibrary(Path.Combine(store.DataDirectory,"library.png"));
             await PlayVideo(episode);
             Assert(PlayerOverlay.Visibility==Visibility.Visible && Window.GetWindow(PlayerOverlay)?.IsVisible==true,"The video overlay reopens correctly for another playback");
@@ -162,7 +163,7 @@ public partial class MainWindow
             SeekAbsolute(37.25);
             await Until(()=>pendingTarget==null&&Math.Abs(player.Time/1000d-37.25)<2.5,"Movie seeking works",30);
             player.SetPause(true);SavePlayback();ReturnToLibrary();
-            Assert(store.GetProgress(movie) is {Completed:false,Position:>30},"Movie progress is retained in Continue Watching");
+            Assert(store.GetProgress(movie) is {Completed:false,Position:>30},"Movie progress is retained in Continue watching");
             results.Add("ALL DESKTOP PLAYBACK CHECKS PASSED");
         }
         catch(Exception e) { results.Add(e.ToString());store.Log(e); }

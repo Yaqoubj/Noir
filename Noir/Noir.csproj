@@ -27,6 +27,10 @@
     <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.24" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
   </ItemGroup>
+  <!-- The subtitle timing tool is built outside git (build_subtitle_tools.ps1 at the repository root). -->
+  <Target Name="NoirSubtitleRuntimeCheck" BeforeTargets="Build" Condition="!Exists('$(MSBuildThisFileDirectory)../work/subtitle-runtime/NoirSubtitleSync.exe')">
+    <Warning Code="NOIR001" Text="work/subtitle-runtime is missing, so this build has no automatic subtitle timing. Run build_subtitle_tools.ps1 from the repository root (needs Python and ffmpeg), then build again." />
+  </Target>
   <!-- VLC otherwise probes all 300+ plugin DLLs on every launch (about 13 s on a cold disk). -->
   <Target Name="NoirVlcPluginCache" AfterTargets="Build" Condition="'$(OS)'=='Windows_NT'">
     <Exec Command="&quot;$(TargetDir)Noir.exe&quot; --build-vlc-cache" ContinueOnError="true" />

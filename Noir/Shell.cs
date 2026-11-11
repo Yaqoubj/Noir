@@ -42,19 +42,32 @@ public partial class MainWindow
         if(Math.Abs(y-indicatorY)<.5)return;var first=double.IsNaN(indicatorY);indicatorY=y;NavIndicator.Opacity=1;
         Motion.To(NavIndicator,(TranslateTransform)NavIndicator.RenderTransform,TranslateTransform.YProperty,y,first?0:180);
     }
-    DispatcherTimer? toastTimer;
+    DispatcherTimer? toastTimer;bool warningToast,toastCloseAdded;
     void WatchStatusText()=>DependencyPropertyDescriptor.FromProperty(TextBlock.TextProperty,typeof(TextBlock)).AddValueChanged(Status,(_,_)=>ShowToast());
-    // Every Status.Text update appears as a short notice; longer messages stay a little longer.
+    // A small X so a warning can be dismissed; the pill is otherwise click-through.
+    void AddToastClose()
+    {
+        if(toastCloseAdded)return;toastCloseAdded=true;
+        var close=new Button{Content=Icon("M5,5 L19,19 M19,5 L5,19",11,"#C7C2BC"),Width=22,Height=22,Padding=new(0),Margin=new(12,0,-6,0),Background=Brush("Transparent"),BorderThickness=new(0),VerticalAlignment=VerticalAlignment.Center,ToolTip=T("Dismiss")};
+        System.Windows.Automation.AutomationProperties.SetName(close,T("Dismiss"));close.Click+=(_,_)=>{Status.Text="";};
+        close.Visibility=Visibility.Collapsed;close.Name="ToastClose";
+        StatusToast.Child=null;var host=new DockPanel();DockPanel.SetDock(close,Dock.Right);host.Children.Add(close);host.Children.Add(Status);StatusToast.Child=host;
+    }
+    // Every Status.Text update appears as a short notice that hides itself after 4 seconds and never takes clicks.
+    // Scan warnings (warningToast) stay until dismissed with their X.
     void ShowToast()
     {
-        if(string.IsNullOrWhiteSpace(Status.Text)){Motion.Opacity(StatusToast,0,200);return;}
+        AddToastClose();var sticky=warningToast;warningToast=false;var close=(UIElement)((DockPanel)StatusToast.Child).Children[0];
+        if(string.IsNullOrWhiteSpace(Status.Text)){toastTimer?.Stop();StatusToast.IsHitTestVisible=false;Motion.Opacity(StatusToast,0,200);return;}
         // Same chrome as the sheets: elevated surface, 1 px edge, 14 px radius.
         StatusToast.CornerRadius=new(14);StatusToast.Padding=new(16,9,16,9);StatusToast.Background=Brush("#F7141416");StatusToast.BorderBrush=Brush("#2EFFFFFF");
+        close.Visibility=sticky?Visibility.Visible:Visibility.Collapsed;StatusToast.IsHitTestVisible=sticky;
         Motion.Opacity(StatusToast,1,180);Motion.Pop(StatusToast);
-        toastTimer??=new DispatcherTimer();toastTimer.Stop();toastTimer.Interval=TimeSpan.FromSeconds(Math.Clamp(Status.Text.Length/14.0,3,9));
-        toastTimer.Tick-=HideToast;toastTimer.Tick+=HideToast;toastTimer.Start();
+        toastTimer??=new DispatcherTimer();toastTimer.Stop();toastTimer.Tick-=HideToast;
+        if(sticky)return;
+        toastTimer.Interval=TimeSpan.FromSeconds(4);toastTimer.Tick+=HideToast;toastTimer.Start();
     }
-    void HideToast(object? sender,EventArgs e){toastTimer?.Stop();Motion.Opacity(StatusToast,0,400);}
+    void HideToast(object? sender,EventArgs e){toastTimer?.Stop();StatusToast.IsHitTestVisible=false;Motion.Opacity(StatusToast,0,400);}
     static new FrameworkElement Icon(string geometry,double size=20,string color="#E9E4DC")=>new System.Windows.Shapes.Path{Data=Geometry.Parse(geometry),Stroke=Brush(color),StrokeThickness=1.7,StrokeLineJoin=PenLineJoin.Round,StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round,Width=size,Height=size,Stretch=Stretch.Uniform};
     const string DownloadGlyph="M12,1 L12,16 M6,10 L12,16 L18,10 M2,17 L2,23 L22,23 L22,17",ScanGlyph="M3,8 A10,10 0 0 1 20,4 M20,1 L20,7 L14,7 M21,16 A10,10 0 0 1 4,20 M4,23 L4,17 L10,17",SettingsGlyph="M1,5 L23,5 M1,12 L23,12 M1,19 L23,19 M7,2 L7,8 M17,9 L17,15 M10,16 L10,22";
     FrameworkElement DownloadIcon(int active)

@@ -30,7 +30,7 @@ public sealed partial class LibraryStore
                 if(Directory.Exists(art))foreach(var image in Directory.EnumerateFiles(art).Where(f=>!f.EndsWith(".tmp")))
                     try{archive.CreateEntryFromFile(image,"art/"+System.IO.Path.GetFileName(image),CompressionLevel.NoCompression);}catch(IOException){}
                 using(var readme=new StreamWriter(archive.CreateEntry("RESTORE.txt").Open()))
-                    readme.Write("Restore in Noir: History → Add history → Restore from backup. Video files, passwords and browser sign-ins are not included.");
+                    readme.Write("Restore in Noir: History → Import → Restore from backup. Video files, passwords and browser sign-ins are not included.");
             }
             File.Move(temp,full,true);
         }
@@ -83,8 +83,8 @@ public sealed partial class LibraryStore
                     if(review!=null)
                     {
                         var current=State.PersonalReviews.GetValueOrDefault(mine.Id);
-                        if(current==null){State.PersonalReviews[mine.Id]=new(){Rating=review.Rating,Note=review.Note};if(review.Rating>0)record.RatedItemIds.Add(mine.Id);}
-                        else{if(current.Rating==0&&review.Rating>0){current.Rating=review.Rating;record.RatedItemIds.Add(mine.Id);}if(current.Note.Length==0)current.Note=review.Note;}
+                        if(current==null){State.PersonalReviews[mine.Id]=new(){Rating10=review.Rating10,Note=review.Note};if(review.Rating>0)record.RatedItemIds.Add(mine.Id);}
+                        else{if(current.Rating==0&&review.Rating>0){current.Rating10=review.Rating10;record.RatedItemIds.Add(mine.Id);}if(current.Note.Length==0)current.Note=review.Note;}
                     }
                     if(listed)State.Watchlist.Add(mine.GroupKey);
                     if(added2)State.LibraryAdds.Add(mine.GroupKey);

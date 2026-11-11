@@ -34,7 +34,7 @@ public partial class MainWindow
     void RenderLogWatched()
     {
         PageTitle.Text="Log what you watched";
-        var back=ActionButton(logTitle!=null?"←  Back to search":"←  Back to History",()=>{if(logTitle!=null){logTitle=null;Render();ContentScroll.ScrollToTop();}else CloseLog();});
+        var back=ActionButton(logTitle!=null?T("[[back]]  Back to search","[[back]]  العودة إلى البحث"):T("[[back]]  Back to History","[[back]]  العودة إلى السجل"),()=>{if(logTitle!=null){logTitle=null;Render();ContentScroll.ScrollToTop();}else CloseLog();});
         back.Background=Brush("Transparent");back.Foreground=Brush("#AAA6A0");back.Padding=new(0,4,0,4);ContentPanel.Children.Add(back);
         if(logLoading){ContentPanel.Children.Add(Heading("Loading episodes…"));return;}
         if(logTitle!=null){RenderLogTitle(logTitle);return;}
@@ -144,7 +144,7 @@ public partial class MainWindow
         if(logWhen.Length==0){var hint=Text((title.Years.Length>0?"Came out "+title.Years.Split('–')[0]+" — ":"")+"pick when you watched it, or Don't remember.",12,"#9F9A93");hint.Margin=new(0,6,0,0);info.Children.Add(hint);}
         foreach(var option in options)
         {
-            var label=option=="Pick a date"&&logWhen==option?logDay.ToString("d MMM yyyy")+"  ▾":option;var value=option;
+            var label=option=="Pick a date"&&logWhen==option?logDay.ToString("d MMM yyyy")+"  [[chevron-down]]":option;var value=option;
             var pill=ActionButton(label,()=>{});pill.Style=(Style)FindResource("Pill");pill.Padding=new(16,8,16,8);pill.Margin=new(0,0,8,8);
             var selected=value==logWhen;pill.Background=Brush(selected?"#E4C084":"#14FFFFFF");pill.Foreground=Brush(selected?"#16120C":"#D9D4CC");pill.BorderBrush=Brush(selected?"#E4C084":"#2EFFFFFF");pill.FontWeight=selected?FontWeights.SemiBold:FontWeights.Normal;
             pill.Click+=(_,_)=>{if(value=="Pick a date")DateChooser(pill,logDay,(day,unknown)=>{logWhen=unknown?"Don't remember":"Pick a date";logDay=day;RenderQuiet();},false);else{logWhen=value;RenderQuiet();}};
@@ -154,7 +154,7 @@ public partial class MainWindow
         if(title.IsMovie)
         {
             var watched=group!=null&&store.EverWatched(group[0]);
-            actions.Children.Add(BigButton(watched?"＋   Log a rewatch":"✓   I watched it",()=>LogTitleItems(title,[(0,0)],watched?$"Rewatch of {title.Name} logged":$"{title.Name} logged",watched),true));
+            actions.Children.Add(BigButton(watched?"[[plus]]   Log a rewatch":"[[check]]   I watched it",()=>LogTitleItems(title,[(0,0)],watched?$"Rewatch of {title.Name} logged":$"{title.Name} logged",watched),true));
             if(watched)actions.Children.Add(BigButton("Remove from history",()=>{var g=TrackedGroup(title);if(g!=null)UncheckAll([g[0]],$"{title.Name} removed from history");},false));
             if(group!=null){var stars=Stars(group[0],22);stars.Margin=new(6,0,0,0);actions.Children.Add(stars);}
             ContentPanel.Children.Add(hero);return;
@@ -165,18 +165,18 @@ public partial class MainWindow
             actions.Children.Add(BigButton(T("Watched up to…","شاهدت حتى…"),()=>UpToPicker(title.Name,released.Select(e=>(e.Season,e.Episode)).ToList(),(s,e)=>LogTitleItems(title,released.Where(x=>x.Season<s||x.Season==s&&x.Episode<=e).Select(x=>(x.Season,x.Episode)).ToList(),T("Your history is up to date","سجلّك محدث الآن"))),false));
             actions.Children.Add(BigButton(T("Pick episodes","اختر الحلقات"),()=>ContentScroll.ScrollToVerticalOffset(480),false));
         }
-        if(todo.Count>0)actions.Children.Add(BigButton($"✓   Mark all {released.Count} watched",()=>LogTitleItems(title,todo.Select(e=>(e.Season,e.Episode)).ToList(),$"{title.Name}: {todo.Count} episodes logged"),true));
+        if(todo.Count>0)actions.Children.Add(BigButton($"[[check]]   Mark all {released.Count} watched",()=>LogTitleItems(title,todo.Select(e=>(e.Season,e.Episode)).ToList(),$"{title.Name}: {todo.Count} episodes logged"),true));
         else if(released.Count>0)actions.Children.Add(BigButton("Unmark all",()=>{var g=TrackedGroup(title);if(g!=null)UncheckAll(g.Where(store.EverWatched).ToList(),$"{title.Name} removed from history");},false));
         ContentPanel.Children.Add(hero);
         var seasons=title.Episodes.Select(e=>e.Season).Where(s=>s>0).Distinct().Order().ToList();
         if(seasons.Count==0){ContentPanel.Children.Add(Body("No episode list is available for this show yet."));return;}
         if(!seasons.Contains(logSeason))logSeason=seasons.FirstOrDefault(s=>title.Episodes.Any(e=>e.Season==s&&(e.AirsAt==null||e.AirsAt<=now)&&!Seen(s,e.Episode)),seasons[0]);
-        ContentPanel.Children.Add(UnderlineTabs(seasons.Select(s=>{var done=released.Where(e=>e.Season==s).ToList();return "Season "+s+(done.Count>0&&done.All(e=>Seen(e.Season,e.Episode))?" ✓":"");}).ToArray(),"Season "+logSeason+(released.Where(e=>e.Season==logSeason).ToList() is {Count:>0} r&&r.All(e=>Seen(e.Season,e.Episode))?" ✓":""),label=>{logSeason=int.Parse(label[7..].TrimEnd(' ','✓'));RenderQuiet();}));
+        ContentPanel.Children.Add(UnderlineTabs(seasons.Select(s=>{var done=released.Where(e=>e.Season==s).ToList();return "Season "+s+(done.Count>0&&done.All(e=>Seen(e.Season,e.Episode))?" [[check]]":"");}).ToArray(),"Season "+logSeason+(released.Where(e=>e.Season==logSeason).ToList() is {Count:>0} r&&r.All(e=>Seen(e.Season,e.Episode))?" [[check]]":""),label=>{logSeason=int.Parse(label[7..].Split(' ')[0]);RenderQuiet();}));
         var seasonEpisodes=title.Episodes.Where(e=>e.Season==logSeason).OrderBy(e=>e.Episode).ToList();var seasonReleased=seasonEpisodes.Where(e=>e.AirsAt==null||e.AirsAt<=now).ToList();
         var seasonSeen=seasonReleased.Count(e=>Seen(e.Season,e.Episode));
         var bar=new DockPanel{Margin=new(0,12,0,12)};
         var seasonAction=seasonSeen<seasonReleased.Count
-            ?ActionButton($"✓  Mark season {logSeason} watched",()=>LogTitleItems(title,seasonReleased.Where(e=>!Seen(e.Season,e.Episode)).Select(e=>(e.Season,e.Episode)).ToList(),$"{title.Name} season {logSeason} logged"),true)
+            ?ActionButton($"[[check]]  Mark season {logSeason} watched",()=>LogTitleItems(title,seasonReleased.Where(e=>!Seen(e.Season,e.Episode)).Select(e=>(e.Season,e.Episode)).ToList(),$"{title.Name} season {logSeason} logged"),true)
             :ActionButton($"Unmark season {logSeason}",()=>{var g=TrackedGroup(title);if(g!=null)UncheckAll(g.Where(i=>i.Season==logSeason&&store.EverWatched(i)).ToList(),$"Season {logSeason} unmarked");});
         seasonAction.IsEnabled=seasonReleased.Count>0;DockPanel.SetDock(seasonAction,Dock.Right);bar.Children.Add(seasonAction);
         bar.Children.Add(Text($"{seasonSeen} of {seasonReleased.Count} watched"+(seasonEpisodes.Count>seasonReleased.Count?$" · {seasonEpisodes.Count-seasonReleased.Count} still to air":""),14,"#AAA6A0"));((FrameworkElement)bar.Children[^1]).VerticalAlignment=VerticalAlignment.Center;
@@ -205,7 +205,7 @@ public partial class MainWindow
                 var before=released.Where(x=>(x.Season<e.Season||x.Season==e.Season&&x.Episode<=e.Episode)&&!Seen(x.Season,x.Episode)).ToList();
                 if(before.Count>1)
                 {
-                    var upTo=ActionButton($"✓ Up to here ({before.Count})",()=>LogTitleItems(title,before.Select(x=>(x.Season,x.Episode)).ToList(),$"{title.Name}: {before.Count} episodes logged up to S{ep.Season:00} E{ep.Episode:00}"));
+                    var upTo=ActionButton($"[[check]] Up to here ({before.Count})",()=>LogTitleItems(title,before.Select(x=>(x.Season,x.Episode)).ToList(),$"{title.Name}: {before.Count} episodes logged up to S{ep.Season:00} E{ep.Episode:00}"));
                     upTo.Background=Brush("Transparent");upTo.Foreground=Brush("#E4C084");upTo.FontSize=12.5;upTo.Padding=new(10,6,10,6);upTo.Opacity=1;upTo.ToolTip="Mark every earlier unwatched episode, and this one";
                     Grid.SetColumn(upTo,3);g.Children.Add(upTo);
                 }

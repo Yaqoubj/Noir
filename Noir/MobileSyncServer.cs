@@ -156,12 +156,12 @@ public sealed class MobileSyncServer : IAsyncDisposable
                     var limit=ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
                     if(limit is {IsReadOnly:false})limit.MaxRequestBodySize=6*1024*1024;
                 }
-                var requested=ctx.Request.Headers["X-Noir-Profile"].ToString();
+                var requested=MobileProfiles.Resolve(ctx.Request.Headers["X-Noir-Profile"].ToString(),store.DataDirectory);
                 if(ctx.Request.Path!="/v1/pair"&&!ctx.Request.Path.StartsWithSegments("/v1/profiles"))
                 {
                     if(!MobileProfiles.Matches(requested,store.DataDirectory)||ctx.Request.Headers["X-Noir-Host"].ToString() is {Length:>0} requestedHost&&requestedHost!=MobileProfiles.HostId(store.DataDirectory))
                     {var active=MobileProfiles.Active(store.DataDirectory);ctx.Response.StatusCode=409;await ctx.Response.WriteAsJsonAsync(new{activeProfileId=active.Id,activeProfileName=active.Name,hostId=MobileProfiles.HostId(store.DataDirectory)},Json);return;}
-                    if(requested.Length>0&&!ProfileAllowed(ctx,requested)){ctx.Response.StatusCode=403;return;}
+                    if(!ProfileAllowed(ctx,requested)){ctx.Response.StatusCode=403;return;}
                 }
                 var mediaResponse=ctx.Request.Path.StartsWithSegments("/v1/media")||ctx.Request.Path.StartsWithSegments("/v1/phone-downloads/content");
                 if(mediaResponse)Interlocked.Increment(ref activeMediaResponses);
@@ -311,7 +311,7 @@ public sealed class MobileSyncServer : IAsyncDisposable
     {
         IResult Error(int status,string en,string ar)=>Results.Json(new{error=store.State.Language=="ar"?ar:en},Json,statusCode:status);
         var auth=ctx.Request.Headers.Authorization.ToString();if(!auth.StartsWith("Bearer ",StringComparison.Ordinal)||!Authorized(auth[7..]))return Results.Unauthorized();
-        var requested=ctx.Request.Headers["X-Noir-Profile"].ToString();if(!MobileProfiles.Matches(requested,store.DataDirectory))return Results.StatusCode(409);if(requested.Length>0&&!ProfileAllowed(ctx,requested))return Results.StatusCode(403);
+        var requested=MobileProfiles.Resolve(ctx.Request.Headers["X-Noir-Profile"].ToString(),store.DataDirectory);if(!MobileProfiles.Matches(requested,store.DataDirectory))return Results.StatusCode(409);if(!ProfileAllowed(ctx,requested))return Results.StatusCode(403);
         if(downloads==null||confirmDownloadDelete==null)return Error(409,"Open Noir on your PC to confirm deletion.","افتح نوار على الكمبيوتر لتأكيد الحذف.");
         if(!await downloadDelete.WaitAsync(0,ctx.RequestAborted))return Error(409,"Another deletion is waiting for confirmation on your PC.","تنتظر عملية حذف أخرى التأكيد على الكمبيوتر.");
         try{
@@ -333,7 +333,7 @@ public sealed class MobileSyncServer : IAsyncDisposable
     sealed class DownloadDeleteInput {public string Id {get;set;}="";}
     bool ProfileAllowed(HttpContext ctx,string id)
     {
-        var p=Profiles.Load(MobileProfiles.Root(store.DataDirectory)).Profiles.FirstOrDefault(p=>p.Id==id);if(p==null)return false;if(p.PinHash.Length==0)return true;
+        var list=Profiles.Load(MobileProfiles.Root(store.DataDirectory));var p=list.Profiles.FirstOrDefault(p=>p.Id==id);if(p==null)return false;if(p.PinHash.Length==0&&list.ReadFailurePath==null)return true;
         var hash=Hash(ctx.Request.Headers.Authorization.ToString()[7..]);lock(gate)return Config.Peers.Any(peer=>peer.Hash==hash&&peer.ProfileAccess.Contains(id));
     }
     public int UnlockProfile(string token,string id,string pin)

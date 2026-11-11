@@ -16,12 +16,17 @@ public partial class MainWindow
 {
     string trackerTab="Up next",showsFilter="All",showsSort="Recent",moviesFilter="All",moviesSort="Recent";
     int trackerLimit=60;
-    static readonly string[] TrackerTabs=["Up next","Upcoming","Shows","Movies","Diary","Stats","Add history"];
+    static readonly string[] TrackerTabs=["Up next","Shows","Movies","Diary","Stats"];
     bool quietRender;
     string historyContinued="";
     HistorySettings? historySettings;string historySettingsDirectory="";
     HistorySettings HistoryPrefs{get{if(historySettings==null||historySettingsDirectory!=store.DataDirectory){historySettingsDirectory=store.DataDirectory;historySettings=HistorySettings.Load(store.DataDirectory);}return historySettings;}}
     static string T(string english,string arabic,params object[] values)=>string.Format(Loc.Culture,Loc.Arabic?arabic:T(english),values);
+    // A1-5: the one left-to-right episode label ("S01 · E02") for Up next, Shows cards and the diary; inside an Arabic line it keeps its own order.
+    static string EpisodeTag(VideoItem item)=>"\u202A"+item.EpisodeLabel+"\u202C";
+    static System.Windows.Documents.Run EpisodeRun(VideoItem item,string color,FontWeight? weight=null){var run=new System.Windows.Documents.Run(EpisodeTag(item)){Foreground=Brush(color),FlowDirection=FlowDirection.LeftToRight};if(weight is {} w)run.FontWeight=w;return run;}
+    static string MinutesText(int minutes)=>minutes>=60?(Loc.Arabic?$"{minutes/60} س {minutes%60:00}":$"{minutes/60} h {minutes%60:00}"):(Loc.Arabic?$"{minutes} د":$"{minutes} min");
+    static string EpisodesLeft(int left)=>left==1?T("Last episode out","آخر حلقة صدرت"):Loc.Count(left,"episode left","episodes left","حلقة واحدة متبقية","حلقتان متبقيتان","حلقات متبقية","حلقة متبقية");
     HistoryRewardState RewardState()=>HistoryRewards.Summary(store.Archive.SelectMany(i=>store.ViewingHistory(i).Select(v=>new RewardViewing(v.WatchedAt.ToLocalTime().Date,i.IsMovie,v.DateUnknown,v.Approximate))),DateTime.Today);
     void HistoryPop(FrameworkElement element)
     {
@@ -43,7 +48,7 @@ public partial class MainWindow
     }
     void HistoryEmptyActions()
     {
-        var row=new WrapPanel{Margin=new(0,12,0,8)};row.Children.Add(BigButton(T("＋  Log","＋  سجّل"),()=>OpenLog(null),true));row.Children.Add(BigButton(T("Import history","استيراد السجل"),()=>{trackerTab="Add history";Render();},false));ContentPanel.Children.Add(row);
+        var row=new WrapPanel{Margin=new(0,12,0,8)};row.Children.Add(BigButton(T("[[plus]]  Log","[[plus]]  سجّل"),()=>OpenLog(null),true));row.Children.Add(BigButton(T("Import","استيراد"),()=>{trackerTab="Import";Render();},false));ContentPanel.Children.Add(row);
     }
     void RenderViewingLife(List<Watched> views)
     {
@@ -67,17 +72,25 @@ public partial class MainWindow
     void RenderQuiet(){quietRender=true;try{Render();}finally{quietRender=false;}}
     void RenderTrackerHistory()
     {
-        ApplyAppMode();SearchPlaceholder.Text=T("Search your history","ابحث في سجلك");SearchBox.ToolTip=SearchPlaceholder.Text;PageEyebrow.Text=T("YOUR VIEWING LIFE","حكاية مشاهداتك");
+        ApplyAppMode();SearchPlaceholder.Text=T("Search your history","ابحث في سجلك");SearchBox.ToolTip=SearchPlaceholder.Text;PageEyebrow.Text="";
         if(logging){RenderLogWatched();return;}
-        PageTitle.Text=T("Your viewing life","حكاية مشاهداتك");
+        var subPage=trackerTab is "Upcoming" or "Import";PageTitle.Text=subPage?T(trackerTab):T("History","السجل");
         var views=AllViewings();
         LibraryHeader.Visibility=Visibility.Collapsed;
+        if(subPage)
+        {
+            var back=ActionButton(T("[[back]]  Back to History","[[back]]  العودة إلى السجل"),()=>{trackerTab=TrackerOnly?"Shows":"Up next";trackerLimit=60;Render();ContentScroll.ScrollToTop();});
+            back.Background=Brush("Transparent");back.Foreground=Brush("#AAA6A0");back.Padding=new(0,4,0,4);back.HorizontalAlignment=HorizontalAlignment.Left;back.Margin=new(0,TopBar.Height+Density.Pick(22,30),0,0);ContentPanel.Children.Add(back);
+            var subHeading=Text(PageTitle.Text,Density.Pick(24,28),"#F4F1EB",FontWeights.SemiBold);subHeading.Margin=new(0,6,0,0);ContentPanel.Children.Add(subHeading);
+            if(trackerTab=="Upcoming")RenderUpcoming();else RenderAddHistory();
+            return;
+        }
         var header=new DockPanel{Margin=new(0,TopBar.Height+Density.Pick(22,30),0,0),LastChildFill=true};
         var actions=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Bottom};DockPanel.SetDock(actions,Dock.Right);header.Children.Add(actions);
-        var log=ActionButton(T("＋  Log","＋  سجّل"),()=>OpenLog(null),true);log.Padding=Density.Compact?Density.ButtonPadding:new(20,11,22,11);log.ToolTip=T("Log movies and episodes watched anywhere","سجّل الأفلام والحلقات التي شاهدتها في أي مكان");System.Windows.Automation.AutomationProperties.SetName(log,log.Content.ToString());actions.Children.Add(log);
-        var import=ActionButton(T("⇅  Add history","⇅  أضف سجلّك"),()=>{trackerTab="Add history";Render();});import.Padding=Density.Compact?Density.ButtonPadding:new(18,11,20,11);import.Margin=new(10,0,0,0);import.ToolTip=T("Import history from other apps","استورد سجلّك من التطبيقات الأخرى");System.Windows.Automation.AutomationProperties.SetName(import,import.Content.ToString());actions.Children.Add(import);
-        var extras=ActionButton("⋯",()=>{});extras.Padding=new(14,6,14,12);extras.FontSize=17;extras.Margin=new(10,0,0,0);extras.ToolTip=T("More: year story, compare taste, calendar, backup","المزيد: حكاية العام ومقارنة الذوق والتقويم والنسخ الاحتياطي");System.Windows.Automation.AutomationProperties.SetName(extras,T("More history tools","المزيد من أدوات السجل"));extras.Click+=(_,_)=>ShowHistoryMore(extras);actions.Children.Add(extras);
-        var caption=new StackPanel();var heading=Text(PageTitle.Text,Density.Pick(24,28),"#F4F1EB",FontWeights.SemiBold);heading.TextWrapping=TextWrapping.NoWrap;heading.TextTrimming=TextTrimming.CharacterEllipsis;caption.Children.Add(heading);caption.Children.Add(Text(T("Every story, remembered.","كل حكاية تبقى."),12,"#9F9A93"));header.Children.Add(caption);header.SizeChanged+=(_,e)=>DockPanel.SetDock(actions,e.NewSize.Width<640?Dock.Bottom:Dock.Right);ContentPanel.Children.Add(header);
+        var log=ActionButton(T("[[plus]]  Log","[[plus]]  سجّل"),()=>OpenLog(null),true);log.Padding=Density.Compact?Density.ButtonPadding:new(20,11,22,11);log.ToolTip=T("Log movies and episodes watched anywhere","سجّل الأفلام والحلقات التي شاهدتها في أي مكان");System.Windows.Automation.AutomationProperties.SetName(log,log.Content.ToString());actions.Children.Add(log);
+        var import=ActionButton(T("[[swap]]  Import","[[swap]]  استيراد"),()=>{trackerTab="Import";Render();});import.Padding=Density.Compact?Density.ButtonPadding:new(18,11,20,11);import.Margin=new(10,0,0,0);import.ToolTip=T("Import history from other apps","استورد سجلّك من التطبيقات الأخرى");System.Windows.Automation.AutomationProperties.SetName(import,import.Content.ToString());actions.Children.Add(import);
+        var extras=ActionButton("[[more]]",()=>{});extras.Padding=new(14,6,14,12);extras.FontSize=17;extras.Margin=new(10,0,0,0);extras.ToolTip=T("More: year story, compare taste, calendar, backup","المزيد: حكاية العام ومقارنة الذوق والتقويم والنسخ الاحتياطي");System.Windows.Automation.AutomationProperties.SetName(extras,T("More history tools","المزيد من أدوات السجل"));extras.Click+=(_,_)=>ShowHistoryMore(extras);actions.Children.Add(extras);
+        var caption=new StackPanel();var heading=Text(PageTitle.Text,Density.Pick(24,28),"#F4F1EB",FontWeights.SemiBold);heading.TextWrapping=TextWrapping.NoWrap;heading.TextTrimming=TextTrimming.CharacterEllipsis;caption.Children.Add(heading);header.Children.Add(caption);header.SizeChanged+=(_,e)=>DockPanel.SetDock(actions,e.NewSize.Width<640?Dock.Bottom:Dock.Right);ContentPanel.Children.Add(header);
         ContentPanel.Children.Add(HistoryPillTabs());
         switch(trackerTab)
         {
@@ -86,7 +99,7 @@ public partial class MainWindow
             case "Movies":RenderTrackedMovies();break;
             case "Diary":RenderTrackerDiary();break;
             case "Stats":RenderHistoryStats();break;
-            case "Add history":RenderAddHistory();break;
+            case "Import":RenderAddHistory();break;
             default:RenderUpNextTracker();ContentPanel.Children.Add(HistoryProfileHeader());break;
         }
         RenderViewingLife(views);
@@ -133,16 +146,16 @@ public partial class MainWindow
             var empty=new Border{Background=new LinearGradientBrush(Brush("#2A241C").Color,Brush("#141416").Color,20),CornerRadius=new(16),Padding=new(30,28,30,28),Margin=new(0,18,0,10)};
             var stack=new StackPanel();empty.Child=stack;stack.Children.Add(Text(T("Track everything you watch","تتبّع كل ما تشاهده"),26,weight:FontWeights.Bold));
             stack.Children.Add(Body(T("Log shows and movies watched anywhere, or import your history. Your next episode appears here.","سجّل الأعمال التي شاهدتها في أي مكان أو استورد سجلّك. ستظهر حلقتك التالية هنا."),14));
-            var row=new StackPanel{Orientation=Orientation.Horizontal,Margin=new(0,8,0,0)};row.Children.Add(BigButton(T("＋   Log what you watched","＋   سجّل ما شاهدته"),()=>OpenLog(null),true));row.Children.Add(BigButton(T("⇅   Import history","⇅   استيراد السجل"),()=>{trackerTab="Add history";Render();},false));stack.Children.Add(row);
+            var row=new StackPanel{Orientation=Orientation.Horizontal,Margin=new(0,8,0,0)};row.Children.Add(BigButton(T("[[plus]]   Log what you watched","[[plus]]   سجّل ما شاهدته"),()=>OpenLog(null),true));row.Children.Add(BigButton(T("[[swap]]   Import","[[swap]]   استيراد"),()=>{trackerTab="Import";Render();},false));stack.Children.Add(row);
             ContentPanel.Children.Add(empty);
         }
         var watchNext=premieres.Count+active.Count;
-        if(watchNext>0){ContentPanel.Children.Add(Heading(T("Watch next","شاهد تالياً"),T("{0} shows in progress · check off an episode when you finish it.","{0} أعمال تتابعها · سجّل الحلقة عند الانتهاء منها.",watchNext)));var watchGrid=TrackerGrid(premieres.Select(t=>TrackerRow(t,false,T("SEASON {0} IS OUT","الموسم {0} متاح",t.Next!.Season))).Concat(active.Take(trackerLimit).Select(t=>TrackerRow(t,false))));watchGrid.Tag="HistoryWatchNext";ContentPanel.Children.Add(watchGrid);}
+        if(watchNext>0){ContentPanel.Children.Add(Body(T("{0} shows in progress · check off an episode when you finish it.","{0} أعمال تتابعها · سجّل الحلقة عند الانتهاء منها.",watchNext),13));var watchGrid=TrackerGrid(premieres.Select(t=>TrackerRow(t,false,T("SEASON {0} IS OUT","الموسم {0} متاح",t.Next!.Season))).Concat(active.Take(trackerLimit).Select(t=>TrackerRow(t,false))));watchGrid.Tag="HistoryWatchNext";ContentPanel.Children.Add(watchGrid);}
         RenderRecentlyWatched();
         var soon=shows.Where(t=>t.Status=="Caught up").Select(t=>(t.Group,Next:store.State.EpisodeSchedules.GetValueOrDefault(t.Group[0].GroupKey)?.Where(e=>e.Season>0&&e.AirsAt>now).OrderBy(e=>e.AirsAt).FirstOrDefault())).Where(x=>x.Next!=null).OrderBy(x=>x.Next!.AirsAt).Take(12).ToList();
         if(soon.Count>0)ContentPanel.Children.Add(Rail(T("Caught up · airing soon","أكملت المتاح · قريباً"),T("New episodes of shows you've finished so far.","حلقات جديدة من الأعمال التي أكملت حلقاتها المتاحة."),soon.Select(x=>CalendarCard(x.Group,x.Next!)).ToList()));
         if(fresh.Count>0)ContentPanel.Children.Add(Rail(T("Not started yet","لم تبدأ بعد"),T("A new story is waiting.","حكاية جديدة بانتظارك."),fresh.Take(20).Select(t=>TrackerPoster(t)).ToList()));
-        if(historyOnly>0&&SearchBox.Text.Trim().Length==0){var note=ActionButton(T("{0} unfinished shows from your history are in Shows  ›","{0} أعمال غير مكتملة من سجلك في قسم المسلسلات  ‹",historyOnly),()=>{trackerTab="Shows";showsFilter="Unfinished";Render();});note.Background=Brush("Transparent");note.Foreground=Brush("#9F9A93");note.FontSize=12.5;note.Padding=new(0,14,0,0);ContentPanel.Children.Add(note);}
+        if(historyOnly>0&&SearchBox.Text.Trim().Length==0){var note=ActionButton(T("{0} unfinished shows from your history are in Shows  [[chevron]]","{0} أعمال غير مكتملة من سجلك في قسم المسلسلات  [[chevron-left]]",historyOnly),()=>{trackerTab="Shows";showsFilter="Unfinished";Render();});note.Background=Brush("Transparent");note.Foreground=Brush("#9F9A93");note.FontSize=12.5;note.Padding=new(0,14,0,0);ContentPanel.Children.Add(note);}
         if(dormant.Count>0){ContentPanel.Children.Add(Heading(T("Still watching these?","هل ما زلت تتابع هذه الأعمال؟"),T("Nothing checked off for two months. Keep watching, or stop showing.","لم تسجّل مشاهدة منذ شهرين. واصل المتابعة أو أوقف إظهارها.")));ContentPanel.Children.Add(TrackerGrid(dormant.Take(trackerLimit).Select(t=>TrackerRow(t,true))));}
         RenderHistoryFavourites();
     }
@@ -156,21 +169,21 @@ public partial class MainWindow
     FrameworkElement TrackerRow(Tracked t,bool dormant,string badge="")
     {
         var show=t.Group[0];var next=t.Next!;var left=t.Released-t.Watched;
-        var card=new Border{Tag="HistoryTrackerRow:"+show.GroupKey,Background=Brush("#161618"),CornerRadius=new(14),BorderBrush=Brush("#00000000"),BorderThickness=new(1.5),Padding=new(12),Opacity=dormant?.82:1};
-        var g=new Grid();g.ColumnDefinitions.Add(new(){Width=new(Density.Pick(66,78))});g.ColumnDefinitions.Add(new(){Width=new(1,GridUnitType.Star)});g.ColumnDefinitions.Add(new(){Width=GridLength.Auto});card.Child=g;
-        var poster=new Button{Content=Art(show.Poster,show.Title,Density.Pick(99,117),true),Padding=new(0),Height=Density.Pick(99,117),Background=Brush("Transparent"),ToolTip=T("Open {0}","افتح {0}",show.Title)};poster.Click+=(_,_)=>OpenHistoryTitle(t.Group);
+        var card=new Border{Tag="HistoryTrackerRow:"+show.GroupKey,Background=Brush("#161618"),CornerRadius=new(14),BorderBrush=Brush("#00000000"),BorderThickness=new(1.5),Padding=new(10,8,10,8),Opacity=dormant?.82:1};
+        var g=new Grid();g.ColumnDefinitions.Add(new(){Width=new(Density.Pick(60,68))});g.ColumnDefinitions.Add(new(){Width=new(1,GridUnitType.Star)});g.ColumnDefinitions.Add(new(){Width=GridLength.Auto});card.Child=g;
+        var poster=new Button{Content=Art(show.Poster,show.Title,Density.Pick(90,102),true),Padding=new(0),Height=Density.Pick(90,102),Background=Brush("Transparent"),ToolTip=T("Open {0}","افتح {0}",show.Title)};poster.Click+=(_,_)=>OpenHistoryTitle(t.Group);
         System.Windows.Automation.AutomationProperties.SetName(poster,poster.ToolTip.ToString());g.Children.Add(new Border{CornerRadius=new(8),ClipToBounds=true,Child=poster,VerticalAlignment=VerticalAlignment.Center});
-        var info=new StackPanel{Margin=new(16,2,12,2),VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(info,1);g.Children.Add(info);
+        var info=new StackPanel{Margin=new(14,0,12,0),VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(info,1);g.Children.Add(info);
         var remaining=t.Group.Where(i=>store.Counts(i)&&store.Aired(i,DateTimeOffset.UtcNow)&&!store.EverWatched(i)).ToList();
         if(badge.Length>0||left is >0 and <3)info.Children.Add(new Border{Background=Brush(badge.Length>0?"#E4C084":"#33E4C084"),CornerRadius=new(5),Padding=new(7,2,7,2),Margin=new(0,0,0,5),HorizontalAlignment=HorizontalAlignment.Left,Child=Text(badge.Length>0?badge:T("ALMOST DONE","أوشكت على الإكمال"),9.5,badge.Length>0?"#16120C":"#E4C084",FontWeights.Bold)});
         var title=Text(show.Title,17,weight:FontWeights.SemiBold);title.TextTrimming=TextTrimming.CharacterEllipsis;title.TextWrapping=TextWrapping.NoWrap;info.Children.Add(title);
         var spoiler=store.State.HideSpoilers&&!store.EverWatched(next);
-        var episode=new TextBlock{FontSize=13.5,Margin=new(0,5,0,0),TextTrimming=TextTrimming.CharacterEllipsis};episode.Inlines.Add(new System.Windows.Documents.Run("\u202A"+next.EpisodeLabel.Replace(" · "," ")+"\u202C"){Foreground=Brush("#E4C084"),FontWeight=FontWeights.SemiBold});
+        var episode=new TextBlock{FontSize=13.5,Margin=new(0,5,0,0),TextTrimming=TextTrimming.CharacterEllipsis};episode.Inlines.Add(EpisodeRun(next,"#E4C084",FontWeights.SemiBold));
         if(next.EpisodeTitle.Length>0&&!spoiler)episode.Inlines.Add(new System.Windows.Documents.Run("   "+next.EpisodeTitle){Foreground=Brush("#D9D4CC")});info.Children.Add(episode);
         var minutes=remaining.Sum(store.RuntimeMinutes);
-        var meta=Text((left==1?"Last episode out":$"{left} episodes left")+(minutes>0?" · ≈ "+(minutes>=60?$"{minutes/60} h {minutes%60:00}":$"{minutes} min"):"")+(t.Last>DateTimeOffset.MinValue?"  ·  "+Ago(t.Last):"")+(!TrackerOnly&&CanPlay(next)?"  ·  On your PC":""),12,"#9F9A93");meta.Margin=new(0,5,0,9);info.Children.Add(meta);
-        info.Children.Add(new ProgressBar{Value=t.Watched,Maximum=Math.Max(1,t.Released),Height=4,Foreground=Brush("#E4C084"),Background=Brush("#2E2C2F"),BorderThickness=new(0)});
-        var completion=new StackPanel{Orientation=Orientation.Horizontal,Margin=new(0,8,0,0)};completion.Children.Add(Ring(t.Watched/(double)Math.Max(1,t.Released),30,""));var progress=Text(T("{0} / {1} episodes","{0} / {1} حلقة",t.Watched,t.Released),11,"#B9AB94");progress.Margin=new(8,0,0,0);progress.VerticalAlignment=VerticalAlignment.Center;completion.Children.Add(progress);info.Children.Add(completion);
+        var meta=Text(EpisodesLeft(left)+(minutes>0?" · ≈ "+MinutesText(minutes):"")+(t.Last>DateTimeOffset.MinValue?"  ·  "+Ago(t.Last):"")+(!TrackerOnly&&CanPlay(next)?"  ·  "+T("On your PC","على جهازك"):""),12,"#9F9A93");Bidi(meta);meta.Margin=new(0,3,0,7);info.Children.Add(meta);
+        var bar=new ProgressBar{Value=t.Watched,Maximum=Math.Max(1,t.Released),Height=4,VerticalAlignment=VerticalAlignment.Center,Foreground=Brush("#E4C084"),Background=Brush("#2E2C2F"),BorderThickness=new(0)};
+        var completion=new DockPanel{LastChildFill=true};var progress=Text(T("{0} / {1}","{0} / {1}",t.Watched,t.Released),11,"#B9AB94");progress.Margin=new(10,0,0,0);progress.VerticalAlignment=VerticalAlignment.Center;DockPanel.SetDock(progress,Dock.Right);completion.Children.Add(progress);completion.Children.Add(bar);info.Children.Add(completion);
         // Episodes skipped before the furthest one watched: offer to fill them in instead of ignoring them.
         var gaps=store.Gaps(t.Group).Where(i=>i.Id!=next.Id).ToList();
         if(gaps.Count>0){var fill=ActionButton($"Skipped {gaps.Count} earlier · Mark them",()=>BulkCheckOff(gaps,$"{show.Title}: {gaps.Count} skipped episode{(gaps.Count==1?"":"s")} marked"));fill.Background=Brush("Transparent");fill.Foreground=Brush("#E4C084");fill.FontSize=12;fill.Padding=new(0,6,0,0);fill.ToolTip=Range(gaps);info.Children.Add(fill);}
@@ -182,27 +195,27 @@ public partial class MainWindow
             info.Children.Add(nudge);
         }
         var tools=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(tools,2);g.Children.Add(tools);
-        if(!TrackerOnly&&CanPlay(next)){var play=SmallRound("▶","Play "+next.EpisodeLabel,()=>_=PlayVideo(next));tools.Children.Add(play);}
-        else if(!TrackerOnly&&StreamOffered){var stream=SmallRound("▶","Stream "+next.EpisodeLabel,()=>StreamItem(next));tools.Children.Add(stream);}
-        tools.Children.Add(CheckCircle(false,"Mark "+next.EpisodeLabel+" watched",()=>{historyContinued=show.GroupKey;LogBatch([new(next,DateTimeOffset.UtcNow)],$"{show.Title} {next.EpisodeLabel.Replace(" · "," ")} watched",next);},Density.Pick(46,54)));
+        if(!TrackerOnly&&CanPlay(next)){var play=SmallRound("[[play]]",T("Play","تشغيل")+" "+EpisodeTag(next),()=>_=PlayVideo(next));play.Background=Brush("#E4C084");play.Foreground=Brush("#16120C");tools.Children.Add(play);}
+        else if(!TrackerOnly&&StreamOffered){var stream=SmallRound("[[play]]",T("Stream","بث")+" "+EpisodeTag(next),()=>StreamItem(next));tools.Children.Add(stream);}
+        tools.Children.Add(CheckCircle(false,T("Mark {0} watched","تسجيل مشاهدة {0}",EpisodeTag(next)),()=>{historyContinued=show.GroupKey;LogBatch([new(next,DateTimeOffset.UtcNow)],T("{0} {1} watched","تم تسجيل مشاهدة {0} {1}",show.Title,EpisodeTag(next)),next);},40));
         if(historyContinued==show.GroupKey){historyContinued="";card.Loaded+=(_,_)=>HistoryPop(card);}
         LazyMenu(card,next);tools.Children.Add(MoreButton(next));
-        var stopQuick=ActionButton("✕",()=>StopShowing(show));stopQuick.ToolTip=T("Stop showing","إيقاف الإظهار");System.Windows.Automation.AutomationProperties.SetName(stopQuick,stopQuick.ToolTip.ToString());stopQuick.Padding=new(8,5,8,5);stopQuick.Opacity=0;tools.Children.Add(stopQuick);
+        var stopQuick=ActionButton("[[close]]",()=>StopShowing(show));stopQuick.ToolTip=T("Stop showing","إيقاف الإظهار");System.Windows.Automation.AutomationProperties.SetName(stopQuick,stopQuick.ToolTip.ToString());stopQuick.Padding=new(8,5,8,5);stopQuick.Opacity=0;tools.Children.Add(stopQuick);
         void StopVisibility()=>stopQuick.Opacity=card.IsMouseOver||card.IsKeyboardFocusWithin?1:0;card.MouseEnter+=(_,_)=>StopVisibility();card.MouseLeave+=(_,_)=>StopVisibility();card.IsKeyboardFocusWithinChanged+=(_,_)=>StopVisibility();
         card.MouseEnter+=(_,_)=>card.BorderBrush=Brush("#40E4C084");card.MouseLeave+=(_,_)=>card.BorderBrush=Brush("#00000000");
         return card;
     }
     Button SmallRound(string glyph,string tip,Action act)
     {
-        var b=RoundAction(glyph,tip,act);b.Width=b.Height=40;b.Margin=new(0,0,10,0);b.Background=Brush("#26FFFFFF");((TextBlock)b.Content).FontSize=14;return b;
+        var b=RoundAction(glyph,tip,act);b.Width=b.Height=40;b.Margin=new(0,0,10,0);b.Background=Brush("#26FFFFFF");b.FontSize=14;return b;
     }
     // The tracker's signature control: an outlined circle that fills gold with a tick.
     Button CheckCircle(bool on,string tip,Action act,double size=40)
     {
         var ring=new Ellipse{Width=size,Height=size,StrokeThickness=2,Stroke=Brush(on?"#E4C084":"#6B665E"),Fill=Brush(on?"#E4C084":"#00000000")};
         var tick=new Path{Data=Geometry.Parse("M0,5 L4,9 L12,0"),Stroke=Brush(on?"#16120C":"#9F9A93"),StrokeThickness=2.2,StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round,StrokeLineJoin=PenLineJoin.Round,Width=size*.4,Height=size*.32,Stretch=Stretch.Uniform,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
-        var face=new Grid{Width=size,Height=size};face.Children.Add(ring);face.Children.Add(tick);
-        var b=new Button{Content=face,Padding=new(0),Background=Brush("Transparent"),ToolTip=tip,Width=size,Height=size};System.Windows.Automation.AutomationProperties.SetName(b,tip);
+        var face=new Grid{Width=size,Height=size,FlowDirection=FlowDirection.LeftToRight};/* A1-8: the tick does not mirror */face.Children.Add(ring);face.Children.Add(tick);
+        var b=new Button{Content=face,Padding=new(0),Background=Brush("Transparent"),ToolTip=tip,Width=size,Height=size};System.Windows.Automation.AutomationProperties.SetName(b,tip.Replace("\u202A","").Replace("\u202C",""));// accessible names carry no direction marks
         b.MouseEnter+=(_,_)=>{if(!on){ring.Stroke=Brush("#E4C084");tick.Stroke=Brush("#E4C084");}};b.MouseLeave+=(_,_)=>{if(!on){ring.Stroke=Brush("#6B665E");tick.Stroke=Brush("#9F9A93");}};
         b.Click+=(_,_)=>
         {
@@ -261,18 +274,17 @@ public partial class MainWindow
         var picture=new Grid{Height=Density.PosterHeight,ClipToBounds=true};
         var open=new Button{Content=Art(show.Poster,show.Title,Density.PosterHeight,true),Padding=new(0),Background=Brush("Transparent"),HorizontalContentAlignment=HorizontalAlignment.Stretch,ToolTip=show.Title+" · Episodes"};open.Click+=(_,_)=>OpenHistoryTitle(t.Group);picture.Children.Add(open);
         var shade=new LinearGradientBrush{StartPoint=new(0,0),EndPoint=new(0,1)};shade.GradientStops.Add(new(Color.FromArgb(0,0,0,0),.6));shade.GradientStops.Add(new(Color.FromArgb(200,8,8,10),1));picture.Children.Add(new Border{Background=shade,IsHitTestVisible=false});
-        var ring=Ring(t.Released==0?0:t.Watched/(double)t.Released,46,t.Released==0?"–":Math.Max(t.Watched>0?1:0,t.Watched*100/t.Released)+"%");ring.Margin=new(10);ring.HorizontalAlignment=HorizontalAlignment.Right;ring.VerticalAlignment=VerticalAlignment.Bottom;ring.IsHitTestVisible=false;picture.Children.Add(ring);
-        var chip=t.Status switch{"Caught up"=>T("CAUGHT UP","أكملت المتاح"),"Finished"=>T("FINISHED","مكتمل"),"Dropped"=>T("STOPPED","متوقف"),"Not started"=>T("NOT STARTED","لم تبدأ"),"Unfinished"=>T("UNFINISHED","غير مكتمل"),_=>""};
+                var chip=t.Status switch{"Caught up"=>T("CAUGHT UP","أكملت المتاح"),"Finished"=>T("FINISHED","مكتمل"),"Dropped"=>T("DROPPED","متوقف"),"Not started"=>T("NOT STARTED","لم تبدأ"),"Unfinished"=>T("UNFINISHED","غير مكتمل"),_=>""};
         if(chip.Length>0)picture.Children.Add(new Border{IsHitTestVisible=false,Background=Brush(t.Status is "Caught up" or "Finished"?"#E4C084":"#E6101012"),CornerRadius=new(6),Padding=new(7,3,7,3),Margin=new(10),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Top,Child=Text(chip,9.5,t.Status is "Caught up" or "Finished"?"#16120C":"#E4C084",FontWeights.Bold)});
         var more=MoreButton(show);more.HorizontalAlignment=HorizontalAlignment.Right;more.VerticalAlignment=VerticalAlignment.Top;more.Margin=new(8);picture.Children.Add(more);
         var edge=new Border{CornerRadius=new(10),ClipToBounds=true,Child=picture,BorderThickness=new(1.5),BorderBrush=Brush("#00000000")};panel.Children.Add(edge);
         var name=Text(show.Title,14,weight:FontWeights.SemiBold);name.Margin=new(0,9,0,2);name.TextTrimming=TextTrimming.CharacterEllipsis;name.TextWrapping=TextWrapping.NoWrap;panel.Children.Add(name);
-        var sub=t.Next!=null&&t.Status!="Dropped"?"Next  "+t.Next.EpisodeLabel.Replace(" · "," "):$"{t.Watched} of {t.Released} episodes";
+        var sub=t.Next!=null&&t.Status!="Dropped"?T("Next","التالي")+"  "+EpisodeTag(t.Next):T("{0} of {1} episodes","{0} من {1} حلقة",t.Watched,t.Released);
         if(ShowStars(show.GroupKey) is {Length:>0} rated)sub+="   "+rated;
         panel.Children.Add(Text(sub,11,"#9F9A93"));
         if(t.Next!=null&&t.Status is "Watching" or "Not started" or "Unfinished")
         {
-            var quick=CheckCircle(false,"Mark "+t.Next.EpisodeLabel+" watched",()=>SmartCheckOff(t.Next,$"{show.Title} {t.Next.EpisodeLabel.Replace(" · "," ")} watched"),34);
+            var quick=CheckCircle(false,T("Mark {0} watched","تسجيل مشاهدة {0}",EpisodeTag(t.Next)),()=>SmartCheckOff(t.Next,T("{0} {1} watched","تم تسجيل مشاهدة {0} {1}",show.Title,EpisodeTag(t.Next))),34);
             quick.Margin=new(0,-30,0,0);quick.HorizontalAlignment=HorizontalAlignment.Right;panel.Children.Add(quick);
         }
         if(t.Status=="Dropped"){var back=ActionButton(T("Bring back","إعادة الإظهار"),()=>BringBack(show));back.Margin=new(0,8,0,0);panel.Children.Add(back);}
@@ -288,7 +300,7 @@ public partial class MainWindow
         bar.Children.Add(Chips(filters.Where(f=>f=="All"||counts[f]>0).Select(f=>f).ToArray(),showsFilter,v=>{showsFilter=v;trackerLimit=60;Render();}));ContentPanel.Children.Add(bar);
         var shown=all.Where(t=>showsFilter=="All"||t.Status==showsFilter).ToList();
         shown=(showsSort=="A–Z"?shown.OrderBy(t=>t.Group[0].Title):showsSort=="Most left"?shown.OrderByDescending(t=>t.Released-t.Watched):showsSort=="Rating"?shown.OrderByDescending(t=>store.State.ShowRatings.GetValueOrDefault(t.Group[0].GroupKey)).ThenByDescending(t=>t.Last):shown.OrderByDescending(t=>t.Last)).ToList();
-        if(shown.Count==0){ContentPanel.Children.Add(Heading(all.Count==0?"No shows tracked yet":"Nothing here",all.Count==0?"Log a show you've watched and every episode you check off appears here.":"Try another filter."));if(all.Count==0)ContentPanel.Children.Add(ActionButton("＋  Log a show",()=>OpenLog(null),true));return;}
+        if(shown.Count==0){ContentPanel.Children.Add(Heading(all.Count==0?"No shows tracked yet":"Nothing here",all.Count==0?"Log a show you've watched and every episode you check off appears here.":"Try another filter."));if(all.Count==0)ContentPanel.Children.Add(ActionButton("[[plus]]  Log a show",()=>OpenLog(null),true));return;}
         ContentPanel.Children.Add(Body($"{shown.Count} show{(shown.Count==1?"":"s")} · {shown.Sum(t=>t.Watched):N0} episodes watched · {shown.Sum(t=>Math.Max(0,t.Released-t.Watched)):N0} to go",13));
         var wrap=new WrapPanel{Margin=new(0,8,0,0)};foreach(var t in shown.Take(trackerLimit))wrap.Children.Add(TrackerPoster(t));ContentPanel.Children.Add(wrap);
         if(shown.Count>trackerLimit)ContentPanel.Children.Add(MoreButton(shown.Count-trackerLimit));
@@ -303,7 +315,7 @@ public partial class MainWindow
         bar.Children.Add(Chips(["All","Rated","Rewatched","Not rated"],moviesFilter,v=>{moviesFilter=v;trackerLimit=60;Render();}));ContentPanel.Children.Add(bar);
         var shown=movies.Where(m=>moviesFilter switch{"Rated"=>Rating(m.Item)>0,"Not rated"=>Rating(m.Item)==0,"Rewatched"=>m.Views.Count>1,_=>true}).ToList();
         shown=(moviesSort=="A–Z"?shown.OrderBy(m=>m.Item.Title):moviesSort=="Rating"?shown.OrderByDescending(m=>Rating(m.Item)).ThenByDescending(m=>HistoryDate(m.Item)):shown.OrderByDescending(m=>HistoryDate(m.Item))).ToList();
-        if(shown.Count==0){ContentPanel.Children.Add(Heading(movies.Count==0?"No movies logged yet":"Nothing here",movies.Count==0?"Movies you finish in Noir, log by hand or import appear here.":"Try another filter."));if(movies.Count==0)ContentPanel.Children.Add(ActionButton("＋  Log a movie",()=>OpenLog(null),true));return;}
+        if(shown.Count==0){ContentPanel.Children.Add(Heading(movies.Count==0?"No movies logged yet":"Nothing here",movies.Count==0?"Movies you finish in Noir, log by hand or import appear here.":"Try another filter."));if(movies.Count==0)ContentPanel.Children.Add(ActionButton("[[plus]]  Log a movie",()=>OpenLog(null),true));return;}
         ContentPanel.Children.Add(Body($"{shown.Count} movie{(shown.Count==1?"":"s")} · {shown.Sum(m=>m.Views.Count)} viewing{(shown.Sum(m=>m.Views.Count)==1?"":"s")} · {shown.Count(m=>Rating(m.Item)>0)} rated",13));
         var wrap=new WrapPanel{Margin=new(0,8,0,0)};
         foreach(var (item,list) in shown.Take(trackerLimit))
@@ -335,10 +347,10 @@ public partial class MainWindow
         var months=dated.Select(r=>r.View.WatchedAt.ToLocalTime().ToString("yyyy-MM")).Distinct().ToList();
         if(historyMonthTracker!="All time"&&!months.Contains(historyMonthTracker))historyMonthTracker="All time";
         var bar=new DockPanel{Margin=new(0,6,0,0)};
-        var month=ActionButton((historyMonthTracker=="All time"?"All time":DateTime.Parse(historyMonthTracker+"-01").ToString("MMMM yyyy"))+"  ▾",()=>{});month.Style=(Style)FindResource("Pill");month.Padding=new(16,8,16,8);month.Margin=new(0,14,0,8);DockPanel.SetDock(month,Dock.Right);bar.Children.Add(month);
+        var month=ActionButton((historyMonthTracker=="All time"?"All time":DateTime.Parse(historyMonthTracker+"-01").ToString("MMMM yyyy"))+"  [[chevron-down]]",()=>{});month.Style=(Style)FindResource("Pill");month.Padding=new(16,8,16,8);month.Margin=new(0,14,0,8);DockPanel.SetDock(month,Dock.Right);bar.Children.Add(month);
         var menu=new ContextMenu();foreach(var value in new[]{"All time"}.Concat(months)){var v=value;var option=new MenuItem{Header=v=="All time"?v:DateTime.Parse(v+"-01").ToString("MMMM yyyy")};option.Click+=(_,_)=>{historyMonthTracker=v;trackerLimit=60;Render();};menu.Items.Add(option);}
         month.Click+=(_,_)=>{menu.PlacementTarget=month;menu.Placement=PlacementMode.Bottom;menu.IsOpen=true;};
-        var hide=new CheckBox{Content="Hide logged history",IsChecked=hideLoggedHistory,Foreground=Brush("#C7C2BC"),VerticalAlignment=VerticalAlignment.Center,Margin=new(0,14,16,8),ToolTip="Only what you recorded as you watched it, without back-filled or imported entries"};
+        var hide=new CheckBox{Content=T("Hide logged history","إخفاء السجل المدوَّن"),IsChecked=hideLoggedHistory,Foreground=Brush("#C7C2BC"),VerticalAlignment=VerticalAlignment.Center,Margin=new(0,14,16,8),ToolTip=T("Only what you recorded as you watched it, without back-filled or imported entries","فقط ما سجّلته أثناء المشاهدة، دون الإدخالات المضافة لاحقًا أو المستوردة")};
         hide.Click+=(_,_)=>{hideLoggedHistory=hide.IsChecked==true;trackerLimit=60;Render();};DockPanel.SetDock(hide,Dock.Right);bar.Children.Add(hide);
         bar.Children.Add(Chips(["All","Movies","Shows"],historyType,v=>{historyType=v;trackerLimit=60;Render();}));ContentPanel.Children.Add(bar);
         var inMonth=dated.Where(r=>historyMonthTracker=="All time"||r.View.WatchedAt.ToLocalTime().ToString("yyyy-MM")==historyMonthTracker).ToList();
@@ -349,7 +361,7 @@ public partial class MainWindow
             if(shown>=trackerLimit)break;
             var label=day.Key==DateTime.Today?"Today":day.Key==DateTime.Today.AddDays(-1)?"Yesterday":day.Key.ToString(day.Key.Year==DateTime.Today.Year?"dddd, d MMMM":"dddd, d MMMM yyyy");
             var heading=new DockPanel{Margin=new(0,26,0,10)};var count=Text(T("{0} watched","{0} مشاهدة",day.Count()),12,"#B5A68E");count.VerticalAlignment=VerticalAlignment.Center;DockPanel.SetDock(count,Dock.Right);heading.Children.Add(count);
-            var stack=new Grid{Width=84,Height=42,Margin=new(0,0,12,0)};var covers=day.DistinctBy(v=>v.Item.GroupKey).Take(3).ToList();for(int i=covers.Count-1;i>=0;i--){var cover=new Border{Width=28,Height=42,CornerRadius=new(4),ClipToBounds=true,HorizontalAlignment=HorizontalAlignment.Left,Margin=new(i*20,0,0,0),BorderThickness=new(1),BorderBrush=Brush("#35302A"),Child=HistoryArt(covers[i].Item,42)};stack.Children.Add(cover);}DockPanel.SetDock(stack,Dock.Right);heading.Children.Add(stack);heading.Children.Add(Text(label=="Today"?T("Today","اليوم"):label=="Yesterday"?T("Yesterday","أمس"):label,19,weight:FontWeights.SemiBold));ContentPanel.Children.Add(heading);
+            heading.Children.Add(Text(label=="Today"?T("Today","اليوم"):label=="Yesterday"?T("Yesterday","أمس"):label,19,weight:FontWeights.SemiBold));ContentPanel.Children.Add(heading);
             foreach(var r in day.Take(Math.Max(0,trackerLimit-shown))){ContentPanel.Children.Add(DiaryRow(r.Item,r.View));shown++;}
         }
         if(inMonth.Count>shown){ContentPanel.Children.Add(MoreButton(inMonth.Count-shown));return;}
@@ -365,7 +377,7 @@ public partial class MainWindow
                 var buttons=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};DockPanel.SetDock(buttons,Dock.Right);dock.Children.Add(buttons);
                 Button Small(string label,Action<Button> act){var b=ActionButton(label,()=>{});b.Padding=new(12,6,12,6);b.Margin=new(8,0,0,0);b.Click+=(_,_)=>act(b);buttons.Children.Add(b);return b;}
                 // One date for the whole group covers "I binged season 1 in March 2019"; single viewings are editable when expanded.
-                Small("✎  Set date for all",b=>DateChooser(b,DateTime.Today,(day,unknown)=>
+                Small("[[pencil]]  Set date for all",b=>DateChooser(b,DateTime.Today,(day,unknown)=>
                 {
                     if(unknown)return;var undo=store.Snapshot(views.Select(r=>r.Item).DistinctBy(i=>i.Id));
                     foreach(var r in views)store.SetViewingDate(r.Item,r.View.Id,new DateTimeOffset(day.Date.AddHours(20)),false);
@@ -385,7 +397,7 @@ public partial class MainWindow
             if(undatedGroups.Count>undatedGroupLimit)ContentPanel.Children.Add(UndatedMore(undatedGroups.Count-undatedGroupLimit,()=>{undatedGroupLimit+=40;RenderQuiet();}));
         }
     }
-    static string SourceLabel(string source)=>source.StartsWith("Imported from ")?source[14..]:source switch{"Playback"=>"Played in Noir","Android playback"=>"Phone","Marked on Android"=>"Phone","Earlier record"=>"Noir",_=>source};
+    static string SourceLabel(string source)=>source.StartsWith("Imported from ")?source[14..]:source switch{"Playback"=>T("Played in Noir","شُغّل في Noir"),"Android playback"=>T("Phone","الهاتف"),"Marked on Android"=>T("Phone","الهاتف"),"Earlier record"=>"Noir",_=>source};
     FrameworkElement HistoryArt(VideoItem item,double height,bool still=false)
     {
         var path=still&&System.IO.File.Exists(item.EpisodeImage)?item.EpisodeImage:item.Poster;
@@ -403,24 +415,30 @@ public partial class MainWindow
         var info=new StackPanel{Margin=new(14,0,12,0),VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(info,2);g.Children.Add(info);
         var title=ActionButton("",()=>OpenHistoryTitle(store.EpisodesFor(item.GroupKey)));title.Content=Text(item.Title,15.5,weight:FontWeights.SemiBold);title.Background=Brush("Transparent");title.Padding=new(0);info.Children.Add(title);
         var line=new TextBlock{FontSize=12.5,Margin=new(0,3,0,0),TextTrimming=TextTrimming.CharacterEllipsis};
-        line.Inlines.Add(new System.Windows.Documents.Run(item.IsMovie?(item.Year>0?item.Year.ToString():T("Movie")):$"S{item.Season:00}E{item.Episode:00}"){Foreground=Brush("#E4C084")});
+        line.Inlines.Add(item.IsMovie?new System.Windows.Documents.Run(item.Year>0?item.Year.ToString():T("Movie")){Foreground=Brush("#E4C084")}:EpisodeRun(item,"#E4C084"));
         if(!item.IsMovie&&item.EpisodeTitle.Length>0)line.Inlines.Add(new System.Windows.Documents.Run("   "+item.EpisodeTitle){Foreground=Brush("#C7C2BC")});info.Children.Add(line);
         var meta=new StackPanel{Orientation=Orientation.Horizontal,Margin=new(0,6,0,0)};
         meta.Children.Add(new Border{Background=Brush("#1FFFFFFF"),CornerRadius=new(5),Padding=new(7,2,7,2),Child=Text(SourceLabel(view.Source),10.5,"#C7C2BC")});
-        if(view.Approximate)meta.Children.Add(new Border{Background=Brush("#14FFFFFF"),CornerRadius=new(5),Padding=new(7,2,7,2),Margin=new(6,0,0,0),Child=Text("Approx. date",10.5,"#9F9A93")});
+        if(view.Approximate)meta.Children.Add(new Border{Background=Brush("#14FFFFFF"),CornerRadius=new(5),Padding=new(7,2,7,2),Margin=new(6,0,0,0),Child=Text(T("Approx. date","تاريخ تقريبي"),10.5,"#9F9A93")});
         var rewatch=store.ViewingHistory(item).Count(v=>v.WatchedAt<view.WatchedAt);if(rewatch>0)meta.Children.Add(new Border{Background=Brush("#33E4C084"),CornerRadius=new(5),Padding=new(7,2,7,2),Margin=new(6,0,0,0),Child=Text(T("↻ Rewatch","↻ إعادة مشاهدة"),10.5,"#E4C084")});
         info.Children.Add(meta);
         if(store.State.PersonalReviews.GetValueOrDefault(item.Id)?.Note is {Length:>0} note){var snippet=Text(note.ReplaceLineEndings(" "),12,"#B5ADA1");snippet.TextTrimming=TextTrimming.CharacterEllipsis;snippet.TextWrapping=TextWrapping.NoWrap;snippet.Margin=new(0,6,0,0);snippet.MaxHeight=20;info.Children.Add(snippet);}
         var tools=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(tools,3);g.Children.Add(tools);
-        var rate=Stars(item,15);var hasRating=(store.State.PersonalReviews.GetValueOrDefault(item.Id)?.Rating10??0)>0;rate.Opacity=hasRating?1:.4;tools.Children.Add(rate);var liked=HistoryLiked(item);var heart=ActionButton(liked?"♥":"♡",()=>ToggleHistoryFavourite(item));heart.Foreground=Brush(liked?"#E4C084":"#81796B");heart.Background=Brush("Transparent");heart.Padding=new(8,5,8,5);heart.FontSize=19;heart.ToolTip=HistoryFavouriteLabel(item);System.Windows.Automation.AutomationProperties.SetName(heart,heart.ToolTip.ToString());tools.Children.Add(heart);tools.Children.Add(MoreButton(item));
+        var rate=Stars(item,15);var hasRating=(store.State.PersonalReviews.GetValueOrDefault(item.Id)?.Rating10??0)>0;rate.Opacity=hasRating?1:.4;tools.Children.Add(rate);var liked=HistoryLiked(item);var heart=ActionButton(liked?"[[heart-filled]]":"[[heart]]",()=>ToggleHistoryFavourite(item));heart.Foreground=Brush(liked?"#E4C084":"#81796B");heart.Background=Brush("Transparent");heart.Padding=new(8,5,8,5);heart.FontSize=19;heart.ToolTip=HistoryFavouriteLabel(item);System.Windows.Automation.AutomationProperties.SetName(heart,heart.ToolTip.ToString());tools.Children.Add(heart);var more=ActionButton("[[more]]",()=>{});more.Padding=new(11,2,11,8);more.FontSize=17;more.Margin=new(8,0,0,0);more.VerticalAlignment=VerticalAlignment.Center;more.Background=Brush("#1FFFFFFF");more.ToolTip=T("More: change the date, remove, download, match… (or right-click)","المزيد: تغيير التاريخ والحذف والتنزيل والمطابقة… (أو النقر بالزر الأيمن)");System.Windows.Automation.AutomationProperties.SetName(more,T("More options for","خيارات أخرى لـ")+" "+item.Label);tools.Children.Add(more);
         g.SizeChanged+=(_,e)=>{if(e.WidthChanged){var narrow=e.NewSize.Width<680;tools.Orientation=narrow?Orientation.Vertical:Orientation.Horizontal;g.ColumnDefinitions[0].Width=new(narrow?0:58);time.Visibility=narrow?Visibility.Collapsed:Visibility.Visible;}};
-        Button Tool(string glyph,string tip,Action<Button> act){var b=new Button{Content=glyph,ToolTip=tip,Padding=new(10,6,10,6),Margin=new(8,0,0,0),Background=Brush("#1FFFFFFF"),FontSize=13};System.Windows.Automation.AutomationProperties.SetName(b,tip);b.Click+=(_,_)=>act(b);tools.Children.Add(b);return b;}
-        Tool("✎","Change the date",b=>DateChooser(b,view.DateUnknown?DateTime.Today:view.WatchedAt.ToLocalTime().DateTime,(day,unknown)=>
+        void ChangeDate()=>DateChooser(more,view.DateUnknown?DateTime.Today:view.WatchedAt.ToLocalTime().DateTime,(day,unknown)=>
         {
             var at=unknown?view.WatchedAt:new DateTimeOffset(day.Date.Add(view.DateUnknown?new TimeSpan(20,0,0):view.WatchedAt.ToLocalTime().TimeOfDay));
             var undo=store.Snapshot([item]);store.SetViewingDate(item,view.Id,at,unknown);RenderQuiet();Undoable("Date changed",()=>{store.Restore(undo);RenderQuiet();});
-        }));
-        Tool("✕","Remove this viewing",_=>{var undo=store.Snapshot([item]);store.RemoveViewing(item,view.Id);RenderQuiet();Undoable($"Removed {item.Title} from {view.WatchedAt.ToLocalTime():d MMM}",()=>{store.Restore(undo);RenderQuiet();});});
+        });
+        void RemoveViewing(){var undo=store.Snapshot([item]);store.RemoveViewing(item,view.Id);RenderQuiet();Undoable($"Removed {item.Title} from {view.WatchedAt.ToLocalTime():d MMM}",()=>{store.Restore(undo);RenderQuiet();});}
+        more.Click+=(_,e)=>
+        {
+            e.Handled=true;var menu=ItemMenu(item);
+            var remove=new MenuItem{Header=T("Remove this viewing","حذف هذه المشاهدة")};remove.Click+=(_,_)=>RemoveViewing();var edit=new MenuItem{Header=T("Change the date","تغيير التاريخ")};edit.Click+=(_,_)=>ChangeDate();
+            menu.Items.Insert(0,new Separator());menu.Items.Insert(0,remove);menu.Items.Insert(0,edit);
+            more.ContextMenu=menu;menu.PlacementTarget=more;menu.Placement=PlacementMode.Bottom;menu.IsOpen=true;
+        };
         card.MouseEnter+=(_,_)=>{card.BorderBrush=Brush("#2EFFFFFF");Motion.Opacity(rate,1);rate.ToolTip=T("Click the left or right half of a star to rate","انقر النصف الأيسر أو الأيمن للنجمة للتقييم");};card.MouseLeave+=(_,_)=>{card.BorderBrush=Brush("#00000000");Motion.Opacity(rate,hasRating?1:.4);};if(!TrackerOnly)LazyMenu(card,item);
         return card;
     }
@@ -429,12 +447,18 @@ public partial class MainWindow
     {
         var popup=new Popup{PlacementTarget=anchor,Placement=anchor==null?PlacementMode.MousePoint:PlacementMode.Bottom,StaysOpen=false,AllowsTransparency=true,PopupAnimation=PopupAnimation.Fade};
         var shown=new DateTime(initial.Year,initial.Month,1);var body=new StackPanel{Margin=new(14)};
+        // Keyboard like the other History popups: focus starts on the selected day, Tab stays inside, Esc closes, focus goes back to the button that opened it.
+        var invoker=anchor??Keyboard.FocusedElement as FrameworkElement;var picked=false;string? refocus=null;Button? start=null;
+        KeyboardNavigation.SetTabNavigation(body,KeyboardNavigationMode.Cycle);KeyboardNavigation.SetControlTabNavigation(body,KeyboardNavigationMode.Cycle);KeyboardNavigation.SetDirectionalNavigation(body,KeyboardNavigationMode.Cycle);
+        body.PreviewKeyDown+=(_,e)=>{if(e.Key==Key.Escape){e.Handled=true;popup.IsOpen=false;}};
+        popup.Opened+=(_,_)=>Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input,()=>{if(popup.IsOpen&&start!=null)Keyboard.Focus(start);});
+        popup.Closed+=(_,_)=>{if(!picked&&invoker!=null&&invoker.IsLoaded)Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input,()=>{if(!closing)invoker.Focus();});};
         popup.Child=new Border{Background=Brush("#F7141416"),BorderBrush=Brush("#2EFFFFFF"),BorderThickness=new(1),CornerRadius=new(14),Child=body,Width=300};
         void Draw()
         {
             body.Children.Clear();var head=new DockPanel{Margin=new(0,0,0,8)};
-            Button Nav(string g,int months){var b=new Button{Content=g,Padding=new(10,4,10,4),Background=Brush("#1FFFFFFF")};b.Click+=(_,_)=>{shown=shown.AddMonths(months);Draw();};return b;}
-            var back=Nav("‹",-1);DockPanel.SetDock(back,Dock.Left);head.Children.Add(back);var fwd=Nav("›",1);fwd.IsEnabled=shown.AddMonths(1)<=DateTime.Today;DockPanel.SetDock(fwd,Dock.Right);head.Children.Add(fwd);
+            Button Nav(string g,int months){var b=new Button{Content=g,Padding=new(10,4,10,4),Background=Brush("#1FFFFFFF")};System.Windows.Automation.AutomationProperties.SetName(b,months==-1?"Previous month":months==1?"Next month":"Previous year");b.Click+=(_,_)=>{shown=shown.AddMonths(months);refocus=g;Draw();};return b;}
+            var back=Nav("[[chevron-left]]",-1);DockPanel.SetDock(back,Dock.Left);head.Children.Add(back);var fwd=Nav("[[chevron]]",1);fwd.IsEnabled=shown.AddMonths(1)<=DateTime.Today;DockPanel.SetDock(fwd,Dock.Right);head.Children.Add(fwd);
             var yearBack=Nav("«",-12);DockPanel.SetDock(yearBack,Dock.Left);yearBack.Margin=new(6,0,0,0);head.Children.Add(yearBack);
             var title=Text(shown.ToString("MMMM yyyy"),14,weight:FontWeights.SemiBold);title.TextAlignment=TextAlignment.Center;title.VerticalAlignment=VerticalAlignment.Center;head.Children.Add(title);body.Children.Add(head);
             var grid=new UniformGrid{Columns=7};foreach(var d in new[]{"M","T","W","T","F","S","S"})grid.Children.Add(new TextBlock{Text=d,FontSize=11,Foreground=Brush("#817E78"),HorizontalAlignment=HorizontalAlignment.Center,Margin=new(0,0,0,4)});
@@ -442,13 +466,15 @@ public partial class MainWindow
             for(var day=shown;day.Month==shown.Month;day=day.AddDays(1))
             {
                 var value=day;var selected=value==initial.Date;var b=new Button{Content=value.Day.ToString(),Padding=new(0,6,0,6),Margin=new(2),FontSize=12.5,Background=Brush(selected?"#E4C084":value==DateTime.Today?"#33E4C084":"Transparent"),Foreground=Brush(selected?"#16120C":"#E9E4DC"),IsEnabled=value<=DateTime.Today};
-                b.Click+=(_,_)=>{popup.IsOpen=false;chosen(value,false);};grid.Children.Add(b);
+                b.Click+=(_,_)=>{picked=true;popup.IsOpen=false;chosen(value,false);};grid.Children.Add(b);if(selected&&b.IsEnabled||start==null&&value==DateTime.Today)start=b;
             }
             body.Children.Add(grid);
             var quick=new WrapPanel{Margin=new(0,8,0,0)};
-            void Quick(string label,Action act){var b=new Button{Content=label,Padding=new(10,5,10,5),Margin=new(0,0,6,6),FontSize=12,Background=Brush("#1FFFFFFF")};b.Click+=(_,_)=>{popup.IsOpen=false;act();};quick.Children.Add(b);}
+            void Quick(string label,Action act){var b=new Button{Content=label,Padding=new(10,5,10,5),Margin=new(0,0,6,6),FontSize=12,Background=Brush("#1FFFFFFF")};b.Click+=(_,_)=>{picked=true;popup.IsOpen=false;act();};quick.Children.Add(b);}
             Quick("Today",()=>chosen(DateTime.Today,false));Quick("Yesterday",()=>chosen(DateTime.Today.AddDays(-1),false));if(allowUnknown)Quick("Don't remember",()=>chosen(DateTime.Today,true));
             body.Children.Add(quick);
+            start??=grid.Children.OfType<Button>().LastOrDefault(b=>b.IsEnabled)??quick.Children.OfType<Button>().FirstOrDefault();
+            if(refocus!=null){var again=head.Children.OfType<Button>().FirstOrDefault(b=>IconSet.Src(b.Content)==refocus);refocus=null;if(again!=null){if(!again.IsEnabled)again=back;Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input,()=>Keyboard.Focus(again));}}
         }
         Draw();popup.IsOpen=true;
     }

@@ -2,7 +2,9 @@
 using LibVLCSharp.Shared;
 using System.Text.Json;
 
-var root=Path.Combine(Directory.GetCurrentDirectory(),"NoirValidation");
+// Every case folder of this run lives under one run folder, deleted when all checks pass and kept on failure for diagnosis.
+var validationRoot=Path.Combine(Directory.GetCurrentDirectory(),"NoirValidation");
+var root=Path.Combine(validationRoot,"checks-run-"+DateTime.Now.ToString("yyyyMMdd-HHmmss")+"-"+Guid.NewGuid().ToString("N")[..8]);
 Directory.CreateDirectory(root);
 var caseRoot=Path.Combine(root,"unit-"+Guid.NewGuid().ToString("N"));
 var store=new LibraryStore(caseRoot);
@@ -16,8 +18,10 @@ if(Environment.GetEnvironmentVariable("NOIR_PLAYING_SYNC_VIDEO") is {Length:>0} 
 if(args.Contains("--subtitle-providers")){await SubtitleAddonChecks.Run(Path.Combine(Directory.GetCurrentDirectory(),"work","subtitle-round","bpc"),Check);await SubtitleProviderChecks.Run(root,Check);Console.WriteLine("SUBTITLE CHECKS PASSED");return;}
 if(Environment.GetEnvironmentVariable("NOIR_STREAM_SYNC_VIDEO") is {Length:>0} realVideo){await StreamSamplingChecks.RunReal(Check,realVideo,Environment.GetEnvironmentVariable("NOIR_STREAM_SYNC_SUB")??"",double.Parse(Environment.GetEnvironmentVariable("NOIR_STREAM_SYNC_DURATION")??"0",System.Globalization.CultureInfo.InvariantCulture),Environment.GetEnvironmentVariable("NOIR_SUBTITLE_TOOLS")??"");return;}
 if(args.Contains("--stream-sampling")){await StreamSamplingChecks.Run(root,Check);Console.WriteLine("STREAM SAMPLING CHECKS PASSED");return;}
+await DataSafetyChecks.Run(Check);
 await BackendAuditChecks.Run(root,Check);
 TasteCodeChecks.Run(Check);
+Check(EpisodeText.Tidy("Let'S Use Our Resources With Care")=="Let's Use Our Resources With Care"&&EpisodeText.Tidy("Don’T Stop I'M Here")=="Don’t Stop I'm Here"&&EpisodeText.Tidy("O'Neill'S Story")=="O'Neill's Story"&&new VideoItem{EpisodeTitle="We'Ll See"}.EpisodeTitle=="We'll See"&&new KnownEpisode{Title="It'S On"}.Title=="It's On","Episode titles never capitalise the letter after an apostrophe (provider data like \"Let'S\")");
 Check(MobileSyncServer.CheckCode("ab12cd34ef567890"+new string('0',48))=="AB12 CD34 EF56","TV pairing check code is the first 12 fingerprint digits in groups of four");
 SmartListChecks.Run(root,Check);
 MobileChecks.Run(root,Check);
@@ -191,10 +195,10 @@ if(!args.Contains("--offline")) using(var metadataClient=new MetadataClient(case
     var misspelled=await metadataClient.Fetch(new VideoItem{Title="Wastemen",IsMovie=true});
     Check(misspelled is {SourceName:"Wikipedia",Summary.Length:>20}&&File.Exists(misspelled.Poster),"A unique movie match handles the existing filename typo and caches its poster");
 }
-Core.Initialize();using var vlc=new LibVLC("--no-video-title-show","--quiet","--vout=dummy","--aout=dummy","--avcodec-hw=none");
-using var player=new LibVLCSharp.Shared.MediaPlayer(vlc);
+Core.Initialize();var vlc=new LibVLC("--no-video-title-show","--quiet","--vout=dummy","--aout=dummy","--avcodec-hw=none");
+var player=new LibVLCSharp.Shared.MediaPlayer(vlc);
 var real=library.Where(x=>!x.IsMovie&&x.Available&&File.Exists(x.Path)&&Path.GetExtension(x.Path).Equals(".mkv",StringComparison.OrdinalIgnoreCase)).OrderBy(x=>new FileInfo(x.Path).Length).First();
-using var media=new Media(vlc,new Uri(real.Path));
+var media=new Media(vlc,new Uri(real.Path));
 Check(player.Play(media),"Bundled VLC accepts a real MKV episode");
 for(int i=0;i<100&&(!player.IsSeekable||player.Time<500);i++) await Task.Delay(100);
 Check(player.IsPlaying&&player.Length>60000,"Native decoder plays and reports the real duration");
@@ -204,6 +208,10 @@ player.SetPause(true);
 Check(Math.Abs(player.Time-83420)<2500,"VLC seeks to the saved playback timestamp");
 Check(player.AudioTrackDescription.Length>1&&player.SpuDescription.Length>1,"Audio and subtitle tracks are available in VLC");
 var selected=player.SpuDescription.First(x=>x.Id>=0);Check(player.SetSpu(selected.Id),"Embedded subtitles can be selected");
-player.Stop();
-File.WriteAllText(Path.Combine(root,"checks.json"),JsonSerializer.Serialize(results,new JsonSerializerOptions { WriteIndented=true }));
+// Tear VLC down explicitly, before the banner: a native failure here is a failed run, never a crash after "ALL CHECKS PASSED".
+player.Stop();for(int i=0;i<50&&player.State is not (VLCState.Stopped or VLCState.Ended or VLCState.NothingSpecial);i++)await Task.Delay(100);
+try{media.Dispose();player.Dispose();vlc.Dispose();}catch(Exception e){throw new Exception("FAIL: VLC teardown: "+e.Message,e);}
+results.Add("PASS: VLC media, player and engine are disposed in order");Console.WriteLine(results[^1]);
+File.WriteAllText(Path.Combine(validationRoot,"checks.json"),JsonSerializer.Serialize(results,new JsonSerializerOptions { WriteIndented=true }));
+try{Directory.Delete(root,true);}catch(Exception e){Console.WriteLine("Note: could not remove "+root+": "+e.Message);}
 Console.WriteLine("ALL CHECKS PASSED");

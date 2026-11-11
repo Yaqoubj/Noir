@@ -4,22 +4,29 @@ namespace Noir;
 // Sends Noir's watches and un-checks to Nuvio in batches, retrying while offline.
 public sealed class NuvioSync:IDisposable
 {
-    readonly LibraryStore store;readonly System.Windows.Threading.DispatcherTimer timer;readonly Action changed;bool busy,again,disposed;
+    readonly LibraryStore store;readonly Action changed;bool busy,again,disposed;
+#if !NOIR_HEADLESS
+    readonly System.Windows.Threading.DispatcherTimer timer;
+#endif
     readonly HttpClient http=new(){Timeout=TimeSpan.FromSeconds(30)};
     public string Message {get;private set;}="";
+#if NOIR_HEADLESS
+    internal NuvioSync(LibraryStore library,HttpClient client){store=library;changed=()=>{};http=client;}
+#else
     public NuvioSync(LibraryStore library,Action onChanged)
     {
         store=library;changed=onChanged;
         timer=new(TimeSpan.FromMinutes(5),System.Windows.Threading.DispatcherPriority.Background,(_,_)=>Wake(),System.Windows.Application.Current.Dispatcher);
         store.WatchCompleted+=Wake;store.HistoryChanged+=WakeIfDeletes;timer.Start();Wake();
     }
+#endif
     void WakeIfDeletes(){if(store.State.NuvioDeletes.Count>0)Wake();}
     public void Wake()
     {
         if(disposed)return;if(busy){again=true;return;}
         _=Run();
     }
-    async Task Run()
+    internal async Task Run()
     {
         busy=true;again=false;
         try
@@ -42,9 +49,11 @@ public sealed class NuvioSync:IDisposable
             }
             if(items.Count>0)
             {
-                foreach(var chunk in items.Chunk(200))await client.PushWatched(session.Profile,chunk.Select(c=>c.Item),CancellationToken.None);
-                var now=DateTimeOffset.UtcNow;foreach(var (job,_) in items){job.SyncedAt=now;job.Message="Sent ✓";}
-                store.MarkNuvioKnown(items.Select(i=>i.Job.ItemId));
+                foreach(var chunk in items.Chunk(200))
+                {
+                    await client.PushWatched(session.Profile,chunk.Select(c=>c.Item),CancellationToken.None);
+                    store.CompleteNuvioUpload(chunk);
+                }
             }
             if(deletes.Count>0)
             {
@@ -62,5 +71,9 @@ public sealed class NuvioSync:IDisposable
         }
         finally{busy=false;if(again&&!disposed)Wake();}
     }
-    public void Dispose(){disposed=true;timer.Stop();store.WatchCompleted-=Wake;store.HistoryChanged-=WakeIfDeletes;http.Dispose();}
+    public void Dispose(){disposed=true;
+#if !NOIR_HEADLESS
+        timer.Stop();
+#endif
+        store.WatchCompleted-=Wake;store.HistoryChanged-=WakeIfDeletes;http.Dispose();}
 }

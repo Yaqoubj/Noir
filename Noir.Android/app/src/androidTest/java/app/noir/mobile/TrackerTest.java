@@ -15,6 +15,8 @@ import static org.junit.Assert.*;
 
 /** The phone tracker: check-off with undo, dated logging, sync to the PC fixture and the Log screen. */
 public final class TrackerTest {
+    // Diagnostic: what is still waiting for the PC when an outbox assertion fails.
+    static String outbox(DataStore d){try{java.lang.reflect.Method m=DataStore.class.getDeclaredMethod("pending");m.setAccessible(true);return String.valueOf(m.invoke(d));}catch(Exception e){return "?";}}
     final Instrumentation test=InstrumentationRegistry.getInstrumentation();
     View find(View view,String prefix){
         CharSequence d=view.getContentDescription();if(d!=null&&d.toString().startsWith(prefix))return view;
@@ -42,16 +44,16 @@ public final class TrackerTest {
         JSONObject first=show.stream().filter(i->i.optInt("season")>0&&!DataStore.watched(i)).findFirst().orElse(null);
         if(first==null){for(JSONObject i:show)data.unview(i.optString("id"),"");data.sync();first=show.stream().filter(i->i.optInt("season")>0).findFirst().get();}
         final String id=first.optString("id");String viewing=data.mark(id,true,0,false);data.sync();
-        assertEquals("The PC accepts the check-off",0,data.pendingCount());assertTrue(DataStore.watched(data.item(id)));
+        assertEquals("The PC accepts the check-off "+outbox(data),0,data.pendingCount());assertTrue(DataStore.watched(data.item(id)));
         test.runOnMainSync(()->{home.page="History";home.detail="";home.premium.historyView="Up next";home.render();});test.waitForIdleSync();
-        assertTrue("Up next lists the show in progress",hasText(home.body,"Watch next"));capture("tracker-up-next.png");
+        assertTrue("Up next lists the show in progress",hasText(home.body,"tap the circle the moment you finish"));capture("tracker-up-next.png");
         assertNotNull("Up next offers a one-tap check-off",find(home.body,"Mark "));int before=data.pendingCount();
         // An episode with nothing unwatched before it checks off at once; others ask about the earlier ones first.
         final List<JSONObject> chosen=show;test.runOnMainSync(()->{List<JSONObject> eps=home.smart.released(chosen.get(0));for(JSONObject e:eps){JSONObject fresh=data.item(e.optString("id"));android.util.Log.i("NoirTrackerTest","candidate "+e.optString("id")+" "+(fresh!=null&&DataStore.watched(fresh)));if(fresh!=null&&!DataStore.watched(fresh)){android.util.Log.i("NoirTrackerTest","earlier="+home.smart.earlier(fresh).size());home.tracker.checkOff(fresh,"test");break;}}android.util.Log.i("NoirTrackerTest","released="+eps.size()+" undo="+home.undoUntil);});long wait=System.currentTimeMillis()+8000;while(home.undoUntil<=System.currentTimeMillis()&&System.currentTimeMillis()<wait)Thread.sleep(100);boolean undoShown=home.undoUntil>0;
         assertTrue("The check-off is queued",data.pendingCount()>before||data.pendingCount()==0);
         assertTrue("An undo bar appears",undoShown);capture("tracker-checked.png");
-        test.runOnMainSync(()->{Runnable undo=home.undoAction;home.undoUntil=0;if(undo!=null)undo.run();home.renderKeep();});data.sync();assertEquals("Undo reaches the PC",0,data.pendingCount());
-        data.unview(id,viewing);data.sync();assertEquals(0,data.pendingCount());assertFalse("Unchecking reaches the PC and back",DataStore.watched(data.item(id)));
+        test.runOnMainSync(()->{Runnable undo=home.undoAction;home.undoUntil=0;if(undo!=null)undo.run();home.renderKeep();});data.sync();assertEquals("Undo reaches the PC "+outbox(data),0,data.pendingCount());
+        data.unview(id,viewing);data.sync();assertEquals("pending "+outbox(data),0,data.pendingCount());assertFalse("Unchecking reaches the PC and back",DataStore.watched(data.item(id)));
         for(String tab:new String[]{"Upcoming","Shows","Movies","Diary","Stats"}){test.runOnMainSync(()->{home.premium.historyView=tab;home.render();});capture("tracker-"+tab.toLowerCase(Locale.ROOT)+".png");}
     }
     @Test public void testLogAnythingWithoutPc()throws Exception{
@@ -68,7 +70,7 @@ public final class TrackerTest {
         for(JSONObject e:aired)assertTrue("Logged without a file",log.watched(e));
         JSONObject logged=null;for(JSONObject i:DataStore.objects(data.items()))if(i.optString("imdb").equals(pick.optString("id"))&&i.optInt("season")==1&&i.optInt("episode")==aired.get(0).optInt("episode"))logged=i;
         assertNotNull(logged);final JSONObject record=logged;assertTrue("Don't remember is recorded: "+record,DataStore.objects(record.optJSONArray("viewings")).stream().anyMatch(v->v.optBoolean("dateUnknown")&&v.optString("source").contains("Android")));capture("tracker-log-checked.png");
-        if(data.paired()){data.sync();assertEquals("The PC imports titles logged on the phone",0,data.pendingCount());}
+        if(data.paired()){data.sync();assertEquals("The PC imports titles logged on the phone "+outbox(data),0,data.pendingCount());}
     }
     @Test public void testSmartHistoryOnPhone()throws Exception{
         JSONObject undated=new JSONObject();JSONArray v=new JSONArray();JSONObject one=new JSONObject();DataStore.put(one,"watchedAt","2026-10-17T10:00:00Z");DataStore.put(one,"dateUnknown",true);v.put(one);DataStore.put(undated,"viewings",v);
@@ -93,7 +95,7 @@ public final class TrackerTest {
         final List<JSONObject>[] after=new List[1];test.runOnMainSync(()->after[0]=home.smart.later(data.item(earlier[0].get(0).optString("id"))));
         assertEquals("Un-checking the first knows the 3 later ones are checked",3,after[0].size());
         test.runOnMainSync(()->home.smart.rate(target,target.optString("group"),"S"+target.optInt("season"),4));data.sync();
-        assertEquals("Ratings and check-offs reach the PC",0,data.pendingCount());
+        assertEquals("Ratings and check-offs reach the PC "+outbox(data),0,data.pendingCount());
         assertEquals("The PC sends the season rating back",4,data.settings().optJSONObject("showRatings").optInt(target.optString("group")+":S"+target.optInt("season")));
         for(JSONObject i:released[0])data.unview(i.optString("id"),"");data.sync();
     }
@@ -102,7 +104,7 @@ public final class TrackerTest {
         MainActivity home=(MainActivity)test.startActivitySync(new Intent(test.getTargetContext(),MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         final List<JSONObject>[] g=new List[1];test.runOnMainSync(()->{for(List<JSONObject> x:home.groups())if(home.inLibrary(x)&&NoirApp.downloads.job(x.get(0).optString("id"))==null&&data.localFile(x.get(0).optString("id")).isEmpty())g[0]=x;});
         assertNotNull("The fixture has a library title",g[0]);String id=g[0].get(0).optString("id"),group=g[0].get(0).optString("group");
-        data.library(id,false);data.sync();assertEquals(0,data.pendingCount());
+        data.library(id,false);data.sync();assertEquals("pending "+outbox(data),0,data.pendingCount());
         final boolean[] gone=new boolean[1];test.runOnMainSync(()->gone[0]=!home.inLibrary(home.group(group)));assertTrue("Removing hides it from the phone Library after syncing with the PC",gone[0]);
         test.runOnMainSync(()->{home.page="Library";home.detail="";home.render();});capture("library-after-remove.png");
         assertFalse("It's gone from the Library grid",hasText(home.body,g[0].get(0).optString("title"))&&home.premium.collection.equals("All"));

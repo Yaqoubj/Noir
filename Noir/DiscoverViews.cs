@@ -29,7 +29,7 @@ public partial class MainWindow
             var info=new StackPanel{Margin=new(0,12,0,0)};content.Children.Add(info);var group=TrackedGroup(t);var existing=group?.FirstOrDefault();var meta=Text(FactsFor(t),12,"#E4C084");metaText=meta;meta.Margin=new(0,0,0,10);info.Children.Add(meta);var synopsis=Text(t.Summary.Length>0?t.Summary:loaded?T("No synopsis available.","لا يتوفر ملخص."):T("Loading details…","جارٍ تحميل التفاصيل…"),13,"#C9C4BD");synopsisText=synopsis;synopsis.LineHeight=20;info.Children.Add(synopsis);if(CastStripFor(t) is {} cast)info.Children.Add(cast);
             var actions=new WrapPanel{Margin=new(0,16,0,0)};info.Children.Add(actions);void Act(string text,Action action,bool primary=false){var b=ActionButton(text,()=>{CloseDiscoverPanel();action();},primary);b.Margin=new(0,0,8,8);actions.Children.Add(b);}
             if(!TrackerOnly){var local=group!=null&&group.Any(CanPlay)?ChoiceFor(group):null;if(local!=null)Act(T(store.GetProgress(local) is {Completed:false,Position:>0}?"Resume":"Play"),()=>_=PlayVideo(local),true);Act(T("Stream"),()=>{var episode=activeTitle.IsMovie?null:NextToStream(activeTitle,existing);DiscoverStream(activeTitle,episode?.Season??0,episode?.Episode??0);},local==null);Act(T("Download"),()=>{var episode=activeTitle.IsMovie?null:NextToStream(activeTitle,existing);DiscoverDownload(activeTitle,episode?.Season??0,episode?.Episode??0,false);});}var listed=existing!=null&&store.State.Watchlist.Contains(existing.GroupKey);Act(listed?T("In My List · click to remove","في قائمتي · انقر للإزالة"):T("Add to My List","إضافة إلى قائمتي"),()=>ToggleDiscoveredWatchlist(activeTitle));Act(T("Log","تسجيل المشاهدة"),()=>OpenLog(activeTitle));
-            var full=ActionButton(T("Full page ›","الصفحة الكاملة ›"),()=>{CloseDiscoverPanel();Navigate("Discover");_=OpenDiscoverFull(activeTitle);});full.Foreground=Brush("#E4C084");full.Background=Brush("Transparent");full.Margin=new(0,4,0,0);System.Windows.Automation.AutomationProperties.SetName(full,"Full page");info.Children.Add(full);
+            var full=ActionButton(T("Full page [[chevron]]","الصفحة الكاملة [[chevron]]"),()=>{CloseDiscoverPanel();if(page=="Discover"){discoverReturnOffset=ContentScroll.VerticalOffset;CancelDiscover();}else{Navigate("Discover");discoverReturnOffset=-1;}_=OpenDiscoverFull(activeTitle);});full.Foreground=Brush("#E4C084");full.Background=Brush("Transparent");full.Margin=new(0,4,0,0);System.Windows.Automation.AutomationProperties.SetName(full,"Full page");info.Children.Add(full);
         }
         Paint(title,false);
         try{using var client=DiscoverClient();var details=await client.Details(title,token);cachedRuntime=await Task.Run(()=>{try{var key=$"meta/{details.Type}/{details.Id}.json";var hash=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key)));using var json=System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(store.DataDirectory,"discover",hash+".json")));return json.RootElement.GetProperty("meta").TryGetProperty("runtime",out var runtime)?runtime.ToString():"";}catch{return "";}},token);if(!closing&&!token.IsCancellationRequested&&discoverPanel==overlay){Paint(details,true);}}
@@ -39,6 +39,9 @@ public partial class MainWindow
     DiscoveryClient DiscoverClient()=>discoveryFactory?.Invoke()??new DiscoveryClient(store.DataDirectory);
     string discoverFilter="All";
     DiscoverTitle? discoverTitle;
+    // Where Discover was scrolled when a title's full page opened from it; Back returns there with the same search.
+    double discoverReturnOffset=-1;
+    void BackToDiscoverResults(){CancelDiscover();discoverTitle=null;Render();var offset=discoverReturnOffset;discoverReturnOffset=-1;if(offset<=0){ContentScroll.ScrollToTop();return;}Dispatcher.BeginInvoke(()=>ContentScroll.ScrollToVerticalOffset(offset),System.Windows.Threading.DispatcherPriority.Loaded);}
     DiscoverResults? discoverResults;
     string discoverQuery="",discoverResultsFilter="",discoverMessage="";
     CancellationTokenSource? discoverCancellation;
@@ -57,7 +60,7 @@ public partial class MainWindow
     }
     async Task OpenDiscoverFull(DiscoverTitle title)
     {
-        var token=BeginDiscover();var revision=discoverRevision;cinematic=false;ApplyPageLayout();PageTitle.Text=title.Name;ContentPanel.Children.Clear();ContentPanel.Children.Add(Heading("Opening "+title.Name+"…"));ContentPanel.Children.Add(ActionButton("Back to results",()=>{CancelDiscover();discoverTitle=null;Render();}));
+        var token=BeginDiscover();var revision=discoverRevision;cinematic=false;ApplyPageLayout();PageTitle.Text=title.Name;ContentPanel.Children.Clear();ContentPanel.Children.Add(Heading("Opening "+title.Name+"…"));ContentPanel.Children.Add(ActionButton("[[back]]  Back to Discover",BackToDiscoverResults));
         try{using var client=DiscoverClient();var details=await client.Details(title,token);if(closing||page!="Discover"||revision!=discoverRevision)return;discoverTitle=details;discoverSeason=details.Episodes.FirstOrDefault(e=>e.AirsAt==null||e.AirsAt<=DateTimeOffset.UtcNow)?.Season??1;Render();ContentScroll.ScrollToTop();}
         catch(OperationCanceledException)when(token.IsCancellationRequested){}
         catch(Exception error){if(revision!=discoverRevision||closing)return;store.Log(error);ContentPanel.Children.Add(Body("Details couldn’t be loaded. Please try again."));ContentPanel.Children.Add(ActionButton("Retry",()=>_=OpenDiscoverFull(title)));}

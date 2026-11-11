@@ -1,4 +1,4 @@
-using Noir;
+﻿using Noir;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -14,8 +14,12 @@ var store=new LibraryStore(dir);store.State.SyncTrakt=false;store.State.SyncSeri
 var smallRoot=Path.Combine(dir,"transfer-fixture");Directory.CreateDirectory(smallRoot);var smallFile=Path.Combine(smallRoot,"Download fixture (2026).mp4");File.WriteAllBytes(smallFile,Enumerable.Range(0,2*1024*1024).Select(n=>(byte)(n%251)).ToArray());store.State.Roots.Add(new(){Path=smallRoot,Movies=true});store.Scan(out _);
 File.WriteAllText(Path.ChangeExtension(smallFile,".en.srt"),"1\n00:00:01,000 --> 00:00:03,000\nNoir subtitle fixture\n");
 var commandItem=new VideoItem{Id="pc-download-fixture",CollectionKey="fixture-command",Title="PC command fixture",Season=1,Episode=1,ImdbId="tt123",Available=false};var fixturePoster=Path.Combine(dir,"art","fixture.png");File.WriteAllBytes(fixturePoster,Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN1kAAAAASUVORK5CYII="));commandItem.Poster=fixturePoster;store.State.Catalog[commandItem.Id]=new(){Item=commandItem};store.Record(commandItem,421.625,1800);
-var subtitleFixture=Path.Combine(root,"subtitle-fixture");
-if(Directory.Exists(subtitleFixture)){store.State.Roots.Add(new(){Path=subtitleFixture,Movies=true});store.Scan(out _);}
+// The phone subtitle test asks this fixture PC to time a subtitle; the Noir build copies the tool next to Noir.exe, this fixture uses it in place.
+var timingTools=Environment.GetEnvironmentVariable("NOIR_SUBTITLE_TOOLS") is {Length:>0} toolsOverride?toolsOverride:Path.Combine(Directory.GetCurrentDirectory(),"work","subtitle-runtime");
+if(File.Exists(Path.Combine(timingTools,"NoirSubtitleSync.exe")))SubtitleDownloads.ToolRoot=timingTools;else Console.WriteLine("WARNING: subtitle timing tool missing at "+timingTools+"; run build_subtitle_tools.ps1 or SubtitleTest will fail");
+var subtitleFixture=FixtureMedia.Ensure(root,dir);
+store.State.Roots.Add(new(){Path=subtitleFixture,Movies=true});store.Scan(out _);
+foreach(var title in new[]{"Subtitle surface fixture","Bright pattern fixture"})if(!store.Archive.Any(i=>i.Title==title&&i.Available))throw new Exception("Required generated fixture missing from catalog: "+title);
 store.State.Roots.Add(new(){Path=smallRoot,Movies=false});using var downloads=new PcDownloads(store,new CommandProvider(),start:false);downloads.Configure("https://example.invalid/fixture/manifest.json","fixture-key-not-real",smallRoot,smallRoot);
 var useDefaultPort=args.Contains("--default-port");
 var port=useDefaultPort?MobileSyncServer.Port:49272;

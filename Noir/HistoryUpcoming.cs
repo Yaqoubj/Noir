@@ -24,10 +24,12 @@ public partial class MainWindow
         }
         return result.OrderBy(a=>a.Local).ThenBy(a=>a.Show.Group[0].Title).ToList();
     }
+    static string Eps(int n)=>Loc.Count(n,"episode","episodes","حلقة واحدة","حلقتان","حلقات","حلقة");
+    static string[] WeekdayLetters()=>Loc.Arabic?["ن","ث","ر","خ","ج","س","ح"]:System.Globalization.CultureInfo.CurrentCulture.DateTimeFormat.AbbreviatedDayNames.Skip(1).Append(System.Globalization.CultureInfo.CurrentCulture.DateTimeFormat.AbbreviatedDayNames[0]).Select(d=>d.ToUpperInvariant()).ToArray();
     static string Premiere(Airing a)
     {
         // No "finale": schedules often list only the episodes announced so far.
-        return a.Episode.Episode!=1?"":a.Episode.Season==1?"Series premiere":"Season premiere";
+        return a.Episode.Episode!=1?"":a.Episode.Season==1?T("Series premiere","عرض أول للمسلسل"):T("Season premiere","عرض أول للموسم");
     }
     void RenderUpcoming()
     {
@@ -41,20 +43,20 @@ public partial class MainWindow
         if(all.Count==0)
         {
             ContentPanel.Children.Add(Heading("Nothing on the calendar yet",shows.Count==0?"Log a show you're watching and its next episodes appear here with their air dates.":"Air dates appear once Noir has looked your shows up online (Settings → Library → artwork & information)."));
-            ContentPanel.Children.Add(ActionButton("＋  Log a show",()=>OpenLog(null),true));return;
+            ContentPanel.Children.Add(ActionButton("[[plus]]  Log a show",()=>OpenLog(null),true));return;
         }
         // Out now: aired in the last two weeks and not checked off yet.
         var fresh=all.Where(a=>a.Episode.AirsAt<=now&&a.Episode.AirsAt>now.AddDays(-14)&&(a.Item==null||!store.EverWatched(a.Item))).OrderByDescending(a=>a.Local).ToList();
-        if(fresh.Count>0){ContentPanel.Children.Add(Heading("Out now",$"{fresh.Count} new episode{(fresh.Count==1?"":"s")} from the last two weeks. Watch, get it, or check it off."));ContentPanel.Children.Add(TrackerGrid(fresh.Take(18).Select(a=>OutNowRow(a,all))));}
+        if(fresh.Count>0){ContentPanel.Children.Add(Heading(T("Out now","صدرت الآن"),T("{0} from the last two weeks. Watch, get it, or check it off.","{0} من الأسبوعين الماضيين. شاهدها أو احصل عليها أو سجّلها.",Loc.Count(fresh.Count,"new episode","new episodes","حلقة جديدة واحدة","حلقتان جديدتان","حلقات جديدة","حلقة جديدة"))));ContentPanel.Children.Add(TrackerGrid(fresh.Take(18).Select(a=>OutNowRow(a,all))));}
         ContentPanel.Children.Add(MonthCalendar(all,today));
         var agenda=upcomingDay is {} day?all.Where(a=>a.Local.Date==day).ToList():all.Where(a=>a.Episode.AirsAt>now&&a.Local<today.AddDays(120)).ToList();
-        var title=upcomingDay is {} d?(d==today?"Today":d==today.AddDays(1)?"Tomorrow":d.ToString(d.Year==today.Year?"dddd, d MMMM":"dddd, d MMMM yyyy")):"Coming up";
-        var head=Heading(title,upcomingDay!=null?$"{agenda.Count} episode{(agenda.Count==1?"":"s")}":agenda.Count==0?"No announced episodes in the next four months.":$"{agenda.Count} announced episode{(agenda.Count==1?"":"s")} in the next four months.");
+        var title=upcomingDay is {} d?(d==today?T("Today","اليوم"):d==today.AddDays(1)?T("Tomorrow","غدًا"):d.ToString(d.Year==today.Year?"dddd, d MMMM":"dddd, d MMMM yyyy",Loc.Culture)):T("Coming up","قريبًا");
+        var head=Heading(title,upcomingDay!=null?Eps(agenda.Count):agenda.Count==0?T("No announced episodes in the next four months.","لا توجد حلقات معلنة خلال الأشهر الأربعة القادمة."):T("{0} in the next four months.","{0} خلال الأشهر الأربعة القادمة.",Loc.Count(agenda.Count,"announced episode","announced episodes","حلقة معلنة واحدة","حلقتان معلنتان","حلقات معلنة","حلقة معلنة")));
         if(upcomingDay!=null){var clear=ActionButton("Show everything coming up",()=>{upcomingDay=null;RenderQuiet();});clear.Margin=new(0,8,0,0);head.Children.Add(clear);}
         ContentPanel.Children.Add(head);
         foreach(var group in agenda.GroupBy(a=>a.Local.Date).Take(upcomingDay!=null?1:40))
         {
-            if(upcomingDay==null){var label=group.Key==today?"Today":group.Key==today.AddDays(1)?"Tomorrow":group.Key.ToString(group.Key.Year==today.Year?"dddd, d MMMM":"dddd, d MMMM yyyy");var line=new DockPanel{Margin=new(0,18,0,8)};var count=Text($"{group.Count()} episode{(group.Count()==1?"":"s")}",12,"#817E78");count.VerticalAlignment=VerticalAlignment.Bottom;DockPanel.SetDock(count,Dock.Right);line.Children.Add(count);line.Children.Add(Text(label,17,weight:FontWeights.SemiBold));ContentPanel.Children.Add(line);}
+            if(upcomingDay==null){var label=group.Key==today?T("Today","اليوم"):group.Key==today.AddDays(1)?T("Tomorrow","غدًا"):group.Key.ToString(group.Key.Year==today.Year?"dddd, d MMMM":"dddd, d MMMM yyyy",Loc.Culture);var line=new DockPanel{Margin=new(0,18,0,8)};var count=Text(Eps(group.Count()),12,"#817E78");count.VerticalAlignment=VerticalAlignment.Bottom;DockPanel.SetDock(count,Dock.Right);line.Children.Add(count);line.Children.Add(Text(label,17,weight:FontWeights.SemiBold));ContentPanel.Children.Add(line);}
             foreach(var a in group)ContentPanel.Children.Add(AgendaRow(a,all));
         }
         // Followed shows that are caught up with nothing announced: TV Time's "waiting for news".
@@ -68,11 +70,11 @@ public partial class MainWindow
         Button Nav(string glyph,string tip,int months){var b=ActionButton(glyph,()=>{upcomingMonth=upcomingMonth.AddMonths(months);upcomingDay=null;RenderQuiet();});b.ToolTip=tip;b.FontSize=18;b.Width=38;b.Height=34;b.Padding=new(0);b.Margin=new(8,0,0,0);b.Background=Brush("#1FFFFFFF");return b;}
         var nav=new StackPanel{Orientation=Orientation.Horizontal};DockPanel.SetDock(nav,Dock.Right);
         if(upcomingMonth!=new DateTime(today.Year,today.Month,1)){var back=ActionButton("This month",()=>{upcomingMonth=new(today.Year,today.Month,1);upcomingDay=null;RenderQuiet();});back.Padding=new(12,6,12,6);back.Background=Brush("Transparent");back.Foreground=Brush("#E4C084");nav.Children.Add(back);}
-        nav.Children.Add(Nav("‹","Previous month",-1));nav.Children.Add(Nav("›","Next month",1));head.Children.Add(nav);
+        nav.Children.Add(Nav("[[chevron-left]]","Previous month",-1));nav.Children.Add(Nav("[[chevron]]","Next month",1));head.Children.Add(nav);
         var inMonth=all.Where(a=>a.Local.Year==upcomingMonth.Year&&a.Local.Month==upcomingMonth.Month).ToList();
-        var title=new StackPanel();title.Children.Add(Text(upcomingMonth.ToString("MMMM yyyy"),20,weight:FontWeights.SemiBold));title.Children.Add(Text($"{inMonth.Count} episode{(inMonth.Count==1?"":"s")} · {inMonth.Select(a=>a.Show).Distinct().Count()} show{(inMonth.Select(a=>a.Show).Distinct().Count()==1?"":"s")}",12,"#9F9A93"));head.Children.Add(title);body.Children.Add(head);
+        var title=new StackPanel();title.Children.Add(Text(upcomingMonth.ToString("MMMM yyyy",Loc.Culture),20,weight:FontWeights.SemiBold));title.Children.Add(Text(Eps(inMonth.Count)+" · "+Loc.Count(inMonth.Select(a=>a.Show).Distinct().Count(),"show","shows","مسلسل واحد","مسلسلان","مسلسلات","مسلسلًا"),12,"#9F9A93"));head.Children.Add(title);body.Children.Add(head);
         var grid=new UniformGrid{Columns=7};
-        foreach(var d in System.Globalization.CultureInfo.CurrentCulture.DateTimeFormat.AbbreviatedDayNames.Skip(1).Append(System.Globalization.CultureInfo.CurrentCulture.DateTimeFormat.AbbreviatedDayNames[0]))grid.Children.Add(new TextBlock{Text=d.ToUpperInvariant(),FontSize=10.5,FontWeight=FontWeights.SemiBold,Foreground=Brush("#817E78"),Margin=new(8,0,0,6)});
+        foreach(var d in WeekdayLetters())grid.Children.Add(new TextBlock{Text=d,FontSize=10.5,FontWeight=FontWeights.SemiBold,Foreground=Brush("#817E78"),Margin=new(8,0,0,6)});
         for(int i=0;i<((int)upcomingMonth.DayOfWeek+6)%7;i++)grid.Children.Add(new Border());
         for(var day=upcomingMonth;day.Month==upcomingMonth.Month;day=day.AddDays(1))
         {
@@ -85,16 +87,16 @@ public partial class MainWindow
                 var seen=a.Item!=null&&store.EverWatched(a.Item);var chip=Text((seen?"✓ ":"")+a.Show.Group[0].Title,10.5,value<today?"#9F9A93":"#F4F1EB");chip.TextWrapping=TextWrapping.NoWrap;chip.TextTrimming=TextTrimming.CharacterEllipsis;
                 cell.Children.Add(new Border{Background=Brush(value<today?"#1FFFFFFF":"#40E4C084"),CornerRadius=new(5),Padding=new(6,2,6,2),Margin=new(0,4,0,0),Child=chip});
             }
-            var more=episodes.DistinctBy(a=>a.Show).Count()-2;if(more>0)cell.Children.Add(Text($"+{more} more",10,"#9F9A93"));
+            var more=episodes.DistinctBy(a=>a.Show).Count()-2;if(more>0)cell.Children.Add(Text(T("+{0} more","+{0} أخرى",more),10,"#9F9A93"));
             if(episodes.Count==0){grid.Children.Add(new Border{Child=cell,Margin=new(2),MinHeight=86,CornerRadius=new(10),BorderBrush=Brush("#0FFFFFFF"),BorderThickness=new(1)});continue;}
             var button=new Button{Content=cell,Padding=new(0),Margin=new(2),MinHeight=86,HorizontalContentAlignment=HorizontalAlignment.Stretch,VerticalContentAlignment=VerticalAlignment.Top,Background=Brush(selected?"#33E4C084":"#1C1C1F"),BorderBrush=Brush(selected?"#E4C084":"#00000000"),BorderThickness=new(1),
                 ToolTip=string.Join("\n",episodes.Select(a=>$"{a.Show.Group[0].Title}  S{a.Episode.Season:00}E{a.Episode.Episode:00}"))};
-            System.Windows.Automation.AutomationProperties.SetName(button,value.ToString("d MMMM")+(episodes.Count>0?$", {episodes.Count} episodes":""));
+            System.Windows.Automation.AutomationProperties.SetName(button,value.ToString("d MMMM",Loc.Culture)+(episodes.Count>0?", "+Eps(episodes.Count):""));
             button.Click+=(_,_)=>{upcomingDay=upcomingDay==value?null:value;RenderQuiet();};grid.Children.Add(button);
         }
         body.Children.Add(grid);return shell;
     }
-    string EpisodeLine(Airing a)=>$"S{a.Episode.Season:00} · E{a.Episode.Episode:00}"+(a.Episode.Title.Length>0&&!(store.State.HideSpoilers&&a.Item!=null&&!store.EverWatched(a.Item)&&a.Episode.AirsAt<=DateTimeOffset.UtcNow&&IsSpoiler(a))?"   "+a.Episode.Title:"");
+    string EpisodeLine(Airing a)=>"\u202A"+$"S{a.Episode.Season:00} · E{a.Episode.Episode:00}"+"\u202C"+(a.Episode.Title.Length>0&&!(store.State.HideSpoilers&&a.Item!=null&&!store.EverWatched(a.Item)&&a.Episode.AirsAt<=DateTimeOffset.UtcNow&&IsSpoiler(a))?"   "+a.Episode.Title:"");
     // Generic titles ("Episode 4") are never spoilers; named ones are hidden only once they're out and unwatched.
     static bool IsSpoiler(Airing a)=>!System.Text.RegularExpressions.Regex.IsMatch(a.Episode.Title,@"^(Episode|Chapter)\s*\d+$",System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     FrameworkElement AgendaRow(Airing a,List<Airing> all)
@@ -109,7 +111,7 @@ public partial class MainWindow
         var tag=Premiere(a);if(tag.Length>0)info.Children.Add(new Border{Background=Brush("#33E4C084"),CornerRadius=new(5),Padding=new(7,2,7,2),Margin=new(0,6,0,0),HorizontalAlignment=HorizontalAlignment.Left,Child=Text(tag,10.5,"#E4C084")});
         var tools=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(tools,3);g.Children.Add(tools);
         if(a.Episode.AirsAt>DateTimeOffset.UtcNow)tools.Children.Add(new Border{Background=Brush("#E4C084"),CornerRadius=new(6),Padding=new(9,3,9,3),Child=Text(When(a.Episode.AirsAt!.Value),11,"#16120C",FontWeights.Bold)});
-        else if(a.Item!=null)tools.Children.Add(CheckCircle(store.EverWatched(a.Item),store.EverWatched(a.Item)?"Watched":"Mark watched",()=>{if(store.EverWatched(a.Item))SmartWatchedClick(a.Item);else SmartCheckOff(a.Item,$"{show.Title} S{a.Episode.Season:00}E{a.Episode.Episode:00} watched");},38));
+        else if(a.Item!=null)tools.Children.Add(CheckCircle(store.EverWatched(a.Item),store.EverWatched(a.Item)?T("Watched","شوهد"):T("Mark watched","تسجيل المشاهدة"),()=>{if(store.EverWatched(a.Item))SmartWatchedClick(a.Item);else SmartCheckOff(a.Item,T("{0} {1} watched","تم تسجيل مشاهدة {0} {1}",show.Title,EpisodeTag(a.Item)));},38));
         card.MouseEnter+=(_,_)=>card.BorderBrush=Brush("#2EFFFFFF");card.MouseLeave+=(_,_)=>card.BorderBrush=Brush("#00000000");if(!TrackerOnly&&a.Item!=null){LazyMenu(card,a.Item);tools.Children.Add(MoreButton(a.Item));}
         return card;
     }
@@ -121,24 +123,24 @@ public partial class MainWindow
         var poster=new Button{Content=Art(show.Poster,show.Title,117,true),Padding=new(0),Height=117,Background=Brush("Transparent"),ToolTip="Open "+show.Title};poster.Click+=(_,_)=>OpenHistoryTitle(a.Show.Group);
         g.Children.Add(new Border{CornerRadius=new(8),ClipToBounds=true,Child=poster,VerticalAlignment=VerticalAlignment.Center});
         var info=new StackPanel{Margin=new(16,2,12,2),VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(info,1);g.Children.Add(info);
-        var badge=new Border{Background=Brush("#E4C084"),CornerRadius=new(5),Padding=new(7,2,7,2),HorizontalAlignment=HorizontalAlignment.Left,Margin=new(0,0,0,6),Child=Text(Premiere(a) is {Length:>0} p?p.ToUpperInvariant():"NEW EPISODE",9.5,"#16120C",FontWeights.Bold)};info.Children.Add(badge);
+        var badge=new Border{Background=Brush("#E4C084"),CornerRadius=new(5),Padding=new(7,2,7,2),HorizontalAlignment=HorizontalAlignment.Left,Margin=new(0,0,0,6),Child=Text(Premiere(a) is {Length:>0} p?p.ToUpperInvariant():T("NEW EPISODE"),9.5,"#16120C",FontWeights.Bold)};info.Children.Add(badge);
         var title=Text(show.Title,17,weight:FontWeights.SemiBold);title.TextTrimming=TextTrimming.CharacterEllipsis;title.TextWrapping=TextWrapping.NoWrap;info.Children.Add(title);
         var line=Text(EpisodeLine(a),13.5,"#E4C084");line.Margin=new(0,4,0,0);line.TextTrimming=TextTrimming.CharacterEllipsis;line.TextWrapping=TextWrapping.NoWrap;info.Children.Add(line);
-        info.Children.Add(Text("Aired "+(a.Local.Date==DateTime.Today?"today":a.Local.Date==DateTime.Today.AddDays(-1)?"yesterday":a.Local.ToString("dddd d MMM"))+(!TrackerOnly&&item!=null&&CanPlay(item)?"  ·  On your PC":""),12,"#9F9A93"));
+        info.Children.Add(Text(T("Aired {0}","صدرت {0}",a.Local.Date==DateTime.Today?T("today","اليوم"):a.Local.Date==DateTime.Today.AddDays(-1)?T("yesterday","أمس"):a.Local.ToString("dddd d MMM",Loc.Culture))+(!TrackerOnly&&item!=null&&CanPlay(item)?"  ·  "+T("On your PC","على جهازك"):""),12,"#9F9A93"));
         var actions=new WrapPanel{Margin=new(0,8,0,0)};info.Children.Add(actions);
         Button Small(string label,string tip,Action act,bool primary=false){var b=ActionButton(label,act,primary);b.Padding=new(12,6,12,6);b.Margin=new(0,0,8,4);b.FontSize=12.5;b.ToolTip=tip;actions.Children.Add(b);return b;}
-        if(!TrackerOnly&&item!=null&&CanPlay(item))Small("▶  Play","Play "+item.EpisodeLabel,()=>_=PlayVideo(item),true);
+        if(!TrackerOnly&&item!=null&&CanPlay(item))Small(T("[[play]]  Play","[[play]]  تشغيل"),T("Play","تشغيل")+" "+EpisodeTag(item),()=>_=PlayVideo(item),true);
         else if(!TrackerOnly&&item!=null)
         {
-            if(StreamOffered&&ActiveDownload(item)==null)Small("▶  Stream","Stream "+item.EpisodeLabel+" through AIOStreams",()=>StreamItem(item),true);
-            Small(ActiveDownload(item)!=null?"Downloading…":"↓  Get","Find this episode for your download service",()=>{if(ActiveDownload(item)!=null)Navigate("Downloads");else FindDownloads(item);});
+            if(StreamOffered&&ActiveDownload(item)==null)Small(T("[[play]]  Stream","[[play]]  بث"),T("Stream {0} through AIOStreams","بث {0} عبر AIOStreams",EpisodeTag(item)),()=>StreamItem(item),true);
+            Small(ActiveDownload(item)!=null?T("Downloading…","جارٍ التنزيل…"):T("[[download]]  Get","[[download]]  احصل عليها"),T("Find this episode for your download service","ابحث عن هذه الحلقة في خدمة التنزيل"),()=>{if(ActiveDownload(item)!=null)Navigate("Downloads");else FindDownloads(item);});
         }
         if(!TrackerOnly&&show.ImdbId.Length>0)Small("Stremio","Stream it in Stremio with your add-ons",()=>OpenInStremio(show.ImdbId,false,a.Episode.Season,a.Episode.Episode));
         if(!TrackerOnly&&show.ImdbId.Length>0)Small("Nuvio","Open it in Nuvio",()=>OpenInNuvio(show.ImdbId,false,show.Title));
         if(item!=null)
         {
             var tools=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(tools,2);g.Children.Add(tools);
-            tools.Children.Add(CheckCircle(false,"Mark watched",()=>SmartCheckOff(item,$"{show.Title} S{a.Episode.Season:00}E{a.Episode.Episode:00} watched"),54));
+            tools.Children.Add(CheckCircle(false,T("Mark watched","تسجيل المشاهدة"),()=>SmartCheckOff(item,T("{0} {1} watched","تم تسجيل مشاهدة {0} {1}",show.Title,EpisodeTag(item))),54));
             if(!TrackerOnly){LazyMenu(card,item);tools.Children.Add(MoreButton(item));}
         }
         card.MouseEnter+=(_,_)=>card.BorderBrush=Brush("#40E4C084");card.MouseLeave+=(_,_)=>card.BorderBrush=Brush("#00000000");

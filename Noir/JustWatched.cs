@@ -40,7 +40,7 @@ public partial class MainWindow
         }
         var reactions=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};var reactionButtons=new List<(string Mood,Button Button)>();
         void RefreshReactions(){foreach(var (mood,button) in reactionButtons){var on=store.State.Reactions.GetValueOrDefault(item.Id)==mood;button.Background=Brush(on?"#45E4C084":"#222226");button.Foreground=Brush(on?"#E4C084":"#C7C2BC");AutomationProperties.SetHelpText(button,on?T("Selected","محدد"):"");}}
-        foreach(var mood in new[]{("loved","♥",T("Loved","أحببته")),("funny","☺",T("Funny","مضحك")),("wow","✦",T("Wow","مذهل")),("sad","☂",T("Sad","حزين")),("meh","−",T("Meh","عادي"))})
+        foreach(var mood in new[]{("loved","[[heart-filled]]",T("Loved","أحببته")),("funny","[[smile]]",T("Funny","مضحك")),("wow","[[sparkle]]",T("Wow","مذهل")),("sad","[[frown]]",T("Sad","حزين")),("meh","[[meh]]",T("Meh","عادي"))})
         {
             var b=Chip(mood.Item2,mood.Item3,()=>{store.SetReaction(item.Id,store.State.Reactions.GetValueOrDefault(item.Id)==mood.Item1?"":mood.Item1);JustWatchedInteraction(item);RefreshReactions();});if(compact)b.Width=32;reactionButtons.Add((mood.Item1,b));reactions.Children.Add(b);
         }
@@ -61,7 +61,7 @@ public partial class MainWindow
         {
             if(!editing)return;editing=false;if(save&&Active()){store.SetReview10(item,Rating(),editor.Text.Trim());JustWatchedInteraction(item);}editor.Visibility=Visibility.Collapsed;RefreshNote();
         }
-        note=Chip(compact?"✎":T("Add a note…","أضف ملاحظة…"),T("Add a note…","أضف ملاحظة…"),()=>{if(editing)return;editing=true;editor.Text=saved;editor.Visibility=Visibility.Visible;editor.Focus();editor.CaretIndex=editor.Text.Length;});
+        note=Chip(compact?"[[pencil]]":T("Add a note…","أضف ملاحظة…"),T("Add a note…","أضف ملاحظة…"),()=>{if(editing)return;editing=true;editor.Text=saved;editor.Visibility=Visibility.Visible;editor.Focus();editor.CaretIndex=editor.Text.Length;});
         editor.PreviewKeyDown+=(_,e)=>{if(e.Key is Key.Enter or Key.Escape){FinishNote(e.Key==Key.Enter);note.Focus();e.Handled=true;}};editor.LostKeyboardFocus+=(_,_)=>FinishNote(true);
         var others=Chip(compact?"💬":T("💬 What others said","💬 آراء الآخرين"),T("What others said","آراء الآخرين"),()=>{JustWatchedInteraction(item);
 #if NOIR_VALIDATE
@@ -91,7 +91,7 @@ public partial class MainWindow
 #endif
         }
         DismissJustWatched(false);justWatchedDirectory=store.DataDirectory;justWatchedInteracted=false;
-        var content=new StackPanel();var head=new DockPanel();var close=ActionButton("✕",()=>DismissJustWatched(true));close.Padding=new(6,2,6,2);close.HorizontalAlignment=HorizontalAlignment.Right;AutomationProperties.SetName(close,T("Dismiss Just watched","إغلاق بطاقة شاهدت للتو"));close.ToolTip=T("Close","إغلاق");DockPanel.SetDock(close,Dock.Right);head.Children.Add(close);head.Children.Add(Text(T("JUST WATCHED","شاهدت للتو"),10,"#E4C084",FontWeights.SemiBold));content.Children.Add(head);content.Children.Add(JustWatchedPanel(finished,false));
+        var content=new StackPanel();var head=new DockPanel();var close=ActionButton("[[close]]",()=>DismissJustWatched(true));close.Padding=new(6,2,6,2);close.HorizontalAlignment=HorizontalAlignment.Right;AutomationProperties.SetName(close,T("Dismiss Just watched","إغلاق بطاقة شاهدت للتو"));close.ToolTip=T("Close","إغلاق");DockPanel.SetDock(close,Dock.Right);head.Children.Add(close);head.Children.Add(Text(T("JUST WATCHED","شاهدت للتو"),10,"#E4C084",FontWeights.SemiBold));content.Children.Add(head);content.Children.Add(JustWatchedPanel(finished,false));
         MountJustWatched(content,finished.Id);StartJustWatchedTimer();
     }
     void MountJustWatched(FrameworkElement content,string id)

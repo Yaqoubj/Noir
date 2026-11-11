@@ -23,7 +23,7 @@ public partial class MainWindow
         void Fit()
         {
             var width=hero.ActualWidth>0?hero.ActualWidth:Math.Max(780,ActualWidth);
-            content.MaxWidth=Math.Min(Density.Pick(620,700),Math.Max(200,width-2*(Density.Compact?24:sidePad)));
+            content.MaxWidth=Math.Min(detail?Density.Pick(620,860):Density.Pick(620,700),Math.Max(200,width-2*(Density.Compact?24:sidePad)));
             content.Measure(new Size(width,double.PositiveInfinity));
             hero.Height=Density.Compact?HeroHeight(detail):Math.Max(HeroHeight(detail),content.DesiredSize.Height+TopBar.Height+24);
         }
@@ -32,7 +32,7 @@ public partial class MainWindow
     Button RoundAction(string glyph,string tip,Action action,bool on=false)
     {
         var b=new Button{Width=Density.HeroRound,Height=Density.HeroRound,Padding=new(0),ToolTip=T(tip),Background=Brush(on?"#E4C084":"#40FFFFFF"),Foreground=Brush(on?"#16120C":"#F4F1EB"),Margin=new(10,0,0,0)};
-        b.Content=new TextBlock{Text=glyph,FontSize=Density.Pick(16,19),HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
+        b.FontSize=Density.Pick(16,19);b.Content=IconSet.Has(glyph)?IconSet.Content(glyph):new TextBlock{Text=glyph,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
         Motion.ButtonFeedback(b);b.Template=RoundTemplate();System.Windows.Automation.AutomationProperties.SetName(b,T(tip));b.Click+=(_,_)=>action();return b;
     }
     static ControlTemplate RoundTemplate()
@@ -50,14 +50,37 @@ public partial class MainWindow
         if(!primary){b.Background=Brush("#40FFFFFF");b.Foreground=Brush("#F4F1EB");}
         b.Margin=new(0,0,12,0);return b;
     }
-    FrameworkElement CinematicHero(VideoItem item,List<VideoItem> group,bool continuing,bool justFinished=false)
+    // U27/U28: the same gold primary button on every hero (Home and Discover used to differ).
+    Button HeroGold(string text,Action action)=>BigButton(text,action,true);
+    // One tile of a title page's action row (gold when primary); the label is also its name in More when the row folds it away.
+    Button DetailTile(string glyph,string label,Action action,string? tip=null,bool primary=false)
+    {
+        var plain=IconSet.Plain(T(label));var stack=new StackPanel{Orientation=Orientation.Horizontal};
+        var icon=IconSet.Draw(glyph.Replace("[[","").Replace("]]","").Trim(),16);icon.Margin=new(0,0,9,0);
+        if(!primary&&icon is System.Windows.Shapes.Path ip){ip.Stroke=Brush("#E4C084");if(System.Windows.Data.BindingOperations.IsDataBound(ip,System.Windows.Shapes.Shape.FillProperty))ip.Fill=Brush("#E4C084");}
+        stack.Children.Add(icon);stack.Children.Add(Text(plain,13.5,primary?"#16120C":"#E9E4DC",primary?FontWeights.SemiBold:FontWeights.Normal));
+        var b=new Button{Content=stack,Background=Brush(primary?"#E4C084":"#1A1A1D"),Padding=new(16,10,18,10),Margin=new(0,0,10,0),ToolTip=tip??plain,Tag=plain};b.Click+=(_,_)=>action();
+        System.Windows.Automation.AutomationProperties.SetName(b,plain);return b;
+    }
+    // The Trailer button of a title page: hidden until a trailer is found, drawn like the other tiles.
+    Button TrailerTile(VideoItem item)
+    {
+        var label=T("Trailer","الإعلان");var skin=DetailTile("[[play]]",label,()=>{});var b=TrailerAction(item);b.Style=null;b.Content=skin.Content;b.Background=skin.Background;b.Padding=skin.Padding;b.Margin=skin.Margin;b.ToolTip=label;b.Tag=label;
+        System.Windows.Automation.AutomationProperties.SetName(b,label);return b;
+    }
+    // Back link at the top left of a title page hero.
+    void PlaceHeroBack(Grid overlay,Button back)
+    {
+        back.Foreground=Brush("#D9D4CC");back.Margin=new(Density.Compact?24:sidePad,TopBar.Height+Density.Pick(10,14),0,0);back.VerticalAlignment=VerticalAlignment.Top;back.HorizontalAlignment=HorizontalAlignment.Left;Panel.SetZIndex(back,6);overlay.Children.Add(back);
+    }
+    FrameworkElement CinematicHero(VideoItem item,List<VideoItem> group,bool continuing,bool justFinished=false,FrameworkElement? detailRow=null,Button? detailBack=null)
     {
         var detail=detailKey!=null;var height=HeroHeight(detail);
         var grid=new Grid{Height=height,ClipToBounds=true,Background=Brush("#151517")};
         var media=new Border{ClipToBounds=true};var artwork=new Grid();media.Child=artwork;HeroArtwork(artwork,File.Exists(item.Backdrop)?item.Backdrop:item.Poster,item.GroupKey);grid.Children.Add(media);var overlay=new Grid();while(artwork.Children.Count>1){var shade=artwork.Children[1];artwork.Children.RemoveAt(1);overlay.Children.Add(shade);}grid.Children.Add(overlay);PreviewHost.Configure(store.DataDirectory,store.GetProgress,store.EverWatched,TmdbKey());PreviewHost.Attach(media,item,detail?1800:1500);PreviewHost.SetOverlay(media,overlay);
         var panel=new StackPanel{Margin=new(Density.Compact?24:sidePad,0,Density.Compact?24:sidePad,Density.Compact?(detail?24:38):detail?42:70),MaxWidth=Density.Pick(620,700),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Bottom};
         var pro=store.GetProgress(item);var playable=CanPlay(item);
-        var eyebrow=justFinished?(item.IsMovie?"YOU JUST WATCHED":"YOU FINISHED THIS SHOW"):continuing&&!playable?"UP NEXT · NOT ON THIS PC YET":continuing&&pro is {Completed:false,Position:>=1}?"CONTINUE WATCHING":continuing?"UP NEXT":detail?(store.TitleStatus(group)).ToUpperInvariant():"TONIGHT'S PICK";
+        var eyebrow=justFinished?(item.IsMovie?"YOU JUST WATCHED":"YOU FINISHED THIS SHOW"):continuing&&!playable?"UP NEXT · NOT ON THIS PC":continuing&&pro is {Completed:false,Position:>=1}?"CONTINUE WATCHING":continuing?"UP NEXT":detail?(store.TitleStatus(group)).ToUpperInvariant():"TONIGHT'S PICK";
         var tag=new Border{Background=Brush("#33E4C084"),BorderBrush=Brush("#66E4C084"),BorderThickness=new(1),CornerRadius=new(4),Padding=new(9,3,9,3),HorizontalAlignment=HorizontalAlignment.Left,Child=Text(T(eyebrow),11,"#F0D3A0",FontWeights.SemiBold)};panel.Children.Add(tag);
         // The title's own logo artwork when Cinemeta has one; otherwise the name in display type.
         if(TitleLogo(item,Density.HeroLogoHeight(detail),Density.HeroLogoWidth) is {} logo){logo.Margin=new(0,18,0,18);panel.Children.Add(logo);}
@@ -77,26 +100,28 @@ public partial class MainWindow
         }
         if(!detail&&continuing&&CatchUpCard(group,true) is {} catchUp)panel.Children.Add(catchUp);
         var actions=new WrapPanel{Orientation=Orientation.Horizontal,Margin=new(0,Density.Pick(16,26),0,0)};
+        if(detail&&detailRow!=null){detailRow.Margin=new(0,Density.Pick(16,26),0,0);if(detailBack!=null)PlaceHeroBack(overlay,detailBack);}
+        else{
         if(justFinished)
         {
-            actions.Children.Add(HeroButton(rating>0?"★  Your rating":"★  Rate it",()=>OpenDiary(item),true));
-            if(item.IsMovie&&playable)actions.Children.Add(HeroButton("↻  Watch again",()=>_=PlayVideo(item,true),false));
+            actions.Children.Add(HeroGold(rating>0?"[[star-filled]]  Your rating":"[[star-filled]]  Rate it",()=>OpenDiary(item)));
+            if(item.IsMovie&&playable)actions.Children.Add(HeroButton("[[sync]]  Watch again",()=>_=PlayVideo(item,true),false));
         }
         else if(!playable&&StreamOffered&&ActiveDownload(item)==null&&System.Text.RegularExpressions.Regex.IsMatch(item.ImdbId,@"^tt\d+$"))
         {
             // Not on this PC: stream it now, or download it to keep.
-            actions.Children.Add(HeroButton(pro is {Completed:false,Position:>=1}?"▶   Resume stream":"▶   Stream"+(continuing&&!item.IsMovie?" "+item.EpisodeLabel.Replace(" · ",""):""),()=>StreamItem(item),true));
-            actions.Children.Add(HeroButton("↓  Download",()=>FindDownloads(item),false));
+            actions.Children.Add(HeroGold(T(pro is {Completed:false,Position:>=1}?"[[play]]   Resume stream":"[[play]]   Stream")+(continuing&&!item.IsMovie&&!(pro is {Completed:false,Position:>=1})?" "+EpisodeTag(item):""),()=>StreamItem(item)));
+            actions.Children.Add(HeroButton("[[download]]  Download",()=>FindDownloads(item),false));
         }
-        else actions.Children.Add(HeroButton(!playable?(ActiveDownload(item)!=null?"Downloading…":"↓  Get it on this PC"):pro is {Completed:false,Position:>=1}?"▶   Resume":continuing&&!item.IsMovie?"▶   Play "+item.EpisodeLabel.Replace(" · ",""):"▶   Play",()=>{if(playable)_=PlayVideo(item);else if(ActiveDownload(item)!=null)Navigate("Downloads");else FindDownloads(item);},true));
+        else actions.Children.Add(HeroGold(!playable?(ActiveDownload(item)!=null?"Downloading…":"[[download]]  Get it on this PC"):pro is {Completed:false,Position:>=1}?"[[play]]   Resume":continuing&&!item.IsMovie?T("[[play]]   Play")+" "+EpisodeTag(item):"[[play]]   Play",()=>{if(playable)_=PlayVideo(item);else if(ActiveDownload(item)!=null)Navigate("Downloads");else FindDownloads(item);}));
         var listed=store.State.Watchlist.Contains(item.GroupKey);
-        var list=HeroButton(listed?"✓  In My List":"＋  Add to My List",()=>ToggleWatchlist(item),false);list.ToolTip=T(listed?"In My List · click to remove":"Add to My List");actions.Children.Add(list);
-        if(!detail)actions.Children.Add(HeroButton("ⓘ   More info",()=>OpenDetails(group),false));
-        else if(playable&&pro is {Completed:false,Position:>=1})actions.Children.Add(HeroButton("↺   Start over",()=>_=PlayVideo(item,true),false));
-        if(!justFinished)actions.Children.Add(RoundAction(rating>0?"★":"☆","Rate & note",()=>OpenDiary(item)));
-        actions.Children.Add(RoundAction("💬","Reviews & comments",()=>OpenReviews(item)));
+        var list=HeroButton(listed?"[[check]]  In My List":"[[plus]]  Add to My List",()=>ToggleWatchlist(item),false);list.ToolTip=T(listed?"In My List · click to remove":"Add to My List");actions.Children.Add(list);
+        if(!detail)actions.Children.Add(HeroButton("[[info]]   More info",()=>OpenDetails(group),false));
+        else if(playable&&pro is {Completed:false,Position:>=1})actions.Children.Add(HeroButton("[[sync]]   Start over",()=>_=PlayVideo(item,true),false));
+        if(!justFinished)actions.Children.Add(RoundAction(rating>0?"[[star-filled]]":"[[star]]","Rate & note",()=>OpenDiary(item)));
         if(detail)actions.Children.Add(TrailerAction(item));
-        foreach(FrameworkElement action in actions.Children)action.Margin=new(action.Margin.Left,action.Margin.Top,action.Margin.Right,8);panel.Children.Add(actions);overlay.Children.Add(panel);FitHero(grid,panel,detail);panel.SizeChanged+=(_,e)=>{if(e.HeightChanged)FitHeroContent();};void FitHeroContent(){panel.Measure(new Size(Math.Max(300,grid.ActualWidth-2*sidePad),double.PositiveInfinity));grid.Height=Density.Compact?HeroHeight(detail):Math.Max(HeroHeight(detail),panel.DesiredSize.Height+TopBar.Height+24);}
+        }
+        foreach(FrameworkElement action in actions.Children)action.Margin=new(action.Margin.Left,action.Margin.Top,action.Margin.Right,8);panel.Children.Add(detail&&detailRow!=null?detailRow:actions);overlay.Children.Add(panel);FitHero(grid,panel,detail);panel.SizeChanged+=(_,e)=>{if(e.HeightChanged)FitHeroContent();};void FitHeroContent(){panel.Measure(new Size(Math.Max(300,grid.ActualWidth-2*sidePad),double.PositiveInfinity));grid.Height=Density.Compact?HeroHeight(detail):Math.Max(HeroHeight(detail),panel.DesiredSize.Height+TopBar.Height+24);}
         return Density.Compact?(detail?ContainedHero(grid,6):grid):Bleed(grid,detail?6:0);
     }
     readonly Dictionary<string,Task<BitmapImage?>> heroPreloads=new(StringComparer.OrdinalIgnoreCase);
@@ -209,5 +234,35 @@ public partial class MainWindow
         Panel.SetZIndex(dots,5);host.Children.Add(dots);Show(0,false);
         var timer=new DispatcherTimer{Interval=TimeSpan.FromSeconds(12)};timer.Tick+=(_,_)=>{if(!following&&slides.Count>1&&!host.IsMouseOver&&!host.IsKeyboardFocusWithin&&IsActive&&current==null&&CarouselVisible(host))Show(index+1,true);};
         host.Loaded+=(_,_)=>{if(Motion.Enabled&&!validationMode)timer.Start();};host.Unloaded+=(_,_)=>{timer.Stop();if(homeHeroFocus==FocusTitle){homeHeroFocus=null;homeHeroCard=null;}};return Density.Compact?ContainedHero(host):Bleed(host);
+    }
+}
+
+// U27: a single-line row for a title page's actions. What does not fit is hidden (not wrapped) and offered in the More menu, which always stays on the row.
+public sealed class FoldRow : Panel
+{
+    public FrameworkElement? More;
+    readonly HashSet<UIElement> folded=new();
+    public IEnumerable<FrameworkElement> Folded()=>InternalChildren.OfType<FrameworkElement>().Where(c=>folded.Contains(c)&&c!=More);
+    protected override Size MeasureOverride(Size available)
+    {
+        var items=InternalChildren.OfType<UIElement>().Where(c=>c!=More&&c.Visibility!=Visibility.Collapsed).ToList();
+        foreach(var c in items)c.Measure(new Size(double.PositiveInfinity,double.PositiveInfinity));More?.Measure(new Size(double.PositiveInfinity,double.PositiveInfinity));
+        var moreWidth=More?.DesiredSize.Width??0;var max=double.IsInfinity(available.Width)?double.MaxValue:available.Width;
+        folded.Clear();var used=moreWidth;var first=true;var full=false;
+        foreach(var c in items){if(full||!first&&used+c.DesiredSize.Width>max){full=true;folded.Add(c);}else{used+=c.DesiredSize.Width;}first=false;}
+        var height=Math.Max(items.Where(c=>!folded.Contains(c)).Select(c=>c.DesiredSize.Height).DefaultIfEmpty().Max(),More?.DesiredSize.Height??0);
+        return new Size(Math.Min(used,max),height);
+    }
+    protected override Size ArrangeOverride(Size final)
+    {
+        double x=0;
+        foreach(var c in InternalChildren.OfType<UIElement>())
+        {
+            if(c==More||c.Visibility==Visibility.Collapsed)continue;
+            if(folded.Contains(c)){if(c.Visibility!=Visibility.Hidden)c.Visibility=Visibility.Hidden;c.Arrange(new Rect(0,0,0,0));continue;}
+            if(c.Visibility==Visibility.Hidden)c.Visibility=Visibility.Visible;
+            c.Arrange(new Rect(x,0,c.DesiredSize.Width,final.Height));x+=c.DesiredSize.Width;
+        }
+        More?.Arrange(new Rect(x,0,More.DesiredSize.Width,final.Height));return final;
     }
 }

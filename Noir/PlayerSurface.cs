@@ -12,7 +12,7 @@ public partial class MainWindow
     bool PlayerSurfaceBuilt=>playerSurface!=null;
     VideoView? video;Grid? playerOverlay,playerHeader,nextMedia,nextRingHost;TextBlock? nowTitle,nowEpisode,playerMessage,playerHint,nextLabel,nextTitle,nextCountdown,stillWatchingTitle,stillWatchingBody,elapsed,total,savedLabel;
     Button? sleepButton,skipIntro,creditsChip,nextRingPlay,nextPlay,nextCancel,stillWatchingContinue,stillWatchingBack,pauseButton,pictureModeButton,boostButton,speedButton;
-    Border? nextPanel,nextStill,stillWatchingPanel;Path? nextRing;StackPanel? playerFooter,playerVolume;Slider? seekBar,volumeBar;Canvas? chapterTicks;
+    Border? nextPanel,nextStill,stillWatchingPanel;Path? nextRing,volumeIcon;Button? playerBackButton,playerEpisodesButton;StackPanel? playerFooter,playerVolume;Slider? seekBar,volumeBar;Canvas? chapterTicks;
     void EnsurePlayerSurface()
     {
         if(playerSurface!=null)return;
@@ -25,12 +25,12 @@ public partial class MainWindow
         stillWatchingTitle=Part<TextBlock>("StillWatchingTitle");stillWatchingBody=Part<TextBlock>("StillWatchingBody");elapsed=Part<TextBlock>("Elapsed");total=Part<TextBlock>("Total");savedLabel=Part<TextBlock>("SavedLabel");
         sleepButton=Part<Button>("SleepButton");skipIntro=Part<Button>("SkipIntro");creditsChip=Part<Button>("CreditsChip");nextRingPlay=Part<Button>("NextRingPlay");nextPlay=Part<Button>("NextPlay");nextCancel=Part<Button>("NextCancel");
         stillWatchingContinue=Part<Button>("StillWatchingContinue");stillWatchingBack=Part<Button>("StillWatchingBack");pauseButton=Part<Button>("PauseButton");pictureModeButton=Part<Button>("PictureModeButton");boostButton=Part<Button>("BoostButton");speedButton=Part<Button>("SpeedButton");
-        nextPanel=Part<Border>("NextPanel");nextStill=Part<Border>("NextStill");stillWatchingPanel=Part<Border>("StillWatchingPanel");nextRing=Part<Path>("NextRing");playerFooter=Part<StackPanel>("PlayerFooter");playerVolume=Part<StackPanel>("PlayerVolume");
+        nextPanel=Part<Border>("NextPanel");nextStill=Part<Border>("NextStill");stillWatchingPanel=Part<Border>("StillWatchingPanel");nextRing=Part<Path>("NextRing");volumeIcon=Part<Path>("VolumeIcon");playerBackButton=Part<Button>("PlayerBackButton");playerEpisodesButton=Part<Button>("PlayerEpisodesButton");playerFooter=Part<StackPanel>("PlayerFooter");playerVolume=Part<StackPanel>("PlayerVolume");
         seekBar=Part<Slider>("SeekBar");volumeBar=Part<Slider>("VolumeBar");chapterTicks=Part<Canvas>("ChapterTicks");
         // Same start state the constructor used to set on the always-built controls.
         playerOverlay.Visibility=Visibility.Collapsed;video.Content=null;
         var wasReady=ready;ready=false;volumeBar.Value=store.State.Volume;ready=wasReady;
-        playerVolume.Visibility=ActualWidth>0&&ActualWidth<1000?Visibility.Collapsed:Visibility.Visible;
+        narrowVolume=ActualWidth>0&&ActualWidth<1000;volumeBar.Visibility=narrowVolume?Visibility.Collapsed:Visibility.Visible;// U80: the speaker stays at narrow widths
         StartupTrace.Mark("Player surface build ended");
     }
     internal VideoView Video{get{EnsurePlayerSurface();return video!;}}
@@ -61,6 +61,9 @@ public partial class MainWindow
     internal Button PauseButton{get{EnsurePlayerSurface();return pauseButton!;}}
     internal Button PictureModeButton{get{EnsurePlayerSurface();return pictureModeButton!;}}
     internal Button BoostButton{get{EnsurePlayerSurface();return boostButton!;}}
+    internal Path VolumeIcon{get{EnsurePlayerSurface();return volumeIcon!;}}
+    internal Button PlayerBackButton{get{EnsurePlayerSurface();return playerBackButton!;}}
+    internal Button PlayerEpisodesButton{get{EnsurePlayerSurface();return playerEpisodesButton!;}}
     internal Button SpeedButton{get{EnsurePlayerSurface();return speedButton!;}}
     internal Border NextPanel{get{EnsurePlayerSurface();return nextPanel!;}}
     internal Border NextStill{get{EnsurePlayerSurface();return nextStill!;}}

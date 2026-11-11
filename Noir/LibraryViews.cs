@@ -42,8 +42,8 @@ public partial class MainWindow
         }
         picture.Children.Add(CardMenu(item));
         // ✕ hides the title from this row (it comes back when you play it again).
-        var remove=new Button{Content="✕",Width=28,Height=28,Padding=new(0),FontSize=12,Background=Brush("#D9101012"),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Top,Margin=new(8),ToolTip=T("Remove from Continue Watching"),Opacity=0};
-        remove.Template=RoundTemplate();System.Windows.Automation.AutomationProperties.SetName(remove,"Remove "+item.Label+" from Continue Watching");
+        var remove=new Button{Content="[[close]]",Width=28,Height=28,Padding=new(0),FontSize=12,Background=Brush("#D9101012"),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Top,Margin=new(8),ToolTip=T("Remove from Continue watching"),Opacity=0};
+        remove.Template=RoundTemplate();System.Windows.Automation.AutomationProperties.SetName(remove,"Remove "+item.Label+" from Continue watching");
         remove.Click+=(_,e)=>{e.Handled=true;store.State.HiddenContinue.Add(item.GroupKey);store.Save();Render();};
         if(next!=null)
         {
@@ -80,10 +80,10 @@ public partial class MainWindow
     {
         var choice=ChoiceFor(group);PageTitle.Text=choice.Title;
         var backPage=detailOrigin?.Page??(page is "History" or "My List"?page:choice.IsMovie?"Movies":"Shows");
-        ContentPanel.Children.Add(Hero(choice,group,store.ContinueFor(group)!=null));
+        var back=ActionButton(T("[[back]]  Back to {0}","[[back]]  العودة إلى {0}",T(backPage)),()=>BackFromDetails(backPage));back.Background=Brush("Transparent");back.Foreground=Brush("#AAA6A0");back.Padding=new(0,4,0,4);back.HorizontalAlignment=HorizontalAlignment.Left;
+        // U27: the action row and the Back link live inside the hero.
+        ContentPanel.Children.Add(CinematicHero(choice,group,store.ContinueFor(group)!=null,false,DetailActions(choice,group,null),back));
         if(CatchUpCard(group) is {} recap)ContentPanel.Children.Add(recap);
-        var back=ActionButton(T("←  Back to {0}","←  العودة إلى {0}",T(backPage)),()=>BackFromDetails(backPage));back.Background=Brush("Transparent");back.Foreground=Brush("#AAA6A0");back.Padding=new(0,4,0,4);back.HorizontalAlignment=HorizontalAlignment.Left;
-        ContentPanel.Children.Add(DetailActions(choice,group,back));
         if(ReadyTitleInfo(choice.GroupKey) is {} readyInfo)ContentPanel.Children.Add(Body(readyInfo,12));
         if(downloads!=null&&!TrackerOnly&&store.State.Watchlist.Contains(choice.GroupKey))ContentPanel.Children.Add(AlsoDownloadToggle(choice));
         if(!choice.IsMovie&&group.Any(i=>i.Season>0))ContentPanel.Children.Add(SeasonStrip(group));
@@ -133,6 +133,41 @@ public partial class MainWindow
             if(visible.Count==0) ContentPanel.Children.Add(Body("No episodes match this filter."));
         }
     }
+    // Tooltips appear only when they add something: one that repeats text already fully visible on the control is dropped (U34).
+    static bool tooltipFilterInstalled;
+    readonly bool tooltipFilter=InstallTooltipFilter();
+    static bool InstallTooltipFilter()
+    {
+        if(tooltipFilterInstalled)return true;tooltipFilterInstalled=true;
+        EventManager.RegisterClassHandler(typeof(FrameworkElement),ToolTipService.ToolTipOpeningEvent,new ToolTipEventHandler((sender,e)=>{try{if(sender is FrameworkElement fe&&TooltipRepeatsVisibleText(fe))e.Handled=true;}catch{}}));
+        return true;
+    }
+    static bool TooltipRepeatsVisibleText(FrameworkElement fe)
+    {
+        var tip=(fe.ToolTip as string)??(fe.ToolTip as ToolTip)?.Content as string;if(string.IsNullOrWhiteSpace(tip))return false;tip=tip.Trim();
+        var texts=new List<TextBlock>();void Collect(DependencyObject node){if(node is TextBlock tb&&tb.Visibility==Visibility.Visible)texts.Add(tb);if(node is Visual or System.Windows.Media.Media3D.Visual3D)for(int i=0;i<VisualTreeHelper.GetChildrenCount(node);i++)Collect(VisualTreeHelper.GetChild(node,i));}
+        Collect(fe);
+        var same=texts.Where(t=>string.Equals(t.Text?.Trim(),tip,StringComparison.CurrentCultureIgnoreCase)).ToList();
+        if(same.Count==0)return false;
+        return same.All(t=>!TextIsCut(t));
+    }
+    static bool TextIsCut(TextBlock t)
+    {
+        if(t.ActualWidth<=0||t.ActualHeight<=0)return true;
+        var face=new Typeface(t.FontFamily,t.FontStyle,t.FontWeight,t.FontStretch);var dpi=VisualTreeHelper.GetDpi(t).PixelsPerDip;
+        var wanted=new FormattedText(t.Text??"",System.Globalization.CultureInfo.CurrentUICulture,t.FlowDirection,face,t.FontSize,Brushes.Black,dpi){MaxTextWidth=t.TextWrapping==TextWrapping.NoWrap?double.MaxValue:Math.Max(1,t.ActualWidth)};
+        return wanted.Width>t.ActualWidth+1||(t.TextWrapping!=TextWrapping.NoWrap&&wanted.Height>t.ActualHeight+1);
+    }
+    // Watched is a gold tick inside a quiet circle, never a filled gold disc (U30).
+    Button EpisodeCheck(bool on,string tip,Action act,double size)
+    {
+        var ring=new System.Windows.Shapes.Ellipse{Width=size,Height=size,StrokeThickness=1.6,Stroke=Brush(on?"#8A7448":"#4A4741"),Fill=Brush("#00000000")};
+        var tick=new System.Windows.Shapes.Path{Data=Geometry.Parse("M0,5 L4,9 L12,0"),Stroke=Brush(on?"#E4C084":"#6B665E"),StrokeThickness=2.2,StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round,StrokeLineJoin=PenLineJoin.Round,Width=size*.4,Height=size*.32,Stretch=Stretch.Uniform,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
+        var face=new Grid{Width=size,Height=size};face.Children.Add(ring);face.Children.Add(tick);
+        var b=new Button{Content=face,Padding=new(0),Background=Brush("Transparent"),ToolTip=tip,Width=size,Height=size};System.Windows.Automation.AutomationProperties.SetName(b,tip);
+        b.MouseEnter+=(_,_)=>{if(!on){ring.Stroke=Brush("#E4C084");tick.Stroke=Brush("#E4C084");}};b.MouseLeave+=(_,_)=>{if(!on){ring.Stroke=Brush("#4A4741");tick.Stroke=Brush("#6B665E");}};
+        b.Click+=(_,_)=>act();return b;
+    }
     FrameworkElement EpisodeRow(VideoItem item)
     {
         var bookmark=store.GetProgress(item);
@@ -147,7 +182,7 @@ public partial class MainWindow
         if(bookmark is {Completed:false,Position:>0}&&store.EverWatched(item))message=T("Rewatch","إعادة مشاهدة")+" · "+message;
         if(item.Duration>0)message+="  ·  "+T("{0} min","{0} د",(int)(item.Duration/60));
         if(bookmark!=null)message+="  ·  "+bookmark.UpdatedAt.ToLocalTime().ToString("d MMM yyyy, HH:mm",Loc.Culture);
-        if(!item.Available||!System.IO.File.Exists(item.Path))message+="  ·  "+T("File unavailable · History kept","الملف غير متاح · تم حفظ السجل");
+        if((!item.Available||!System.IO.File.Exists(item.Path))&&!message.Contains(T("Not on this PC","غير موجود على هذا الكمبيوتر")))message+="  ·  "+T("Not on this PC","غير موجود على هذا الكمبيوتر");
         info.Children.Add(Body(message,12));Grid.SetColumn(info,1);g.Children.Add(info);
         var image=reveal&&System.IO.File.Exists(item.EpisodeImage)?item.EpisodeImage:item.Backdrop;
         var still=new Border{Width=144,Height=81,CornerRadius=new(6),ClipToBounds=true,Background=Brush("#252326"),Child=Art(image,item.Title,81),Margin=new(0,0,15,0),HorizontalAlignment=HorizontalAlignment.Left};g.Children.Add(still);Motion.EnterOnce(still);
@@ -155,10 +190,10 @@ public partial class MainWindow
         if(item.EpisodeSummary.Length>0&&reveal){var summary=Body(item.EpisodeSummary,12);summary.LineHeight=19;summary.MaxHeight=38;summary.TextTrimming=TextTrimming.WordEllipsis;summary.Cursor=System.Windows.Input.Cursors.Hand;summary.ToolTip=T("Expand synopsis","توسيع الملخص");summary.MouseLeftButtonUp+=(_,e)=>{summary.MaxHeight=double.IsPositiveInfinity(summary.MaxHeight)?38:double.PositiveInfinity;summary.ToolTip=T(double.IsPositiveInfinity(summary.MaxHeight)?"Collapse synopsis":"Expand synopsis",double.IsPositiveInfinity(summary.MaxHeight)?"طي الملخص":"توسيع الملخص");e.Handled=true;};info.Children.Add(summary);}
         var actions=new WrapPanel { VerticalAlignment=VerticalAlignment.Center };
         var available=CanPlay(item);var stream=!available&&StreamOffered&&store.Aired(item,DateTimeOffset.UtcNow);
-        var play=ActionButton(stream?"▶ Stream":!available?"↓ Download":bookmark is {Completed:false,Position:>0}?"▶ Resume":"▶ Play",()=>{if(available)_=PlayVideo(item);else if(stream)StreamItem(item);else FindDownloads(item);},true);play.MinWidth=Density.EpisodeActionMin;actions.Children.Add(play);
-        if(stream){var get=ActionButton("↓",()=>FindDownloads(item));get.ToolTip=T("Download to this PC");get.Margin=new(8,0,0,0);actions.Children.Add(get);}
-        var reviews=ActionButton("Reviews",()=>OpenReviews(item));reviews.Margin=new(8,0,0,0);actions.Children.Add(reviews);
-        var seen=store.EverWatched(item);var mark=CheckCircle(seen,seen?"Mark unwatched":"Mark watched",()=>{if(seen)SmartWatchedClick(item);else SmartCheckOff(item,item.Label+" watched");},36);mark.Margin=new(12,0,0,0);actions.Children.Add(mark);actions.Children.Add(MoreButton(item));
+        // Only the next episode to watch carries the gold button; every other row is quiet (U30).
+        var upNext=!item.IsMovie&&!store.EverWatched(item)&&(store.ContinueFor(store.EpisodesFor(item.GroupKey))??store.UpNextFor(store.EpisodesFor(item.GroupKey))?.Item)?.Id==item.Id;
+        var play=ActionButton(stream?"[[play]] Stream":!available?"[[download]] Download":bookmark is {Completed:false,Position:>0}?"[[play]] Resume":"[[play]] Play",()=>{if(available)_=PlayVideo(item);else if(stream)StreamItem(item);else FindDownloads(item);},upNext);play.MinWidth=Density.EpisodeActionMin;actions.Children.Add(play);
+        var seen=store.EverWatched(item);var mark=EpisodeCheck(seen,seen?"Mark unwatched":"Mark watched",()=>{if(seen)SmartWatchedClick(item);else SmartCheckOff(item,item.Label+" watched");},36);mark.Margin=new(12,0,0,0);actions.Children.Add(mark);actions.Children.Add(MoreButton(item));
         Grid.SetColumn(actions,2);g.Children.Add(actions);
         g.RowDefinitions.Add(new(){Height=GridLength.Auto});g.RowDefinitions.Add(new(){Height=GridLength.Auto});
         g.SizeChanged+=(_,_)=>{var small=g.ActualWidth<760;g.ColumnDefinitions[0].Width=new GridLength(small?120:160);still.Width=small?104:144;still.Height=still.Width*9/16;Grid.SetRow(actions,small?1:0);Grid.SetColumn(actions,small?1:2);Grid.SetColumnSpan(actions,small?2:1);actions.Margin=new Thickness(0,small?10:0,0,0);};
@@ -169,43 +204,53 @@ public partial class MainWindow
     void LazyMenu(FrameworkElement target,VideoItem item){target.ContextMenu=new ContextMenu();target.ContextMenuOpening+=(_,_)=>target.ContextMenu=ItemMenu(item);}
     ContextMenu ItemMenu(VideoItem item)
     {
-        var menu=new ContextMenu{FlowDirection=LibraryRoot.FlowDirection};AddHistoryTitleActions(menu,item);
-        if(StreamOffered&&System.Text.RegularExpressions.Regex.IsMatch(item.ImdbId,@"^tt\d+$"))
-        {
-            var stream=new MenuItem{Header="Stream now"};stream.Click+=(_,_)=>StreamItem(item);menu.Items.Add(stream);
-            var choose=new MenuItem{Header="Choose a stream…"};choose.Click+=(_,_)=>StreamItem(item,true);menu.Items.Add(choose);
-        }
-        var download=new MenuItem{Header="Download to this PC"};download.Click+=(_,_)=>FindDownloads(item);menu.Items.Add(download);
-        if(!item.IsMovie){var seasonDownload=new MenuItem{Header="Download this season to PC"};seasonDownload.Click+=(_,_)=>FindDownloads(item,true);menu.Items.Add(seasonDownload);}
-        if(CanPlay(item)){var subtitles=new MenuItem{Header="Download English / Arabic subtitles"};subtitles.Click+=(_,_)=>DownloadSubtitleFiles(item);menu.Items.Add(subtitles);}
-        var queue=new MenuItem{Header="Add to play queue",IsEnabled=CanPlay(item)};queue.Click+=(_,_)=>{store.Queue(item);Status.Text="Added to your play queue.";};menu.Items.Add(queue);
-        var collections=new MenuItem{Header="Save to collection"};collections.Click+=(_,_)=>CollectionDialog(item);menu.Items.Add(collections);
-        var statuses=new MenuItem{Header="Viewing status"};foreach(var status in LibraryStore.Statuses){var value=status;var option=new MenuItem{Header=status};option.Click+=(_,_)=>{store.SetStatus(item,value);Render();};statuses.Items.Add(option);}menu.Items.Add(statuses);
-        var match=new MenuItem{Header="Correct match / episode numbers"};match.Click+=(_,_)=>MatchDialog(item);menu.Items.Add(match);
-        var restart=new MenuItem { Header="Play from beginning",IsEnabled=item.Available && System.IO.File.Exists(item.Path) };restart.Click+=(_,_)=>_ = PlayVideo(item,true);menu.Items.Add(restart);
+        // Grouped title menu (U36): items that cannot apply are left out, not greyed; submenus hold the rest.
+        var menu=new ContextMenu{FlowDirection=LibraryRoot.FlowDirection};
+        MenuItem Row(string label,Action act,bool check=false,bool on=false){var m=new MenuItem{Header=label};if(check){m.IsCheckable=true;m.IsChecked=on;}m.Click+=(_,_)=>act();System.Windows.Automation.AutomationProperties.SetName(m,label);return m;}
+        void Gap(){if(menu.Items.Count>0&&menu.Items[^1] is not Separator)menu.Items.Add(new Separator());}
+        var hasImdb=System.Text.RegularExpressions.Regex.IsMatch(item.ImdbId,@"^tt\d+$");var playable=CanPlay(item);
+        if(StreamOffered&&hasImdb){menu.Items.Add(Row(T("Stream now","بث الآن"),()=>StreamItem(item)));menu.Items.Add(Row(T("Choose a stream…","اختر بثًا…"),()=>StreamItem(item,true)));}
+        menu.Items.Add(Row(T("Download","تنزيل"),()=>FindDownloads(item)));
+        Gap();
+        var watched=new MenuItem{Header=T("Watched","المشاهدة")};
         var isWatched=store.EverWatched(item);
-        var mark=new MenuItem { Header=isWatched?"Mark unwatched":"Mark watched" };mark.Click+=(_,_)=> { if(isWatched)SmartWatchedClick(item);else SmartCheckOff(item,item.Label+" watched"); };menu.Items.Add(mark);
+        watched.Items.Add(Row(isWatched?T("Mark unwatched","تعليم كغير مشاهد"):T("Mark watched","تعليم كمشاهد"),()=>{if(isWatched)SmartWatchedClick(item);else SmartCheckOff(item,item.Label+" watched");}));
         if(!item.IsMovie&&item.Season>0)
         {
-            var upTo=new MenuItem{Header="Mark watched up to here"};
-            upTo.Click+=(_,_)=>{var now=DateTimeOffset.UtcNow;var earlier=store.EpisodesFor(item.GroupKey).Where(i=>i.Season>0&&(i.Season<item.Season||i.Season==item.Season&&i.Episode<=item.Episode)&&store.Aired(i,now)&&!store.EverWatched(i)).ToList();if(earlier.Count>0)BulkCheckOff(earlier,$"{earlier.Count} episode{(earlier.Count==1?"":"s")} of {item.Title} marked watched");};
-            menu.Items.Add(upTo);
+            watched.Items.Add(Row(T("Watched up to here","شوهد حتى هنا"),()=>{var now=DateTimeOffset.UtcNow;var earlier=store.EpisodesFor(item.GroupKey).Where(i=>i.Season>0&&(i.Season<item.Season||i.Season==item.Season&&i.Episode<=item.Episode)&&store.Aired(i,now)&&!store.EverWatched(i)).ToList();if(earlier.Count>0)BulkCheckOff(earlier,$"{earlier.Count} episode{(earlier.Count==1?"":"s")} of {item.Title} marked watched");}));
             var whole=ShowEpisodes(item);var wholeSeen=whole.Count>0&&whole.All(store.EverWatched);
-            var show=new MenuItem{Header=wholeSeen?"Unmark whole show":"Mark whole show watched",IsEnabled=whole.Count>0};
-            show.Click+=(_,_)=>{if(wholeSeen)UncheckAll(store.EpisodesFor(item.GroupKey).Where(store.EverWatched).ToList(),$"{item.Title} unmarked");else MarkWholeShow(item);};menu.Items.Add(show);
-            var specials=new MenuItem{Header="Count specials in progress",IsCheckable=true,IsChecked=store.State.IncludeSpecials.Contains(item.GroupKey)};
-            specials.Click+=(_,_)=>{if(!store.State.IncludeSpecials.Remove(item.GroupKey))store.State.IncludeSpecials.Add(item.GroupKey);store.Save();Render();};menu.Items.Add(specials);
+            if(whole.Count>0)watched.Items.Add(Row(wholeSeen?T("Unmark whole show","إلغاء تعليم المسلسل كله"):T("Mark whole show watched","تعليم المسلسل كله كمشاهد"),()=>{if(wholeSeen)UncheckAll(store.EpisodesFor(item.GroupKey).Where(store.EverWatched).ToList(),$"{item.Title} unmarked");else MarkWholeShow(item);}));
+            watched.Items.Add(Row(T("Count specials in progress","احتساب الحلقات الخاصة في التقدم"),()=>{if(!store.State.IncludeSpecials.Remove(item.GroupKey))store.State.IncludeSpecials.Add(item.GroupKey);store.Save();Render();},true,store.State.IncludeSpecials.Contains(item.GroupKey)));
         }
-        if(System.Text.RegularExpressions.Regex.IsMatch(item.ImdbId,@"^tt\d+$")){var stream=new MenuItem{Header="Stream in Stremio"};stream.Click+=(_,_)=>OpenInStremio(item.ImdbId,item.IsMovie,item.Season,item.Episode);menu.Items.Add(stream);
-            var nuvio=new MenuItem{Header="Stream in Nuvio"};nuvio.Click+=(_,_)=>OpenInNuvio(item.ImdbId,item.IsMovie,item.Title);menu.Items.Add(nuvio);}
-        var reviews=new MenuItem{Header="Reviews & comments"};reviews.Click+=(_,_)=>OpenReviews(item);menu.Items.Add(reviews);
-        var diary=new MenuItem{Header="Viewing diary & my rating"};diary.Click+=(_,_)=>OpenDiary(item);menu.Items.Add(diary);
-        var info=new MenuItem{Header="Episode / movie information"};info.Click+=(_,_)=>OpenEpisodeInfo(item);menu.Items.Add(info);
-        var saved=new MenuItem{Header=store.State.Watchlist.Contains(item.GroupKey)?"Remove from My List":"Add to My List"};saved.Click+=(_,_)=>ToggleWatchlist(item);menu.Items.Add(saved);
-        if(store.IsHidden(item.GroupKey)){var back=new MenuItem{Header="Show in library again"};back.Click+=(_,_)=>{store.SetHidden(item.GroupKey,false);Render();};menu.Items.Add(back);}
-        else{var remove=new MenuItem{Header="Remove from library…"};remove.Click+=(_,_)=>RemoveTitleDialog(item);menu.Items.Add(remove);}
-        var hide=new MenuItem{Header=store.State.HiddenContinue.Contains(item.GroupKey)?"Show in Continue Watching":"Hide from Continue Watching"};
-        hide.Click+=(_,_)=>{if(!store.State.HiddenContinue.Add(item.GroupKey)) store.State.HiddenContinue.Remove(item.GroupKey);store.Save();Render();};menu.Items.Add(hide);
+        menu.Items.Add(watched);
+        Gap();
+        menu.Items.Add(Row(store.State.Watchlist.Contains(item.GroupKey)?T("Remove from My List","إزالة من قائمتي"):T("Add to My List","إضافة إلى قائمتي"),()=>ToggleWatchlist(item)));
+        menu.Items.Add(Row(HistoryFavouriteLabel(item),()=>ToggleHistoryFavourite(item)));
+        menu.Items.Add(Row(T("Save to collection","حفظ في مجموعة"),()=>CollectionDialog(item)));
+        Gap();
+        var statuses=new MenuItem{Header=T("Viewing status","حالة المشاهدة")};var currentStatus=store.State.TitleStatuses.GetValueOrDefault(item.GroupKey,"Automatic");
+        foreach(var status in LibraryStore.Statuses){var value=status;statuses.Items.Add(Row(T(status),()=>{store.SetStatus(item,value);Render();},true,value==currentStatus));}
+        menu.Items.Add(statuses);
+        if(hasImdb)
+        {
+            var openIn=new MenuItem{Header=T("Open in","فتح في")};
+            openIn.Items.Add(Row("Stremio",()=>OpenInStremio(item.ImdbId,item.IsMovie,item.Season,item.Episode)));
+            openIn.Items.Add(Row("Nuvio",()=>OpenInNuvio(item.ImdbId,item.IsMovie,item.Title)));
+            menu.Items.Add(openIn);
+        }
+        Gap();
+        menu.Items.Add(Row(T("Reviews","المراجعات"),()=>OpenReviews(item)));
+        menu.Items.Add(Row(T("Diary and rating","اليوميات والتقييم"),()=>OpenDiary(item)));
+        menu.Items.Add(Row(item.IsMovie?T("Movie information","معلومات الفيلم"):T("Episode information","معلومات الحلقة"),()=>OpenEpisodeInfo(item)));
+        Gap();
+        var manage=new MenuItem{Header=T("Manage","إدارة")};
+        if(playable&&System.IO.File.Exists(item.Path)){manage.Items.Add(Row(T("Play from beginning","التشغيل من البداية"),()=>_=PlayVideo(item,true)));}
+        if(playable){manage.Items.Add(Row(T("Add to play queue","إضافة إلى قائمة التشغيل"),()=>{store.Queue(item);Status.Text=T("Added to your play queue.","أُضيف إلى قائمة التشغيل.");}));manage.Items.Add(Row(T("Download English / Arabic subtitles","تنزيل ترجمة إنجليزية / عربية"),()=>DownloadSubtitleFiles(item)));}
+        manage.Items.Add(Row(T("Correct match / episode numbers"),()=>MatchDialog(item)));
+        manage.Items.Add(Row(store.State.HiddenContinue.Contains(item.GroupKey)?T("Show in Continue watching","إظهار في متابعة المشاهدة"):T("Hide from Continue watching","إخفاء من متابعة المشاهدة"),()=>{if(!store.State.HiddenContinue.Add(item.GroupKey)) store.State.HiddenContinue.Remove(item.GroupKey);store.Save();Render();}));
+        if(store.IsHidden(item.GroupKey))manage.Items.Add(Row(T("Show in library again","إظهار في المكتبة مجددًا"),()=>{store.SetHidden(item.GroupKey,false);Render();}));
+        else manage.Items.Add(Row(T("Remove from library…","إزالة من المكتبة…"),()=>RemoveTitleDialog(item)));
+        menu.Items.Add(manage);
         return menu;
     }
     void ToggleWatchlist(VideoItem item) {if(!store.State.Watchlist.Add(item.GroupKey)) store.State.Watchlist.Remove(item.GroupKey);store.TouchMobileField("list:"+item.GroupKey);store.Save();Render();}

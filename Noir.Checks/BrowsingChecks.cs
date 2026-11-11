@@ -12,7 +12,7 @@ public static class BrowsingChecks
         check(StatusLabels.For([],now,3)=="#3 this week"&&StatusLabels.For([],now,11)=="","Browsing ranks use only the existing Top 10 range");
         check(StatusLabels.For([],now,planned:true)==""&&StatusLabels.For([],now,planned:true,myListFilter:true)=="Still planned","Still planned is restricted to the My List filter");
         var path=Path.Combine(root,"browsing-"+Guid.NewGuid().ToString("N"));var layout=new HomeLayout{Rows=[new(){Id="services"},new(){Id="continue",Visible=false},new(){Id="list",Visible=false},new(){Id="genre:Drama",Pinned=true},new(){Id="removed"},new(){Id="services"}]};layout.Save(path);var loaded=HomeLayout.Load(path).Resolve(["genre:Drama","collection:Weekend"]);
-        check(loaded[0].Id=="continue"&&loaded[0].Visible&&loaded.Count(r=>r.Id=="continue")==1,"Continue Watching is always first and visible after saving and reopening");
+        check(loaded[0].Id=="continue"&&loaded[0].Visible&&loaded.Count(r=>r.Id=="continue")==1,"Continue watching is always first and visible after saving and reopening");
         check(loaded[1].Id=="services"&&!loaded.Single(r=>r.Id=="list").Visible&&loaded.Single(r=>r.Id=="genre:Drama").Pinned,"Home order, hidden rows and pinned genres survive persistence");
         check(loaded.All(r=>r.Id!="removed")&&loaded.Select(r=>r.Id).Distinct().Count()==loaded.Count,"Home ignores unknown rows and duplicate identifiers safely");
         check(!loaded.Single(r=>r.Id=="collection:Weekend").Visible&&loaded.Count(r=>r.Id=="top10")==1,"New extra rows start hidden while new standard rows remain available");

@@ -29,9 +29,9 @@ static class OrganizerChecks
         var episodes=Enumerable.Range(1,3).Select(e=>new VideoItem{Path=$"episode-{e}.mkv",Title="Resume",CollectionKey="resume",Season=e==3?2:1,Episode=e==3?1:e,Duration=100}).ToList();
         continueStore.Record(episodes[1],100,100,true);var extra=new VideoItem{Path="special.mkv",Title="Resume",CollectionKey="resume",Season=0,Episode=1};continueStore.Record(extra,3.622,100);
         check(continueStore.ContinueFor(episodes.Append(extra))==extra&&continueStore.GetProgress(extra)!.Position==3.622,"Continue follows the exact latest bookmark including specials");
-        continueStore.Record(extra,40,100);check(continueStore.ContinueFor(episodes.Append(extra))==extra,"An intentionally watched special still becomes Continue Watching");
+        continueStore.Record(extra,40,100);check(continueStore.ContinueFor(episodes.Append(extra))==extra,"An intentionally watched special still becomes Continue watching");
         continueStore.Record(episodes[2],23.456,100);var reopen=new LibraryStore(continueStore.DataDirectory);var selected=reopen.ContinueFor(reopen.Archive);
-        check(selected?.Season==2&&reopen.GetProgress(selected)!.Position==23.456,"Continue Watching keeps the latest episode and exact time after restart");
+        check(selected?.Season==2&&reopen.GetProgress(selected)!.Position==23.456,"Continue watching keeps the latest episode and exact time after restart");
         var regular=reopen.Archive.First(i=>i.Season==2);reopen.GetProgress(regular)!.UpdatedAt=DateTimeOffset.UtcNow.AddMinutes(-1);reopen.State.Viewings[regular.Id]=[new(){Id=Guid.NewGuid().ToString("N"),WatchedAt=DateTimeOffset.UtcNow}];
         check(reopen.ContinueFor(reopen.Archive)==null,"A newer permanent watched receipt prevents resuming its older unfinished bookmark");
         reopen.Record(regular,12.345,100);check(reopen.ContinueFor(reopen.Archive)==regular,"A deliberate later rewatch can resume despite earlier watch history");

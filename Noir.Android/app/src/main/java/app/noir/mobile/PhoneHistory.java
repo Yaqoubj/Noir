@@ -12,7 +12,7 @@ import java.util.zip.*;
 final class PhoneHistory {
     /** One watched movie or episode read from another app, before it is matched to a title. */
     static final class Row {
-        String service="",title="",imdb="",tvdb="",episodeTitle="",source="",note="";int year,season,episode,rating,showRating;Boolean movie;long at,loggedAt;boolean approximate;
+        String service="",title="",imdb="",tvdb="",episodeTitle="",source="",note="";int year,season,episode,rating,showRating;int rating10=-1;Boolean movie;long at,loggedAt;boolean approximate;
         Row(String service,String title,int year,Boolean movie,String imdb,String tvdb,int season,int episode,String episodeTitle,long at,int rating){this.service=service;this.title=title;this.year=year;this.movie=movie;this.imdb=imdb;this.tvdb=tvdb;this.season=season;this.episode=episode;this.episodeTitle=episodeTitle;this.at=at;this.rating=rating;}
         String key(){return (imdb.matches("tt\\d+")?imdb:!tvdb.isEmpty()?"tvdb:"+tvdb:normalize(title)+":"+year)+":"+movie;}
     }
@@ -118,7 +118,7 @@ final class PhoneHistory {
             if(values.isEmpty()){result.service=root instanceof JSONObject?"Trakt":"Noir";return result;}
             boolean noir=false,watched=false,trakt=false,rated=false;for(JSONObject v:values){noir|=v.has("imdb_id")||v.has("date_unknown");watched|=v.has("watched_at")||v.has("last_watched_at");trakt|=v.has("movie")||v.has("show")||v.has("episode");rated|=v.has("rated_at");}
             if(noir){result.service="Noir";for(JSONObject v:values){Row r=new Row("Noir",s(v,"title"),integer(s(v,"year")),s(v,"type").equals("movie"),s(v,"imdb_id"),"",integer(s(v,"season")),integer(s(v,"episode")),s(v,"episode_title"),s(v,"date_unknown").equals("true")?0:date(s(v,"watched_at"),null),rating(s(v,"rating"),1));
-                r.approximate=s(v,"approximate").equals("true");r.source=s(v,"source");r.loggedAt=date(s(v,"logged_at"),null);r.note=s(v,"note");r.showRating=rating(s(v,"show_rating"),1);result.rows.add(r);}return result;}
+                if(v.has("rating10"))r.rating10=Math.max(0,Math.min(10,v.optInt("rating10")));r.approximate=s(v,"approximate").equals("true");r.source=s(v,"source");r.loggedAt=date(s(v,"logged_at"),null);r.note=s(v,"note");r.showRating=rating(s(v,"show_rating"),1);result.rows.add(r);}return result;}
             if(rated&&!watched)return result;
             if(trakt){result.service="Trakt";for(JSONObject v:values)traktItem(v,result.rows);return result;}
         }
@@ -176,7 +176,7 @@ final class PhoneHistory {
             JSONArray a=new JSONArray();for(View x:views){JSONObject i=x.item,v=x.viewing,o=new JSONObject();boolean movie=i.optBoolean("movie");JSONObject review=i.optJSONObject("review");
                 o.put("type",movie?"movie":"episode");o.put("title",i.optString("title"));o.put("year",i.optInt("year"));o.put("imdb_id",i.optString("imdb"));o.put("season",movie?0:i.optInt("season"));o.put("episode",movie?0:i.optInt("episode"));o.put("episode_title",i.optString("episodeTitle"));
                 o.put("watched_at",v.optBoolean("dateUnknown")?"":iso(DataStore.date(v.optString("watchedAt"))));o.put("date_unknown",v.optBoolean("dateUnknown"));o.put("approximate",v.optBoolean("approximate"));o.put("source",v.optString("source"));o.put("rating",x.rating);o.put("id",v.optString("id"));
-                o.put("logged_at",v.optString("loggedAt"));o.put("note",review==null?"":review.optString("note"));o.put("show_rating",movie||showRatings==null?0:showRatings.optInt(i.optString("group")));a.put(o);}
+                o.put("rating10",DataStore.rating10(i));o.put("logged_at",v.optString("loggedAt"));o.put("note",review==null?"":review.optString("note"));o.put("show_rating",movie||showRatings==null?0:showRatings.optInt(i.optString("group")));a.put(o);}
             out.append(a.toString(2));
         }else{
             JSONArray movies=new JSONArray();Map<String,JSONObject> shows=new LinkedHashMap<>();

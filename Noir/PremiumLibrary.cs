@@ -14,7 +14,7 @@ public partial class MainWindow
     {
         if(collectionFilter!="My List"&&!store.State.Collections.ContainsKey(collectionFilter))collectionFilter="My List";
         ContentPanel.Children.Add(Chips(new[]{"My List"}.Concat(store.State.Collections.Keys.Order()).ToArray(),collectionFilter,v=>{collectionFilter=v;Render();}));
-        ContentPanel.Children.Add(ActionButton("+ Create collection",()=>CollectionDialog(null)));
+        ContentPanel.Children.Add(ActionButton("[[plus]] Create collection",()=>CollectionDialog(null)));
     }
     void CollectionDialog(VideoItem? item)
     {
@@ -43,7 +43,7 @@ public partial class MainWindow
                 var id=i.Id;var card=(StackPanel)ContinueCard(i);var tools=new StackPanel{Orientation=Orientation.Horizontal,Margin=new(0,0,0,4)};
                 card.Children.Insert(1,new TextBlock{Text=$"#{++position} in queue",FontSize=11,Foreground=Brush("#E4C084"),Margin=new(0,8,0,0)});
                 Button Small(string glyph,string tip,Action act){var b=ActionButton(glyph,act);b.ToolTip=tip;b.Width=34;b.Height=30;b.Padding=new(0);b.Margin=new(0,0,6,0);b.Background=Brush("#1C1C1F");System.Windows.Automation.AutomationProperties.SetName(b,tip);tools.Children.Add(b);return b;}
-                Small("‹","Move earlier",()=>{store.MoveQueue(id,-1);Render();});Small("›","Move later",()=>{store.MoveQueue(id,1);Render();});Small("✕","Remove from queue",()=>{store.State.PlayQueue.Remove(id);store.Save();Render();});
+                Small("[[chevron-left]]","Move earlier",()=>{store.MoveQueue(id,-1);Render();});Small("[[chevron]]","Move later",()=>{store.MoveQueue(id,1);Render();});Small("[[close]]","Remove from queue",()=>{store.State.PlayQueue.Remove(id);store.Save();Render();});
                 card.Children.Add(tools);cards.Add(Lift(card));
             }
             ContentPanel.Children.Add(Rail("Your play queue","Plays in this order. Files that aren't on this PC are skipped.",cards));

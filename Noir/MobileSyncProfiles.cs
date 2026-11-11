@@ -20,7 +20,8 @@ public static class MobileProfiles
     }
     public static void Identify(MobileSnapshot snapshot,string directory)
     {var p=Active(directory);snapshot.ProfileId=p.Id;snapshot.ProfileName=p.Name;snapshot.ProfileColor=p.Color;snapshot.HostId=HostId(directory);}
-    public static bool Matches(string requested,string directory)=>requested.Length==0||requested==Active(directory).Id;
+    public static string Resolve(string requested,string directory)=>requested.Length==0?Active(directory).Id:requested;
+    public static bool Matches(string requested,string directory)=>Resolve(requested,directory)==Active(directory).Id;
     static string Instance(string directory,string id)
     {try{using var json=JsonDocument.Parse(File.ReadAllText(Path.Combine(Root(directory),id=="default"?"":"profiles/"+id,"library.json")));return json.RootElement.TryGetProperty("MobileInstanceId",out var value)?value.GetString()??"":"";}catch(Exception e)when(e is IOException or JsonException){return "";}}
     public static object[] List(string directory)=>Profiles.Load(Root(directory)).Profiles.Select(p=>(object)new{id=p.Id,name=p.Name,color=p.Color,locked=p.PinHash.Length>0,active=p.Id==Active(directory).Id,instance=Instance(directory,p.Id),hostId=HostId(directory)}).ToArray();

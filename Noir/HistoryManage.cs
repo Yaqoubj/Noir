@@ -5,7 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Media.Imaging;
 using QRCoder;
 namespace Noir;
-// History → Add history: Nuvio connection, where your history came from (with undo), and full backups.
+// History → Import: Nuvio connection, where your history came from (with undo), and full backups.
 public partial class MainWindow
 {
     NuvioSync? nuvioSync;long nuvioPendingCursor;
@@ -164,7 +164,7 @@ public partial class MainWindow
     }
     void StartNuvio()
     {
-        nuvioSync=new NuvioSync(store,()=>{if(page=="History"&&trackerTab=="Add history"&&!logging)RenderQuiet();});
+        nuvioSync=new NuvioSync(store,()=>{if(page=="History"&&trackerTab=="Import"&&!logging)RenderQuiet();});
         var timer=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromMinutes(2)};
         timer.Tick+=(_,_)=>{timer.Interval=TimeSpan.FromHours(4);if(store.State.NuvioAutoImport&&store.State.NuvioConnected&&!importBusy)_=ImportNuvio(true);};timer.Start();
         // Weekly automatic backup, checked shortly after start and then every few hours.
@@ -184,8 +184,8 @@ public partial class MainWindow
             foreach(var b in batches)
             {
                 var row=new DockPanel{Margin=new(0,6,0,0),MaxWidth=760,HorizontalAlignment=HorizontalAlignment.Left};var id=b.Id;
-                var undo=ActionButton("Undo",()=>{var n=store.UndoImport(id);if(lastImport==id)lastImport="";Status.Text=$"Removed {n:N0} viewing{(n==1?"":"s")} from that import.";RenderQuiet();});undo.Padding=new(14,6,14,6);DockPanel.SetDock(undo,Dock.Right);row.Children.Add(undo);
-                row.Children.Add(Text($"{b.Service} · {b.Added:N0} viewing{(b.Added==1?"":"s")}{(b.RatedItemIds.Count>0?$" · {b.RatedItemIds.Count} ratings":"")} · {Ago(b.At)}",13.5,"#D9D4CC"));((FrameworkElement)row.Children[^1]).Width=560;
+                var undo=ActionButton(T("Undo","تراجع"),()=>{var n=store.UndoImport(id);if(lastImport==id)lastImport="";Status.Text=$"Removed {n:N0} viewing{(n==1?"":"s")} from that import.";RenderQuiet();});undo.Padding=new(14,6,14,6);DockPanel.SetDock(undo,Dock.Right);row.Children.Add(undo);
+                row.Children.Add(Text(b.Service+" · "+Loc.Count(b.Added,"viewing","viewings","مشاهدة واحدة","مشاهدتان","مشاهدات","مشاهدة")+(b.RatedItemIds.Count>0?" · "+Loc.Count(b.RatedItemIds.Count,"rating","ratings","تقييم واحد","تقييمان","تقييمات","تقييمًا"):"")+" · "+Ago(b.At),13.5,"#D9D4CC"));((FrameworkElement)row.Children[^1]).Width=560;
                 ContentPanel.Children.Add(row);
             }
         }
@@ -253,7 +253,7 @@ public partial class MainWindow
         var merge=ActionButton("Merge",async()=>
         {
             CloseSmart();Status.Text="Merging backup…";
-            try{await Task.Yield();var added=store.MergeBackup(preview);Status.Text=added==0?"Everything in that backup was already here.":$"Restored {added:N0} viewings from the backup.";trackerTab="Add history";Render();}
+            try{await Task.Yield();var added=store.MergeBackup(preview);Status.Text=added==0?"Everything in that backup was already here.":$"Restored {added:N0} viewings from the backup.";trackerTab="Import";Render();}
             catch(Exception e){store.Log(e);Status.Text="The backup couldn't be merged. Your history is unchanged.";}
         },true);merge.Margin=new(0,0,8,0);row.Children.Add(merge);
         var replace=ActionButton("Replace & restart",()=>

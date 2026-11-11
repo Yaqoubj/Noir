@@ -35,4 +35,17 @@ public sealed partial class LibraryStore
         State.WatchSync.Remove("Nuvio:"+item.Id);CommunityQueue.Enqueue(State,item,dated.WatchedAt);
     }
     public void MarkNuvioKnown(IEnumerable<string> itemIds){lock(gate){State.NuvioKnown.UnionWith(itemIds);Save();}}
+    internal void CompleteNuvioUpload(IEnumerable<(WatchSyncJob Job,NuvioWatched Item)> uploaded)
+    {
+        lock(gate)
+        {
+            foreach(var (job,item) in uploaded)
+            {
+                job.SyncedAt=DateTimeOffset.UtcNow;job.Message="Sent ✓";State.NuvioKnown.Add(job.ItemId);
+                if(State.Viewings.GetValueOrDefault(job.ItemId) is {Count:>0}||State.Catalog.GetValueOrDefault(job.ItemId) is {} entry&&ProgressFor(State,entry.Item)?.Completed==true)continue;
+                State.NuvioDeletes.Add(NuvioKeys.Key(item.ContentId,item.Season,item.Episode));State.NuvioKnown.Remove(job.ItemId);State.WatchSync.Remove("Nuvio:"+job.ItemId);
+            }
+            Save();
+        }
+    }
 }

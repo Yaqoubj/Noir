@@ -49,21 +49,22 @@ public partial class MainWindow
         var years=views.Where(v=>!v.DateUnknown).Select(v=>v.At.LocalDateTime.Year).Append(DateTime.Today.Year).Distinct().OrderDescending().ToArray();
         var selected=views.Where(v=>!v.DateUnknown&&v.At.LocalDateTime.Year==historyReviewYear).ToList();
         var card=new Border{CornerRadius=new(16),Background=Brush("#191715"),BorderBrush=Brush("#4DE4C084"),BorderThickness=new(1),Padding=new(22),Margin=new(0,16,0,12)};var body=new StackPanel();card.Child=body;
-        var head=new DockPanel();var year=ActionButton(historyReviewYear+"  ▾",()=>{});year.Background=Brush("#22E4C084");year.Foreground=Brush("#E4C084");year.Padding=new(12,5,12,5);DockPanel.SetDock(year,Dock.Right);head.Children.Add(year);head.Children.Add(Text(T("Year in review","حصاد السنة"),22,"#F4F1EB",FontWeights.SemiBold));body.Children.Add(head);
+        var head=new DockPanel();var year=ActionButton(historyReviewYear+"  [[chevron-down]]",()=>{});year.Background=Brush("#22E4C084");year.Foreground=Brush("#E4C084");year.Padding=new(12,5,12,5);DockPanel.SetDock(year,Dock.Right);head.Children.Add(year);head.Children.Add(Text(T("Year in review","حصاد السنة"),22,"#F4F1EB",FontWeights.SemiBold));body.Children.Add(head);
         year.Click+=(_,_)=>{var menu=new ContextMenu();foreach(var y in years){var value=y;var item=new MenuItem{Header=y.ToString(),IsCheckable=true,IsChecked=y==historyReviewYear};item.Click+=(_,_)=>{historyReviewYear=value;RenderQuiet();};menu.Items.Add(item);}menu.PlacementTarget=year;menu.IsOpen=true;};
         var busiest=selected.GroupBy(v=>v.At.LocalDateTime.Month).OrderByDescending(g=>g.Sum(v=>v.Seconds)).FirstOrDefault();
         var longest=HistoryRewards.Streaks(selected.Select(v=>new RewardViewing(v.At.LocalDateTime.Date,v.Item.IsMovie,v.DateUnknown,v.Approximate)),new DateTime(historyReviewYear,12,31)).Longest;
         var metrics=new WrapPanel{Margin=new(0,12,0,16)};
         foreach(var pair in new[]{(T("Hours watched","ساعات المشاهدة"),$"{selected.Sum(v=>v.Seconds)/3600:0.#}"),(T("Busiest month","أكثر الشهور مشاهدة"),busiest==null?"—":new DateTime(historyReviewYear,busiest.Key,1).ToString("MMMM",Loc.Culture)),(T("Longest streak","أطول سلسلة مشاهدة"),T("{0} days","{0} يوم",longest))})
         {var metric=new StackPanel{MinWidth=145,Margin=new(0,0,26,8)};metric.Children.Add(Text(pair.Item2,23,"#E4C084",FontWeights.SemiBold));metric.Children.Add(Text(pair.Item1,11.5,"#B6AA96"));metrics.Children.Add(metric);}body.Children.Add(metrics);
-        var tops=new WrapPanel();
+        var tops=new StackPanel();
         foreach(var movie in new[]{false,true})
         {
             var top=selected.Where(v=>v.Item.IsMovie==movie).GroupBy(v=>v.Item.GroupKey).OrderByDescending(g=>g.Sum(v=>v.Seconds)).Take(2).ToList();
+            var topRow=new WrapPanel();if(top.Count>0){var topLabel=Text(movie?T("Top movies","من أبرز الأفلام"):T("Top shows","من أبرز المسلسلات"),11,"#B6AA96");topLabel.Margin=new(0,4,0,6);tops.Children.Add(topLabel);tops.Children.Add(topRow);}
             foreach(var group in top)
             {
                 var item=group.First().Item;var row=new Grid{Width=200,Margin=new(0,0,18,8)};row.ColumnDefinitions.Add(new(){Width=new(52)});row.ColumnDefinitions.Add(new());row.Children.Add(new Border{CornerRadius=new(6),ClipToBounds=true,Child=HistoryArt(item,75)});
-                var info=new StackPanel{Margin=new(10,0,0,0),VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(info,1);info.Children.Add(Text(movie?T("Top movie","من أبرز الأفلام"):T("Top show","من أبرز المسلسلات"),10,"#B6AA96"));var title=Text(item.Title,13.5,weight:FontWeights.SemiBold);title.TextWrapping=TextWrapping.NoWrap;title.TextTrimming=TextTrimming.CharacterEllipsis;info.Children.Add(title);info.Children.Add(Text(Duration(group.Sum(v=>v.Seconds),true),11,"#E4C084"));row.Children.Add(info);var open=new Button{Content=row,Padding=new(0),Background=Brush("Transparent"),ToolTip=item.Title};open.Click+=(_,_)=>OpenHistoryTitle(store.EpisodesFor(item.GroupKey));tops.Children.Add(open);
+                var info=new StackPanel{Margin=new(10,0,0,0),VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(info,1);var title=Text(item.Title,13.5,weight:FontWeights.SemiBold);title.TextWrapping=TextWrapping.NoWrap;title.TextTrimming=TextTrimming.CharacterEllipsis;info.Children.Add(title);info.Children.Add(Text(Duration(group.Sum(v=>v.Seconds),true),11,"#E4C084"));row.Children.Add(info);var open=new Button{Content=row,Padding=new(0),Background=Brush("Transparent"),ToolTip=item.Title};open.Click+=(_,_)=>OpenHistoryTitle(store.EpisodesFor(item.GroupKey));topRow.Children.Add(open);
             }
         }
         if(selected.Count==0)body.Children.Add(Text(T("A fresh chapter. Log a story to start your year.","بداية جديدة. سجّل مشاهدة لتبدأ حكاية السنة."),13,"#C7BBA7"));else body.Children.Add(tops);ContentPanel.Children.Add(card);
@@ -78,7 +79,7 @@ public partial class MainWindow
     void RenderHistoryStats()
     {
         var views=AllViewings();
-        var story=ActionButton(T("Your {0} story ›","حكايتك في {0} ›",historyReviewYear),()=>OpenYearStory(historyReviewYear),true);story.Margin=new(0,14,0,0);ContentPanel.Children.Add(story);var taste=ActionButton(T("Compare taste with a friend ›","قارن ذوقك مع صديق ›"),()=>OpenTaste());taste.Margin=new(0,10,0,0);taste.HorizontalAlignment=HorizontalAlignment.Left;ContentPanel.Children.Add(taste);
+        var story=ActionButton(T("Your {0} story [[chevron]]","حكايتك في {0} [[chevron]]",historyReviewYear),()=>OpenYearStory(historyReviewYear),true);story.Margin=new(0,0,10,0);var taste=ActionButton(T("Compare taste with a friend [[chevron]]","قارن ذوقك مع صديق [[chevron]]"),()=>OpenTaste());taste.Margin=new(0,0,0,0);var storyRow=new WrapPanel{Margin=new(0,14,0,0)};storyRow.Children.Add(story);storyRow.Children.Add(taste);ContentPanel.Children.Add(storyRow);
         if(views.Count==0)
         {
             ContentPanel.Children.Add(Heading(T("Your stats start with your first story","إحصاءاتك تبدأ بأول حكاية"),T("Log a favourite, or bring your history from Netflix, Trakt and more.","سجّل عملاً تحبه أو استورد سجلك من نتفليكس وتراكت وغيرها.")));HistoryEmptyActions();
@@ -217,7 +218,8 @@ public partial class MainWindow
         track.Children.Add(new Border{Background=Brush("#E4C084"),CornerRadius=new(4)});var rest=new Border{Background=Brush("#2A2A2E"),CornerRadius=new(4)};Grid.SetColumn(rest,1);track.Children.Add(rest);
         Grid.SetColumn(track,1);row.Children.Add(track);
         var number=Text(value,12,"#AAA6A0");number.HorizontalAlignment=HorizontalAlignment.Right;Grid.SetColumn(number,2);row.Children.Add(number);
-        return row;
+        // Bars stop at 520 px (130 label + 510 bar + 80 value = 720 in all): the row sits in a capped first column.
+        var capped=new Grid();capped.ColumnDefinitions.Add(new(){Width=new(1,GridUnitType.Star),MaxWidth=720});capped.ColumnDefinitions.Add(new(){Width=GridLength.Auto});capped.Children.Add(row);return capped;
     }
     FrameworkElement Milestone(string title,bool unlocked,string detail)
     {

@@ -24,7 +24,7 @@ public partial class MainWindow
     // The ⋯ twin of right-click: ItemMenu is otherwise invisible on rows and tracker cards.
     Button MoreButton(VideoItem item)
     {
-        var b=ActionButton("⋯",()=>{});b.Padding=new(11,2,11,8);b.FontSize=17;b.Margin=new(8,0,0,0);b.VerticalAlignment=VerticalAlignment.Center;b.Background=Brush("#1FFFFFFF");
+        var b=ActionButton("[[more]]",()=>{});b.Padding=new(11,2,11,8);b.FontSize=17;b.Margin=new(8,0,0,0);b.VerticalAlignment=VerticalAlignment.Center;b.Background=Brush("#1FFFFFFF");
         b.ToolTip=T("More: download, subtitles, match, mark watched… (or right-click)","المزيد: التنزيل والترجمة والمطابقة وتعليم المشاهدة… (أو النقر بالزر الأيمن)");System.Windows.Automation.AutomationProperties.SetName(b,T("More options for","خيارات أخرى لـ")+" "+item.Label);
         b.Click+=(_,e)=>{e.Handled=true;var menu=ItemMenu(item);b.ContextMenu=menu;menu.PlacementTarget=b;menu.Placement=PlacementMode.Bottom;menu.IsOpen=true;};return b;
     }
@@ -67,7 +67,7 @@ public partial class MainWindow
         void Place(string english,string arabic,string hint,string hintArabic,Action go){var b=ActionButton("",()=>{CloseShortcutSheet();go();});var lines=new StackPanel();lines.Children.Add(Text(T(english,arabic),13.5,"#F4F1EB",FontWeights.SemiBold));lines.Children.Add(Text(T(hint,hintArabic),11.5,"#9F9A93"));b.Content=lines;b.Background=Brush("Transparent");b.Padding=new(10,6,10,6);b.Margin=new(-10,0,0,2);b.HorizontalAlignment=HorizontalAlignment.Stretch;b.HorizontalContentAlignment=HorizontalAlignment.Left;System.Windows.Automation.AutomationProperties.SetName(b,english);list.Children.Add(b);}
         Place("Compare taste with a friend","قارن ذوقك مع صديق","Share a taste card and see what you both loved","شارك بطاقة ذوقك واكتشف ما أحببتماه معًا",()=>OpenTaste());
         Place("Your year in stories","حكاية عامك","A swipeable recap of everything you watched","ملخص لكل ما شاهدته",()=>OpenYearStory(historyReviewYear));
-        Place("Import, back up or export history","استيراد السجل أو نسخه أو تصديره","Netflix, Trakt, TV Time, Letterboxd, Stremio…","Netflix وTrakt وTV Time وLetterboxd وStremio…",()=>{trackerTab="Add history";Navigate("History");});
+        Place("Import, back up or export history","استيراد السجل أو نسخه أو تصديره","Netflix, Trakt, TV Time, Letterboxd, Stremio…","Netflix وTrakt وTV Time وLetterboxd وStremio…",()=>{trackerTab="Import";Navigate("History");});
         Place("Export the episode calendar","تصدير تقويم الحلقات","Upcoming episodes as an .ics file","الحلقات القادمة كملف ‎.ics",ExportUpcomingCalendar);
         if(!TrackerOnly)Place("Edit Home rows","تعديل صفوف الرئيسية","Choose and reorder what Home shows","اختر ما تعرضه الرئيسية ورتّبه",()=>{Navigate("Home");Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded,()=>ContentScroll.ScrollToEnd());});
         if(!TrackerOnly)Place("Organize filenames & folders","تنظيم أسماء الملفات والمجلدات","Tidy names, with Undo","أسماء مرتبة مع إمكانية التراجع",OpenOrganizer);

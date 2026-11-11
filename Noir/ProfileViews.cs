@@ -31,9 +31,10 @@ public partial class MainWindow
             System.Windows.Automation.AutomationProperties.SetName(button,T("Switch to")+" "+p.Name);button.Click+=(_,_)=>{CloseSmart();SwitchProfile(p);};list.Children.Add(button);
         }
         var row2=new WrapPanel();body.Children.Add(row2);
-        SmartButton(row2,"+ Add profile",()=>{CloseSmart();settingsSection="Profile";Navigate("Settings");addingProfile=true;Render();},true);
+        SmartButton(row2,"[[plus]] Add profile",()=>{CloseSmart();settingsSection="Profile";Navigate("Settings");addingProfile=true;Render();});
         SmartButton(row2,"Manage",()=>{CloseSmart();settingsSection="Profile";Navigate("Settings");});
-        SmartButton(row2,"Your stats",()=>{CloseSmart();historyType="All";trackerTab="Stats";Navigate("History");});
+        var other=store.State.Language=="ar"?"en":"ar";var lang=SmartButton(body,"Language: English / العربية",()=>{CloseSmart();SetLanguage(other);});lang.Margin=new(0,6,0,0);
+        System.Windows.Automation.AutomationProperties.SetName(lang,"Language: English / العربية");
     }
     // Saves everything, then restarts into the other profile's folder (asking its PIN first).
     void SwitchProfile(NoirProfile target)
@@ -111,7 +112,7 @@ public partial class MainWindow
             buttons.Add("Cancel",()=>{addingProfile=false;RenderQuiet();});
             Dispatcher.BeginInvoke(()=>name.Focus(),System.Windows.Threading.DispatcherPriority.Input);
         }));
-        else{var add=ActionButton("+ Add profile",()=>{addingProfile=true;RenderQuiet();});add.Margin=new(0,0,0,8);ContentPanel.Children.Add(add);}
+        else{var add=ActionButton("[[plus]] Add profile",()=>{addingProfile=true;RenderQuiet();});add.Margin=new(0,0,0,8);ContentPanel.Children.Add(add);}
         var ask=new CheckBox{Content=T("Ask who's watching when Noir starts"),IsChecked=ProfileData.AskOnStart,Margin=new(0,8,0,4)};
         ask.Click+=(_,_)=>{ProfileData.AskOnStart=ask.IsChecked==true;SaveProfiles();};ContentPanel.Children.Add(ask);
         ContentPanel.Children.Add(Body("Profiles with a PIN always ask for it. Phones pair with the profile that's open on this PC. Starting with Windows opens the last profile you used.",12));

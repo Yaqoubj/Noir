@@ -44,7 +44,7 @@ final class Loc {
    {"Library","المكتبة"},{"More","المزيد"},{"See all ›","عرض الكل ›"},{"Search movies and shows","ابحث عن أفلام ومسلسلات"},
    {"Episodes","الحلقات"},{"Details","التفاصيل"},{"+ My List","+ قائمتي"},{"✓ My List","✓ قائمتي"},{"‹ Back","‹ رجوع"},{"▶ Play","▶ تشغيل"},
    {"Resume or play the next episode.","استأنف أو شغّل الحلقة التالية."},{"Resume, play next, or send the next episode to your PC.","استأنف، أو شغّل التالي، أو أرسل الحلقة التالية إلى جهازك."},
-   {"Watch next","شاهد التالي"},{"Latest","الأحدث"},{"Out now","متاح الآن"},{"Caught up · airing soon","أنهيتها · تُعرض قريبًا"},{"Not started yet","لم تبدأ بعد"},
+   {"Latest","الأحدث"},{"Out now","متاح الآن"},{"Caught up · airing soon","أنهيتها · تُعرض قريبًا"},{"Not started yet","لم تبدأ بعد"},
    {"Still watching these?","هل ما زلت تشاهد هذه؟"},{"Keep","إبقاء"},{"Stop tracking","إيقاف المتابعة"},{"Today","اليوم"},{"Tomorrow","غدًا"},{"Tonight","الليلة"},
    {"＋ Log what you watched","＋ سجّل ما شاهدته"},{"⌕ Discover","⌕ اكتشف"},{"⇅ Import · export · backup","⇅ استيراد · تصدير · نسخ احتياطي"},{"⚡ Quick add","⚡ إضافة سريعة"},{"☰ Paste a list","☰ الصق قائمة"},
    {"Your top shows","مسلسلاتك المفضلة"},{"Your genres","أنواعك"},{"When you watch","متى تشاهد"},{"Milestones","الإنجازات"},{"TIME WATCHED","وقت المشاهدة"},
@@ -65,5 +65,8 @@ final class Loc {
  static CharSequence t(CharSequence s){return s instanceof String?t((String)s):s;}
  static void use(DataStore data){String chosen=data.prefs().optString("language","");arabic=chosen.isEmpty()?"ar".equals(Locale.getDefault().getLanguage()):chosen.equals("ar");}
  static void apply(Activity activity){activity.getWindow().getDecorView().setLayoutDirection(arabic?View.LAYOUT_DIRECTION_RTL:View.LAYOUT_DIRECTION_LTR);}
+ /** Count + noun with the Arabic plural forms (one/two/3-10/11+): English uses `one`/`many` patterns with %d; Arabic reads keys "many|one", "many|two", "many|few", "many|many". */
+ static String plural(long n,String one,String many){if(!arabic){return String.format(Locale.getDefault(),n==1?one:many,n);}String cat=n==1?"one":n==2?"two":n>=3&&n<=10?"few":"many";String v=AR.get(many+"|"+cat);return String.format(Locale.getDefault(),v!=null?v:t(n==1?one:many),n);}
+ static void plural(String many,String one,String two,String few,String all){AR.put(many+"|one",one);AR.put(many+"|two",two);AR.put(many+"|few",few);AR.put(many+"|many",all);}
  static String minutesLeft(int minutes){return arabic?"متبقٍ "+minutes+" د":minutes+" min left";}
 }

@@ -20,9 +20,19 @@ public partial class MainWindow
     FrameworkElement LibraryListRow(List<VideoItem> group)
     {
         var item=group[0];var (watched,total)=Progress(group);var height=Density.LibraryListHeight(LibrarySize);var line=new DockPanel{Margin=new(12)};var picture=new Grid{Width=height*1.5,Height=height,ClipToBounds=true};picture.Children.Add(Art(System.IO.File.Exists(item.Backdrop)?item.Backdrop:item.Poster,item.Title,height));AddStatusPill(picture,item);DockPanel.SetDock(picture,Dock.Left);line.Children.Add(picture);
-        var buttons=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center,Margin=new(12,0,0,0)};DockPanel.SetDock(buttons,Dock.Right);line.Children.Add(buttons);var open=ActionButton(T("Details"),()=>OpenDetails(group));open.Padding=new(12,8,12,8);System.Windows.Automation.AutomationProperties.SetName(open,item.Title+" details");buttons.Children.Add(open);var listed=store.State.Watchlist.Contains(item.GroupKey);var list=ActionButton(listed?"✓":"＋",()=>ToggleWatchlist(item));list.ToolTip=T("My List");list.Margin=new(6,0,0,0);buttons.Children.Add(list);var more=MoreButton(item);more.Margin=new(6,0,0,0);buttons.Children.Add(more);
+        var buttons=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center,Margin=new(12,0,0,0)};DockPanel.SetDock(buttons,Dock.Right);line.Children.Add(buttons);var listed=store.State.Watchlist.Contains(item.GroupKey);var list=ActionButton(listed?"[[check]]":"[[plus]]",()=>ToggleWatchlist(item));list.ToolTip=T("My List");list.Margin=new(6,0,0,0);buttons.Children.Add(list);var more=MoreButton(item);more.Margin=new(6,0,0,0);buttons.Children.Add(more);
         var info=new StackPanel{Margin=new(16,0,8,0),VerticalAlignment=VerticalAlignment.Center};line.Children.Add(info);var title=Text(item.Title,16,weight:FontWeights.SemiBold);title.TextWrapping=TextWrapping.NoWrap;title.TextTrimming=TextTrimming.CharacterEllipsis;info.Children.Add(title);info.Children.Add(Text(string.Join(" · ",new[]{item.Year>0?item.Year.ToString():"",item.Duration>0?Loc.Runtime(item.Duration):"",item.Genres}.Where(x=>x.Length>0)),12,"#AAA6A0"));info.Children.Add(Text(item.IsMovie?T(watched>0?"Watched":"Not started"):$"{watched} / {total} {T("watched")}",11,"#E4C084"));info.Children.Add(new ProgressBar{Height=3,Value=watched,Maximum=Math.Max(1,total),Margin=new(0,8,0,0),Background=Brush("#2A2A30"),Foreground=Brush("#E4C084"),BorderThickness=new(0)});
-        var border=new Border{Width=Math.Max(440,ContentScroll.ViewportWidth-sidePad*2-10),CornerRadius=new(12),Margin=new(0,0,0,10),Background=Brush("#141416"),Child=line,BorderBrush=Brush("#1AFFFFFF"),BorderThickness=new(1)};LazyMenu(border,item);return HoverCard(border,group);
+        var border=new Border{Width=Math.Max(440,ContentScroll.ViewportWidth-sidePad*2-10),CornerRadius=new(12),Margin=new(0,0,0,10),Background=Brush("#141416"),Child=line,BorderBrush=Brush("#1AFFFFFF"),BorderThickness=new(1),Cursor=System.Windows.Input.Cursors.Hand,Focusable=true};System.Windows.Automation.AutomationProperties.SetName(border,item.Title+" "+T("details","التفاصيل"));
+        // The row itself opens the title now that the Details button is gone (U59).
+        border.MouseLeftButtonUp+=(_,e)=>{for(var node=e.OriginalSource as DependencyObject;node!=null&&node!=border;node=node is Visual or System.Windows.Media.Media3D.Visual3D?System.Windows.Media.VisualTreeHelper.GetParent(node):LogicalTreeHelper.GetParent(node))if(node is System.Windows.Controls.Primitives.ButtonBase)return;OpenDetails(group);};
+        border.KeyDown+=(_,e)=>{if(e.OriginalSource==border&&(e.Key==System.Windows.Input.Key.Enter||e.Key==System.Windows.Input.Key.Space)){e.Handled=true;OpenDetails(group);}};LazyMenu(border,item);return HoverCard(border,group);
+    }
+    // The My List chip is drawn only once there is a second collection to switch to (U59).
+    void RenderCollectionsRow()
+    {
+        if(collectionFilter!="My List"&&!store.State.Collections.ContainsKey(collectionFilter))collectionFilter="My List";
+        if(store.State.Collections.Count>0)ContentPanel.Children.Add(Chips(new[]{"My List"}.Concat(store.State.Collections.Keys.Order()).ToArray(),collectionFilter,v=>{collectionFilter=v;Render();}));
+        ContentPanel.Children.Add(ActionButton("[[plus]] Create collection",()=>CollectionDialog(null)));
     }
     string libraryFilter="All",listType="All";
     static readonly string[] LibraryFilters=["All","Watching","Not started","Finished","On this PC"];
@@ -43,7 +53,7 @@ public partial class MainWindow
         if(page!="My List"&&libraryFilter=="Still planned")libraryFilter="All";
         if(page=="My List")
         {
-            RenderCollectionsNavigation();
+            RenderCollectionsRow();
             if(groups.Count==0){ContentPanel.Children.Add(Heading("Your next watch","Use + My List on any title to keep it here."));return;}
             if(listType!="All")groups=groups.Where(g=>g[0].IsMovie==(listType=="Movies")).ToList();
         }
@@ -112,8 +122,8 @@ public partial class MainWindow
     }
     ComboBox Select(string[] options,string selected,Action<string> pick,string name)
     {
-        var box=new ComboBox{MinWidth=options[0]=="S"?64:options[0]=="Poster"?120:150,FontSize=12.5,Padding=new(10,5,10,5)};
-        foreach(var o in options)box.Items.Add(new ComboBoxItem{Content=o switch{"Poster"=>T("Poster","ملصق"),"Landscape"=>T("Landscape","أفقي"),"List"=>T("List","قائمة"),"S"=>T("S","صغير"),"M"=>T("M","متوسط"),"L"=>T("L","كبير"),_=>T(o)},Tag=o});
+        var box=new ComboBox{MinWidth=options[0]=="S"?116:options[0]=="Poster"?120:150,FontSize=12.5,Padding=new(10,5,10,5)};
+        foreach(var o in options)box.Items.Add(new ComboBoxItem{Content=o switch{"Poster"=>T("Poster","ملصق"),"Landscape"=>T("Landscape","أفقي"),"List"=>T("List","قائمة"),"S"=>T("Size: S","الحجم: صغير"),"M"=>T("Size: M","الحجم: متوسط"),"L"=>T("Size: L","الحجم: كبير"),_=>T(o)},Tag=o});
         box.SelectedIndex=Math.Max(0,Array.IndexOf(options,selected));
         System.Windows.Automation.AutomationProperties.SetName(box,T(name));
         box.SelectionChanged+=(_,_)=>{if(box.SelectedItem is ComboBoxItem {Tag:string v}&&v!=selected)pick(v);};
@@ -155,12 +165,12 @@ public partial class MainWindow
         var title=Text(item.Title,Density.CardTitle,weight:FontWeights.SemiBold);title.MaxHeight=40;title.TextTrimming=TextTrimming.CharacterEllipsis;info.Children.Add(title);
         var facts=new List<string>();if(item.Year>0)facts.Add(item.Year.ToString());var genre=item.Genres.Split('·',StringSplitOptions.TrimEntries|StringSplitOptions.RemoveEmptyEntries).Take(2).Select(T);facts.AddRange(genre);
         info.Children.Add(Text(string.Join(" · ",facts),11,"#C9C4BD"));
-        info.Children.Add(Text(item.IsMovie?(watched>0?T("✓ Watched"):item.Duration>0?Loc.Runtime(item.Duration):T("Movie")):$"{watched} / {total} {T("watched")}",11,"#E4C084"));
+        info.Children.Add(Text(item.IsMovie?(watched>0?"✓ "+T("Watched"):item.Duration>0?Loc.Runtime(item.Duration):T("Movie")):$"{watched} / {total} {T("watched")}",11,"#E4C084"));
         var actions=new StackPanel{Orientation=Orientation.Horizontal,Margin=new(0,8,0,0)};info.Children.Add(actions);
         var next=store.UpNextFor(group)?.Item;
-        if(onPc){var target=store.ContinueFor(group)??(next!=null&&CanPlay(next)?next:group.First(CanPlay));var play=new Button{Content="▶ "+T(store.ContinueFor(group)!=null?"Resume":"Play"),Style=(Style)FindResource("Primary"),Padding=new(12,5,12,5),FontSize=12,Margin=new(0,0,6,0)};Motion.ButtonFeedback(play);play.Click+=(_,e)=>{e.Handled=true;_=PlayVideo(target);};actions.Children.Add(play);}
-        var details=new Button{Content="ⓘ",Padding=new(10,5,10,5),FontSize=12,ToolTip=T("Details & episodes")};details.Click+=(_,e)=>{e.Handled=true;OpenDetails(group);};actions.Children.Add(details);
-        var listed=store.State.Watchlist.Contains(item.GroupKey);var list=ActionButton(listed?"✓":"＋",()=>ToggleWatchlist(item));list.ToolTip=T(listed?"In My List · click to remove":"Add to My List");System.Windows.Automation.AutomationProperties.SetName(list,(string)list.ToolTip+" "+item.Title);list.Click+=(_,e)=>e.Handled=true;list.Padding=new(9,5,9,5);list.Margin=new(6,0,0,0);actions.Children.Add(list);
+        if(onPc){var target=store.ContinueFor(group)??(next!=null&&CanPlay(next)?next:group.First(CanPlay));var play=new Button{Content="[[play]] "+T(store.ContinueFor(group)!=null?"Resume":"Play"),Style=(Style)FindResource("Primary"),Padding=new(12,5,12,5),FontSize=12,Margin=new(0,0,6,0)};Motion.ButtonFeedback(play);play.Click+=(_,e)=>{e.Handled=true;_=PlayVideo(target);};actions.Children.Add(play);}
+        var details=new Button{Content="[[info]]",Padding=new(10,5,10,5),FontSize=12,ToolTip=T("Details & episodes")};details.Click+=(_,e)=>{e.Handled=true;OpenDetails(group);};actions.Children.Add(details);
+        var listed=store.State.Watchlist.Contains(item.GroupKey);var list=ActionButton(listed?"[[check]]":"[[plus]]",()=>ToggleWatchlist(item));list.ToolTip=T(listed?"In My List · click to remove":"Add to My List");System.Windows.Automation.AutomationProperties.SetName(list,(string)list.ToolTip+" "+item.Title);list.Click+=(_,e)=>e.Handled=true;list.Padding=new(9,5,9,5);list.Margin=new(6,0,0,0);actions.Children.Add(list);
         picture.Children.Add(overlay);
         var open=new Button{Content=picture,Padding=new(0),Background=Brushes.Transparent,BorderThickness=new(0),HorizontalContentAlignment=HorizontalAlignment.Stretch,VerticalContentAlignment=VerticalAlignment.Stretch,ToolTip=null,Template=PlainTemplate()};
         open.Click+=(_,_)=>OpenDetails(group);System.Windows.Automation.AutomationProperties.SetName(open,item.Title+" details");

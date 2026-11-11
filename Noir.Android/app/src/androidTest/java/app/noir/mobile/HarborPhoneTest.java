@@ -47,8 +47,9 @@ public final class HarborPhoneTest {
             test.runOnMainSync(()->{home.page="Connections";home.render();});
             assertTrue("Connections lists the PC, Nuvio and Stremio",hasText(home.body,"Optional PC sync")&&hasText(home.body,"Nuvio")&&hasText(home.body,"Stremio"));capture("harbor-connections.png");
             test.runOnMainSync(()->{home.page="History";home.premium.historyView="Up next";home.render();});
-            assertTrue("History's Up next has only the action chips, Recently watched and Favourites as sideways rails",horizontalRails(home.body)<=3);
-            assertTrue("History offers quick add and paste a list",hasText(home.body,"Quick add")&&hasText(home.body,"Paste a list"));capture("harbor-history.png");
+            // U65: the tab row is one scrolling row, and Quick add / Paste a list live in the Import sheet.
+            assertTrue("History's Up next has only the tab row, the action chips, Recently watched and Favourites as sideways rails",horizontalRails(home.body)<=4);
+            assertTrue("History offers Log and Import",hasText(home.body,"Import")&&(hasText(home.body,"＋ Log")||hasText(home.body,"+ Log")||hasText(home.body,"Log")));capture("harbor-history.png");
             test.runOnMainSync(()->home.setLanguage("ar"));
             assertTrue("Arabic is on",Loc.arabic);assertEquals("Arabic mirrors the screen",View.LAYOUT_DIRECTION_RTL,home.getWindow().getDecorView().getLayoutDirection());
             assertTrue("History is translated",hasText(home.body,"التالي"));capture("harbor-history-ar.png");

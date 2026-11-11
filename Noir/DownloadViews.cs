@@ -13,7 +13,8 @@ public partial class MainWindow
     Action? downloadPageUpdate;
     int lastDownloadCount=-1;
     void DownloadChanged(){void Update(){if(closing)return;UpdateDownloadBadge();UpdateDownloadsTop();RefreshDownloadsPopover();UpdateBackgroundState();if(!hiddenInTray){downloadPageUpdate?.Invoke();if(page=="Downloads")readyCentreUpdate?.Invoke();}}if(Dispatcher.CheckAccess())Update();else Dispatcher.BeginInvoke(Update,DispatcherPriority.DataBind);}
-    void UpdateDownloadBadge(){var count=downloads?.ActiveCount??0;if(count==lastDownloadCount)return;lastDownloadCount=count;SetNavIcon(DownloadsNav,DownloadIcon(count));UpdateNavSelection();if(!railCompact)DownloadsNav.ToolTip=count>0?$"{T("Downloads")} · {count}":null;}
+    // U48: the count lives only on the top-bar button; the rail icon carries no badge.
+    void UpdateDownloadBadge(){var count=downloads?.ActiveCount??0;if(count==lastDownloadCount)return;lastDownloadCount=count;}
     void StartDownloads()
     {
         try
@@ -25,6 +26,31 @@ public partial class MainWindow
     }
     // Private links and keys: masked, on the dark field style used across Settings.
     PasswordBox Secret(string value)=>new(){Password=value,Padding=new(10),Margin=new(0,5,0,10),Background=Brush("#1C1C1F"),Foreground=Brush("#F4F1EB"),BorderBrush=Brush("#3A3832"),CaretBrush=Brush("#E4C084"),SelectionBrush=Brush("#E4C084")};
+    // One settings field: the input (at most 560 px wide), an optional button beside it, and a small "Saved" tick or an inline error in the same place.
+    (Grid Row,TextBlock Tick) FieldRow(FrameworkElement input,Button? beside=null)
+    {
+        var row=new Grid{HorizontalAlignment=HorizontalAlignment.Stretch};
+        row.ColumnDefinitions.Add(new ColumnDefinition{Width=new(1,GridUnitType.Star),MaxWidth=560});row.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});row.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
+        input.HorizontalAlignment=HorizontalAlignment.Stretch;row.Children.Add(input);
+        if(beside!=null){beside.Margin=new(10,5,0,10);beside.VerticalAlignment=VerticalAlignment.Top;Grid.SetColumn(beside,1);row.Children.Add(beside);}
+        var tick=new TextBlock{FontSize=12,Margin=new(12,0,0,0),VerticalAlignment=VerticalAlignment.Center,TextWrapping=TextWrapping.Wrap,MaxWidth=380,Visibility=Visibility.Collapsed};
+        Grid.SetColumn(tick,2);row.Children.Add(tick);return(row,tick);
+    }
+    // null shows "Saved" for about 2 s; text shows an inline error; "" shows nothing.
+    void Flash(TextBlock tick,string? error)
+    {
+        if(error=="")return;
+        if(tick.Tag is DispatcherTimer old)old.Stop();
+        tick.Text=error??T("Saved","تم الحفظ");tick.Foreground=Brush(error==null?"#7BD88F":"#E5736B");tick.Visibility=Visibility.Visible;
+        var timer=new DispatcherTimer{Interval=TimeSpan.FromSeconds(error==null?2:8)};timer.Tick+=(_,_)=>{timer.Stop();tick.Visibility=Visibility.Collapsed;};tick.Tag=timer;timer.Start();
+    }
+    // Text fields save on Enter or when they lose focus, only if the value changed.
+    void CommitOn(Control box,Func<string> value,TextBlock tick,Func<Task<string?>> save)
+    {
+        var last=value();
+        async void Go(){var now=value();if(now==last)return;last=now;Flash(tick,await save());}
+        box.LostKeyboardFocus+=(_,_)=>Go();box.KeyDown+=(_,e)=>{if(e.Key==System.Windows.Input.Key.Enter)Go();};
+    }
     void RenderDownloadSettings()
     {
         ContentPanel.Children.Add(Heading("Downloads on this PC","Find releases through AIOStreams, your download service and your media servers. Completed downloads join your local library."));
@@ -33,43 +59,47 @@ public partial class MainWindow
         ContentPanel.Children.Add(ReadySettingsPanel());
         var manifest=Secret(c.Manifest);
         var key=Secret(c.Key);
-        ContentPanel.Children.Add(Body("AIOStreams installation URL (manifest.json)",12));ContentPanel.Children.Add(manifest);
-        var service=new ComboBox{ItemsSource=new[]{new ComboBoxItem{Content="TorBox",Tag="TorBox"},new ComboBoxItem{Content="Real-Debrid",Tag="Real-Debrid"},new ComboBoxItem{Content=T("AIOStreams links"),Tag="AIOStreams links"},new ComboBoxItem{Content=T("Torrents (no debrid)","تورنت (دون خدمة وسيطة)"),Tag="Torrents"}},SelectedValuePath="Tag",SelectedValue=c.Service,Margin=new(0,5,0,10)};ContentPanel.Children.Add(Body("Download service",12));ContentPanel.Children.Add(service);
-        var keyLabel=Body("",12);var help=Body("",12);ContentPanel.Children.Add(keyLabel);ContentPanel.Children.Add(key);ContentPanel.Children.Add(help);
+        // Every field saves itself: the whole form is read on the UI thread, then written (secrets encrypted by Configure).
+        Func<Control?,string?> saveMain=_=>null;Func<Task> runCheck=()=>Task.CompletedTask;
+        void Wire(Control input,Func<string> value,(Grid Row,TextBlock Tick) field)=>CommitOn(input,value,field.Tick,()=>Task.FromResult(saveMain(input)));
+        void WireNow(Control input,(Grid Row,TextBlock Tick) field){if(input is ComboBox combo)combo.SelectionChanged+=(_,_)=>Flash(field.Tick,saveMain(combo));else if(input is CheckBox box)box.Click+=(_,_)=>Flash(field.Tick,saveMain(box));}
+        var manifestField=FieldRow(manifest);ContentPanel.Children.Add(Body("AIOStreams installation URL (manifest.json)",12));ContentPanel.Children.Add(manifestField.Row);Wire(manifest,()=>manifest.Password,manifestField);
+        var service=new ComboBox{ItemsSource=new[]{new ComboBoxItem{Content="TorBox",Tag="TorBox"},new ComboBoxItem{Content="Real-Debrid",Tag="Real-Debrid"},new ComboBoxItem{Content=T("AIOStreams links"),Tag="AIOStreams links"},new ComboBoxItem{Content=T("Torrents (no debrid)","تورنت (دون خدمة وسيطة)"),Tag="Torrents"}},SelectedValuePath="Tag",SelectedValue=c.Service,Margin=new(0,5,0,10)};var serviceField=FieldRow(service);ContentPanel.Children.Add(Body("Download service",12));ContentPanel.Children.Add(serviceField.Row);
+        var keyLabel=Body("",12);var help=Body("",12);var keyField=FieldRow(key);ContentPanel.Children.Add(keyLabel);ContentPanel.Children.Add(keyField.Row);Wire(key,()=>key.Password,keyField);ContentPanel.Children.Add(help);
         var sharing=new StackPanel{Margin=new(0,8,0,12)};sharing.Children.Add(Body(T("Sharing back","المشاركة مع الآخرين"),13));
-        var seeding=new ComboBox{ItemsSource=new[]{T("Don't share","دون مشاركة"),T("Until ratio 1.0 or 2 hours","حتى نسبة 1.0 أو ساعتين"),T("While Noir is open","ما دام Noir مفتوحًا")},SelectedIndex=c.Seeding=="off"?0:c.Seeding=="open"?2:1,Margin=new(0,5,0,10)};sharing.Children.Add(seeding);System.Windows.Automation.AutomationProperties.SetName(seeding,T("Seeding","المشاركة بعد التنزيل"));
-        TextBox TorrentNumber(string label,int value){sharing.Children.Add(Body(label,12));var input=new TextBox{Text=value.ToString(System.Globalization.CultureInfo.InvariantCulture),Padding=new(10),Margin=new(0,5,0,10)};System.Windows.Automation.AutomationProperties.SetName(input,label);sharing.Children.Add(input);return input;}
+        var seeding=new ComboBox{ItemsSource=new[]{T("Don't share","دون مشاركة"),T("Until ratio 1.0 or 2 hours","حتى نسبة 1.0 أو ساعتين"),T("While Noir is open","ما دام Noir مفتوحًا")},SelectedIndex=c.Seeding=="off"?0:c.Seeding=="open"?2:1,Margin=new(0,5,0,10)};var seedingField=FieldRow(seeding);sharing.Children.Add(seedingField.Row);System.Windows.Automation.AutomationProperties.SetName(seeding,T("Seeding","المشاركة بعد التنزيل"));WireNow(seeding,seedingField);
+        TextBox TorrentNumber(string label,int value){sharing.Children.Add(Body(label,12));var input=new TextBox{Text=value.ToString(System.Globalization.CultureInfo.InvariantCulture),Padding=new(10),Margin=new(0,5,0,10)};System.Windows.Automation.AutomationProperties.SetName(input,label);var field=FieldRow(input);sharing.Children.Add(field.Row);Wire(input,()=>input.Text,field);return input;}
         var upload=TorrentNumber(T("Upload limit (KB/s) · 0 = unlimited","حد الرفع (KB/s) · 0 = بلا حد"),c.UploadLimitKB);var download=TorrentNumber(T("Download limit (KB/s) · 0 = unlimited","حد التنزيل (KB/s) · 0 = بلا حد"),c.DownloadLimitKB);
-        var autoSwitch=new CheckBox{Content=T("Switch to another release if stuck","التبديل إلى إصدار آخر عند التعثر"),IsChecked=c.AutoSwitch,Margin=new(0,6,0,10)};sharing.Children.Add(autoSwitch);System.Windows.Automation.AutomationProperties.SetName(autoSwitch,T("Switch to another release if stuck","التبديل إلى إصدار آخر عند التعثر"));
+        var autoSwitch=new CheckBox{Content=T("Switch to another release if stuck","التبديل إلى إصدار آخر عند التعثر"),IsChecked=c.AutoSwitch,Margin=new(0,6,0,10)};var autoSwitchField=FieldRow(autoSwitch);sharing.Children.Add(autoSwitchField.Row);WireNow(autoSwitch,autoSwitchField);System.Windows.Automation.AutomationProperties.SetName(autoSwitch,T("Switch to another release if stuck","التبديل إلى إصدار آخر عند التعثر"));
         var active=TorrentNumber(T("Maximum active torrents","الحد الأقصى لتنزيلات التورنت النشطة"),c.MaxActiveTorrents);ContentPanel.Children.Add(sharing);
         System.Windows.Automation.AutomationProperties.SetName(service,T("Download service","خدمة التنزيل"));System.Windows.Automation.AutomationProperties.SetName(manifest,T("AIOStreams or Torrentio installation link","رابط تثبيت AIOStreams أو Torrentio"));
         var keys=new Dictionary<string,string>{{"TorBox",c.Service=="TorBox"?c.Key:c.TorBoxKey},{"Real-Debrid",c.Service=="Real-Debrid"?c.Key:c.RealDebridKey}};var selectedService=c.Service;
-        void ServiceChanged(){if(keys.ContainsKey(selectedService))keys[selectedService]=key.Password;selectedService=service.SelectedValue as string??"TorBox";sharing.Visibility=selectedService=="Torrents"?Visibility.Visible:Visibility.Collapsed;key.Password=keys.GetValueOrDefault(selectedService,"");key.Visibility=keyLabel.Visibility=selectedService is "AIOStreams links" or "Torrents"?Visibility.Collapsed:Visibility.Visible;keyLabel.Text=selectedService=="Real-Debrid"?"Real-Debrid API token":"TorBox API key";help.Text=selectedService=="Torrents"?T("Other people sharing a torrent can see your IP address.","يمكن للأشخاص المشاركين في التورنت رؤية عنوان IP الخاص بك."):selectedService=="AIOStreams links"?"Uses the debrid or usenet services you added in AIOStreams — Real-Debrid, AllDebrid, Premiumize, Easynews, TorBox…":selectedService=="Real-Debrid"?"AIOStreams finds torrents. Your Real-Debrid account fetches them. Reading a release's file list may add its magnet to your account.":"AIOStreams finds torrents. Your TorBox account supplies the files and searches your existing library.";}
-        service.SelectionChanged+=(_,_)=>ServiceChanged();ServiceChanged();
+        void ServiceChanged(){if(keys.ContainsKey(selectedService))keys[selectedService]=key.Password;selectedService=service.SelectedValue as string??"TorBox";sharing.Visibility=selectedService=="Torrents"?Visibility.Visible:Visibility.Collapsed;key.Password=keys.GetValueOrDefault(selectedService,"");keyField.Row.Visibility=keyLabel.Visibility=selectedService is "AIOStreams links" or "Torrents"?Visibility.Collapsed:Visibility.Visible;keyLabel.Text=selectedService=="Real-Debrid"?"Real-Debrid API token":"TorBox API key";help.Text=selectedService=="Torrents"?T("Other people sharing a torrent can see your IP address.","يمكن للأشخاص المشاركين في التورنت رؤية عنوان IP الخاص بك."):selectedService=="AIOStreams links"?"Uses the debrid or usenet services you added in AIOStreams — Real-Debrid, AllDebrid, Premiumize, Easynews, TorBox…":selectedService=="Real-Debrid"?"AIOStreams finds torrents. Your Real-Debrid account fetches them. Reading a release's file list may add its magnet to your account.":"AIOStreams finds torrents. Your TorBox account supplies the files and searches your existing library.";}
+        service.SelectionChanged+=(_,_)=>ServiceChanged();ServiceChanged();WireNow(service,serviceField);
         ComboBox Folder(bool movies,string selected)
         {
             var box=new ComboBox{Margin=new(0,5,0,10),MinWidth=300};foreach(var root in store.State.Roots.Where(r=>r.Movies==movies))box.Items.Add(root.Path);
             box.SelectedItem=selected;if(box.SelectedIndex<0&&box.Items.Count>0)box.SelectedIndex=0;return box;
         }
         var shows=Folder(false,c.ShowsRoot);var movies=Folder(true,c.MoviesRoot);
-        ContentPanel.Children.Add(Body("TV / anime download folder",12));ContentPanel.Children.Add(shows);ContentPanel.Children.Add(Body("Movie download folder",12));ContentPanel.Children.Add(movies);
-        var quality=new ComboBox{ItemsSource=new[]{"1080p","720p","2160p","Any"},SelectedItem=c.PreferredResolution,Margin=new(0,5,0,10)};ContentPanel.Children.Add(Body("Preferred download quality",12));ContentPanel.Children.Add(quality);
-        var size=new TextBox{Text=c.MaxEpisodeBytes>0?(c.MaxEpisodeBytes/1073741824d).ToString("0.##",System.Globalization.CultureInfo.InvariantCulture):"",Padding=new(10),Margin=new(0,5,0,10)};ContentPanel.Children.Add(Body("Maximum episode size in GB · leave empty for no limit",12));ContentPanel.Children.Add(size);
-        var english=new CheckBox{Content="Download English subtitles",IsChecked=c.SubtitleLanguages.Contains("en"),Margin=new(0,8,0,8)};var arabic=new CheckBox{Content="Download Arabic subtitles",IsChecked=c.SubtitleLanguages.Contains("ar"),Margin=new(0,8,0,8)};var timing=new CheckBox{Content="Automatically check subtitle timing against the local video",IsChecked=c.AutoSyncSubtitles,Margin=new(0,8,0,8)};ContentPanel.Children.Add(english);ContentPanel.Children.Add(arabic);ContentPanel.Children.Add(timing);
+        var showsField=FieldRow(shows);var moviesField=FieldRow(movies);ContentPanel.Children.Add(Body("TV / anime download folder",12));ContentPanel.Children.Add(showsField.Row);ContentPanel.Children.Add(Body("Movie download folder",12));ContentPanel.Children.Add(moviesField.Row);WireNow(shows,showsField);WireNow(movies,moviesField);ContentPanel.Children.Add(Body("Files are organized as Show (Year) / Season 01 / Show (Year) S01E01.mkv.",11.5));
+        var quality=new ComboBox{ItemsSource=new[]{"1080p","720p","2160p","Any"},SelectedItem=c.PreferredResolution,Margin=new(0,5,0,10)};var qualityField=FieldRow(quality);ContentPanel.Children.Add(Body("Preferred download quality",12));ContentPanel.Children.Add(qualityField.Row);WireNow(quality,qualityField);
+        var size=new TextBox{Text=c.MaxEpisodeBytes>0?(c.MaxEpisodeBytes/1073741824d).ToString("0.##",System.Globalization.CultureInfo.InvariantCulture):"",Padding=new(10),Margin=new(0,5,0,10)};var sizeField=FieldRow(size);ContentPanel.Children.Add(Body("Maximum episode size in GB · leave empty for no limit",12));ContentPanel.Children.Add(sizeField.Row);Wire(size,()=>size.Text,sizeField);
+        var english=new CheckBox{Content="Download English subtitles",IsChecked=c.SubtitleLanguages.Contains("en"),Margin=new(0,8,0,8)};var arabic=new CheckBox{Content="Download Arabic subtitles",IsChecked=c.SubtitleLanguages.Contains("ar"),Margin=new(0,8,0,8)};var timing=new CheckBox{Content="Automatically check subtitle timing against the local video",IsChecked=c.AutoSyncSubtitles,Margin=new(0,8,0,8)};var englishField=FieldRow(english);var arabicField=FieldRow(arabic);var timingField=FieldRow(timing);ContentPanel.Children.Add(englishField.Row);ContentPanel.Children.Add(arabicField.Row);ContentPanel.Children.Add(Body("Subtitles come from the release or your subtitle source and stay beside the video for offline use.",11.5));ContentPanel.Children.Add(timingField.Row);ContentPanel.Children.Add(Body("Automatic timing runs locally and keeps an original backup.",11.5));WireNow(english,englishField);WireNow(arabic,arabicField);WireNow(timing,timingField);
         var subtitleInitial=SubtitleSelection.From(c);var subtitleKeys=new Dictionary<string,string>(c.SubtitleSiteKeys);if(subtitleInitial.Source is "opensubtitles" or "subdl" or "subsource" or "wyzie")subtitleKeys[subtitleInitial.Source]=subtitleInitial.ApiKey;
         var subtitleIds=new[]{"","opensubtitles","subdl","subsource","wyzie","addon"};
-        var subtitlePicker=new ComboBox{ItemsSource=new[]{T("Free default"),"OpenSubtitles.com","SubDL","SubSource","Wyzie Subs",T("Stremio addon link")},SelectedIndex=Array.IndexOf(subtitleIds,subtitleInitial.Source),Margin=new(0,5,0,10)};ContentPanel.Children.Add(Body(T("Subtitle source"),12));ContentPanel.Children.Add(subtitlePicker);
-        var subtitleKeyLabel=Body(T("Subtitle site API key"),12);var subtitleKey=Secret(subtitleInitial.ApiKey);ContentPanel.Children.Add(subtitleKeyLabel);ContentPanel.Children.Add(subtitleKey);
-        var subtitleLogin=new StackPanel();subtitleLogin.Children.Add(Body(T("Username · optional"),12));var subtitleUsername=new TextBox{Text=subtitleInitial.Username,Padding=new(10),Margin=new(0,5,0,10)};subtitleLogin.Children.Add(subtitleUsername);subtitleLogin.Children.Add(Body(T("Password · optional"),12));var subtitlePassword=Secret(subtitleInitial.Password);subtitleLogin.Children.Add(subtitlePassword);ContentPanel.Children.Add(subtitleLogin);
-        var subtitleAddon=new StackPanel();subtitleAddon.Children.Add(Body(T("Stremio addon link"),12));var subtitleLink=Secret(c.SubtitleAddonUrl);subtitleAddon.Children.Add(subtitleLink);subtitleAddon.Children.Add(Body(T("Authorization · optional"),12));var subtitleAuth=Secret(c.SubtitleAddonAuth);subtitleAddon.Children.Add(subtitleAuth);ContentPanel.Children.Add(subtitleAddon);
+        var subtitlePicker=new ComboBox{ItemsSource=new[]{T("Free default"),"OpenSubtitles.com","SubDL","SubSource","Wyzie Subs",T("Stremio addon link")},SelectedIndex=Array.IndexOf(subtitleIds,subtitleInitial.Source),Margin=new(0,5,0,10)};var subtitlePickerField=FieldRow(subtitlePicker);ContentPanel.Children.Add(Body(T("Subtitle source"),12));ContentPanel.Children.Add(subtitlePickerField.Row);
+        var subtitleKeyLabel=Body(T("Subtitle site API key"),12);var subtitleKey=Secret(subtitleInitial.ApiKey);var subtitleKeyField=FieldRow(subtitleKey,ActionButton(T("Check link","فحص الرابط"),async()=>await runCheck()));ContentPanel.Children.Add(subtitleKeyLabel);ContentPanel.Children.Add(subtitleKeyField.Row);
+        var subtitleLogin=new StackPanel();subtitleLogin.Children.Add(Body(T("Username · optional"),12));var subtitleUsername=new TextBox{Text=subtitleInitial.Username,Padding=new(10),Margin=new(0,5,0,10)};var subtitleUsernameField=FieldRow(subtitleUsername);subtitleLogin.Children.Add(subtitleUsernameField.Row);subtitleLogin.Children.Add(Body(T("Password · optional"),12));var subtitlePassword=Secret(subtitleInitial.Password);var subtitlePasswordField=FieldRow(subtitlePassword);subtitleLogin.Children.Add(subtitlePasswordField.Row);ContentPanel.Children.Add(subtitleLogin);
+        var subtitleAddon=new StackPanel();subtitleAddon.Children.Add(Body(T("Stremio addon link"),12));var subtitleLink=Secret(c.SubtitleAddonUrl);var subtitleLinkField=FieldRow(subtitleLink,ActionButton(T("Check link","فحص الرابط"),async()=>await runCheck()));subtitleAddon.Children.Add(subtitleLinkField.Row);subtitleAddon.Children.Add(Body(T("Authorization · optional"),12));var subtitleAuth=Secret(c.SubtitleAddonAuth);var subtitleAuthField=FieldRow(subtitleAuth);subtitleAddon.Children.Add(subtitleAuthField.Row);ContentPanel.Children.Add(subtitleAddon);
         var subtitleNote=Body(T("Your Wyzie key stays on this device unless you share settings with your phone."),12);ContentPanel.Children.Add(subtitleNote);
         var subtitleGetKey=ActionButton(T("Get a free key"),()=>{var url=SubtitleProviders.KeyPage(subtitleIds[Math.Max(0,subtitlePicker.SelectedIndex)]);if(url.Length>0)System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url){UseShellExecute=true});});ContentPanel.Children.Add(subtitleGetKey);
-        var subtitleOnly=new CheckBox{Content=T("Use only this source"),IsChecked=c.SubtitleAddonOnly,Margin=new(0,8,0,8)};ContentPanel.Children.Add(subtitleOnly);
+        var subtitleOnly=new CheckBox{Content=T("Use only this source"),IsChecked=c.SubtitleAddonOnly,Margin=new(0,8,0,8)};var subtitleOnlyField=FieldRow(subtitleOnly);ContentPanel.Children.Add(subtitleOnlyField.Row);
         var subtitleStatus=Body("",12);ContentPanel.Children.Add(subtitleStatus);bool checkingSubtitle=false;var selectedSubtitle=subtitleInitial.Source;
         foreach(var (control,name) in new (System.Windows.DependencyObject,string)[]{(subtitlePicker,T("Subtitle source")),(subtitleKey,T("Subtitle site API key")),(subtitleUsername,T("Username · optional")),(subtitlePassword,T("Password · optional")),(subtitleLink,T("Stremio addon link")),(subtitleAuth,T("Authorization · optional")),(subtitleOnly,T("Use only this source"))})System.Windows.Automation.AutomationProperties.SetName(control,name);
         void RefreshSubtitleChoice(){subtitleOnly.IsEnabled=selectedSubtitle=="addon"?subtitleLink.Password.Trim().Length>0:selectedSubtitle.Length>0&&subtitleKey.Password.Trim().Length>0;subtitleStatus.Text="";}
         subtitleKey.PasswordChanged+=(_,_)=>RefreshSubtitleChoice();subtitleLink.PasswordChanged+=(_,_)=>RefreshSubtitleChoice();
-        void SubtitleChanged(){if(selectedSubtitle is "opensubtitles" or "subdl" or "subsource" or "wyzie")subtitleKeys[selectedSubtitle]=subtitleKey.Password;selectedSubtitle=subtitleIds[Math.Max(0,subtitlePicker.SelectedIndex)];subtitleKey.Password=subtitleKeys.GetValueOrDefault(selectedSubtitle,"");subtitleKey.Visibility=subtitleKeyLabel.Visibility=subtitleGetKey.Visibility=selectedSubtitle is "" or "addon"?Visibility.Collapsed:Visibility.Visible;subtitleLogin.Visibility=selectedSubtitle=="opensubtitles"?Visibility.Visible:Visibility.Collapsed;subtitleAddon.Visibility=selectedSubtitle=="addon"?Visibility.Visible:Visibility.Collapsed;subtitleNote.Visibility=selectedSubtitle=="wyzie"?Visibility.Visible:Visibility.Collapsed;RefreshSubtitleChoice();}
+        void SubtitleChanged(){if(selectedSubtitle is "opensubtitles" or "subdl" or "subsource" or "wyzie")subtitleKeys[selectedSubtitle]=subtitleKey.Password;selectedSubtitle=subtitleIds[Math.Max(0,subtitlePicker.SelectedIndex)];subtitleKey.Password=subtitleKeys.GetValueOrDefault(selectedSubtitle,"");subtitleKeyField.Row.Visibility=subtitleKeyLabel.Visibility=subtitleGetKey.Visibility=selectedSubtitle is "" or "addon"?Visibility.Collapsed:Visibility.Visible;subtitleLogin.Visibility=selectedSubtitle=="opensubtitles"?Visibility.Visible:Visibility.Collapsed;subtitleAddon.Visibility=selectedSubtitle=="addon"?Visibility.Visible:Visibility.Collapsed;subtitleNote.Visibility=selectedSubtitle=="wyzie"?Visibility.Visible:Visibility.Collapsed;RefreshSubtitleChoice();}
         subtitlePicker.SelectionChanged+=(_,_)=>SubtitleChanged();SubtitleChanged();
         SubtitleSelection ReadSubtitle(){try{return new SubtitleSelection(selectedSubtitle,selectedSubtitle is "" or "addon"?"":subtitleKey.Password,subtitleUsername.Text,subtitlePassword.Password,subtitleLink.Password,subtitleAuth.Password,subtitleOnly.IsChecked==true).Validate();}catch(IOException e){throw new IOException(T(e.Message));}}
         string SubtitleError(Exception e)=>e is SubtitleSourceException failure?failure.SourceName+" · "+T(failure.Kind==SubtitleFailureKind.BadKey?"key rejected":failure.Kind==SubtitleFailureKind.Limit?"daily limit reached":"temporarily unavailable")+(failure.Reset.Length>0?" · "+T("resets")+" "+failure.Reset:""):e is IOException?T(e.Message):T("temporarily unavailable");
@@ -80,12 +110,36 @@ public partial class MainWindow
             try{await new SubtitleProviders().Check(selection,CancellationToken.None);if(ReadSubtitle()!=selection){subtitleStatus.Text=T("Subtitle source changed. Check again.");return false;}subtitleStatus.Text=T(selection.Name)+" · "+T("works");return true;}
             catch(Exception e){subtitleStatus.Text=SubtitleError(e);return false;}finally{checkingSubtitle=false;}
         }
-        ContentPanel.Children.Add(ActionButton(T("Check"),async()=>{await CheckSubtitleLink();}));
-        ContentPanel.Children.Add(ActionButton(T("Save subtitle source"),async()=>{if(await CheckSubtitleLink())try{downloads.ConfigureSubtitleSource(ReadSubtitle(),subtitleKeys);Status.Text=T("Subtitle source saved securely.");}catch(Exception e){subtitleStatus.Text=SubtitleError(e);}}));
-        int TorrentLimit(string text,int min,int max){if(!int.TryParse(text,out var value)||value<min||value>max)throw new IOException(T("Enter a valid torrent limit.","أدخل حدًا صالحًا للتورنت."));return value;}
-        ContentPanel.Children.Add(ActionButton("Save download settings",async()=>{try{var subtitleSelection=ReadSubtitle();if(subtitleSelection!=SubtitleSelection.From(downloads.Config)&&!await CheckSubtitleLink())return;long limit=0;if(size.Text.Trim().Length>0){if(!double.TryParse(size.Text,System.Globalization.NumberStyles.Float,System.Globalization.CultureInfo.InvariantCulture,out var gb)||!double.IsFinite(gb)||gb<=0||gb>1000)throw new System.IO.IOException("Enter an episode size between 0 and 1000 GB, or leave it empty.");limit=(long)(gb*1073741824);}downloads.Configure(manifest.Password,key.Password,shows.SelectedItem as string??"",movies.SelectedItem as string??"",quality.SelectedItem as string??"1080p",limit,new[]{english.IsChecked==true?"en":"",arabic.IsChecked==true?"ar":""}.Where(l=>l.Length>0).ToList(),timing.IsChecked==true,selectedService,seeding.SelectedIndex==0?"off":seeding.SelectedIndex==2?"open":"ratio",TorrentLimit(upload.Text,0,2097151),TorrentLimit(download.Text,0,2097151),autoSwitch.IsChecked==true,TorrentLimit(active.Text,1,20));downloads.ConfigureSubtitleSource(subtitleSelection,subtitleKeys);Status.Text="Saved securely on this PC. Paired phones use these download preferences.";}catch(Exception e){Status.Text=e is System.IO.IOException?e.Message:"Couldn't save settings.";}},true));
-        var servers=ActionButton("Media servers (Plex, Jellyfin, Emby) are in Connections →",()=>{settingsSection="Connections";Render();ContentScroll.ScrollToTop();});servers.Margin=new(0,14,0,10);ContentPanel.Children.Add(servers);
-        ContentPanel.Children.Add(Body("All connected sources are checked for releases and existing files. Plan missing episodes checks released episodes, season coverage and local files. Subtitles come from the release or OpenSubtitles, when available, and stay beside the video for offline use. Automatic timing runs locally and keeps an original backup. Files are organized as Show (Year) / Season 01 / Show (Year) S01E01.mkv.",12));
+        runCheck=async()=>{await CheckSubtitleLink();};
+        // Subtitle source: validated and checked, then saved by itself; quiet means a half-filled choice (a key not typed yet) is not reported.
+        async Task<string?> SaveSubtitle(bool quiet=false)
+        {
+            SubtitleSelection selection;try{selection=ReadSubtitle();}catch(Exception e){return quiet?"":SubtitleError(e);}
+            if(selection!=SubtitleSelection.From(downloads.Config)&&!await CheckSubtitleLink())return quiet?"":subtitleStatus.Text;
+            try{downloads.ConfigureSubtitleSource(selection,subtitleKeys);return null;}catch(Exception e){return SubtitleError(e);}
+        }
+        foreach(var (box,field) in new (Control,(Grid Row,TextBlock Tick))[]{(subtitleKey,subtitleKeyField),(subtitleUsername,subtitleUsernameField),(subtitlePassword,subtitlePasswordField),(subtitleLink,subtitleLinkField),(subtitleAuth,subtitleAuthField)})
+        {
+            var input=box;Func<string> value=input is PasswordBox secret?()=>secret.Password:()=>((TextBox)input).Text;
+            CommitOn(input,value,field.Tick,()=>SaveSubtitle());
+        }
+        subtitlePicker.SelectionChanged+=async(_,_)=>Flash(subtitlePickerField.Tick,await SaveSubtitle(true));
+        subtitleOnly.Click+=async(_,_)=>Flash(subtitleOnlyField.Tick,await SaveSubtitle());
+        saveMain=source=>
+        {
+            try
+            {
+                int Limit(TextBox box,int min,int max,int current){if(int.TryParse(box.Text,out var value)&&value>=min&&value<=max)return value;if(box==source)throw new IOException(T("Enter a valid torrent limit.","أدخل حدًا صالحًا للتورنت."));return current;}
+                var limit=downloads.Config.MaxEpisodeBytes;
+                if(size.Text.Trim().Length==0)limit=0;
+                else if(double.TryParse(size.Text,System.Globalization.NumberStyles.Float,System.Globalization.CultureInfo.InvariantCulture,out var gb)&&double.IsFinite(gb)&&gb>0&&gb<=1000)limit=(long)(gb*1073741824);
+                else if(source==size)throw new IOException("Enter an episode size between 0 and 1000 GB, or leave it empty.");
+                downloads.Configure(manifest.Password,key.Password,shows.SelectedItem as string??"",movies.SelectedItem as string??"",quality.SelectedItem as string??"1080p",limit,new[]{english.IsChecked==true?"en":"",arabic.IsChecked==true?"ar":""}.Where(l=>l.Length>0).ToList(),timing.IsChecked==true,selectedService,seeding.SelectedIndex==0?"off":seeding.SelectedIndex==2?"open":"ratio",Limit(upload,0,2097151,downloads.Config.UploadLimitKB),Limit(download,0,2097151,downloads.Config.DownloadLimitKB),autoSwitch.IsChecked==true,Limit(active,1,20,downloads.Config.MaxActiveTorrents));
+                return null;
+            }
+            catch(Exception e){return e is IOException?e.Message:"Couldn't save settings.";}
+        };
+        var servers=ActionButton("Media servers (Plex, Jellyfin, Emby) are in Connections [[forward]]",()=>{settingsSection="Connections";Render();ContentScroll.ScrollToTop();});servers.Margin=new(0,14,0,10);ContentPanel.Children.Add(servers);
         ContentPanel.Children.Add(ActionButton("Manage PC downloads",ShowDownloads));
         var bridge=new StackPanel();bridge.Children.Add(Body("If AIOStreams returns playback links without download references, create a separate Noir profile on the same host. Export your AIOStreams config with credentials included, then choose the export here. Noir adds download metadata to the copy. The copy omits the retired TorBox Search preset; your existing Stremio profile is unchanged.",12));
         var bridgeStatus=Body("",12);var connect=ActionButton("Connect a separate Noir download profile",async()=>{
@@ -113,13 +167,13 @@ public partial class MainWindow
                 var servers=await api.PlexResources(access,pin.DeviceId,token);token.ThrowIfCancellationRequested();note.Text=servers.Count>0?"Choose the servers to connect:":"Plex returned no accessible servers with an HTTPS or local connection.";
                 foreach(var server in servers){Button? add=null;add=ActionButton("Connect "+server.Name+(server.BaseUrl.StartsWith("http://",StringComparison.OrdinalIgnoreCase)?" · local HTTP":""),()=>{downloads.AddServer(server);add!.IsEnabled=false;add.Content="Connected · "+server.Name;changed();});add.Margin=new(0,4,0,4);dialog.Add(add);}
             }catch(OperationCanceledException){if(dialog.IsOpen)note.Text="Plex sign-in expired. Close this window and try again.";}catch(Exception e){if(dialog.IsOpen)note.Text=e is System.IO.IOException?e.Message:"Couldn't connect Plex. Close this window and retry.";}
-        }));
+        },true));
     }
     async void FindDownloads(VideoItem item,bool season=false)
     {
         if(downloads==null){Status.Text="Downloads are starting. Try again shortly.";return;}
         if(!item.IsMovie){ShowSeasonPlanner(item,season);return;}
-        var window=OpenSheet(T(season?"Download season":"Download episode / movie"),item.Title,SheetKind.Side,820);var body=window.Body;
+        var window=OpenSheet(T(season?"Download season":"Download"),item.Title,SheetKind.Side,820);var body=window.Body;
         var cancel=new CancellationTokenSource();var token=cancel.Token;window.Closed+=_=>{cancel.Cancel();cancel.Dispose();};int searchRevision=0;
         void ClearFooter(){window.FooterButtons.Children.Clear();window.Footer.Visibility=Visibility.Collapsed;}
         async Task Search()
@@ -312,12 +366,12 @@ public partial class MainWindow
             case "Paused":Small(T("Resume","استئناف"),()=>Do("resume"));menu.Add((T("Cancel download","إلغاء التنزيل"),()=>ShowDownloadCancel(j)));break;
             case "Failed" or "Cancelled":Small(T("Retry","إعادة المحاولة"),()=>Do("resume"));break;
             case "Completed":
-                v.Play=Small(T("▶ Play","▶ تشغيل"),()=>{var item=v.Library??ResolveDownloaded(j);if(item==null){Status.Text=T("Scan the library to play this download.","افحص المكتبة لتشغيل هذا التنزيل.");return;}_=PlayVideo(item);},true);ResolveDownloadPlay(v,j);
+                v.Play=Small(T("[[play]] Play","[[play]] تشغيل"),()=>{var item=v.Library??ResolveDownloaded(j);if(item==null){Status.Text=T("Scan the library to play this download.","افحص المكتبة لتشغيل هذا التنزيل.");return;}_=PlayVideo(item);},true);ResolveDownloadPlay(v,j);
                 menu.Add((T("Show in folder","إظهار في المجلد"),()=>ShowInFolder(j.Destination)));break;
             default:Small(T("Pause","إيقاف مؤقت"),()=>Do("pause"));menu.Add((T("Cancel download","إلغاء التنزيل"),()=>ShowDownloadCancel(j)));break;
         }
         if(menu.Count==0)return;
-        var more=ActionButton("⋯",()=>{});more.Padding=new(10,2,10,7);more.FontSize=16;more.Margin=new(6,0,0,0);more.VerticalAlignment=VerticalAlignment.Center;more.Background=Brush("#1FFFFFFF");more.ToolTip=T("More","المزيد");System.Windows.Automation.AutomationProperties.SetName(more,T("More options for","خيارات أخرى لـ")+" "+label);
+        var more=ActionButton("[[more]]",()=>{});more.Padding=new(10,2,10,7);more.FontSize=16;more.Margin=new(6,0,0,0);more.VerticalAlignment=VerticalAlignment.Center;more.Background=Brush("#1FFFFFFF");more.ToolTip=T("More","المزيد");System.Windows.Automation.AutomationProperties.SetName(more,T("More options for","خيارات أخرى لـ")+" "+label);
         more.Click+=(_,e)=>{e.Handled=true;var popup=new ContextMenu{FlowDirection=FlowDirection};foreach(var (text,act) in menu){var entry=new MenuItem{Header=text};var run=act;entry.Click+=(_,_)=>run();popup.Items.Add(entry);}more.ContextMenu=popup;popup.PlacementTarget=more;popup.Placement=System.Windows.Controls.Primitives.PlacementMode.Bottom;popup.IsOpen=true;};
         v.Actions.Children.Add(more);
     }
@@ -353,9 +407,7 @@ public partial class MainWindow
         void ControlAll(string action,Func<PcDownloadJob,bool> pick){try{foreach(var j in manager.Jobs().Where(pick))manager.Control(j.Id,action);}catch(Exception){Status.Text=T("Couldn't change these downloads.","تعذر تغيير هذه التنزيلات.");}update();}
         var pauseAll=Quiet(T("Pause all","إيقاف الكل مؤقتًا"),()=>ControlAll("pause",j=>j.Status is "Queued" or "Preparing" or "Downloading" or "Subtitles"));
         var resumeAll=Quiet(T("Resume all","استئناف الكل"),()=>ControlAll("resume",j=>j.Status=="Paused"));
-        var find=Quiet(T("Find something new","ابحث عن جديد"),()=>Navigate("Discover"));
-        var settings=Quiet(T("Settings"),()=>{settingsSection="Downloads";Navigate("Settings");});
-        foreach(var b in new[]{pauseAll,resumeAll,find,settings})tools.Children.Add(b);
+        foreach(var b in new[]{pauseAll,resumeAll})tools.Children.Add(b);
         page.Children.Add(head);
         var empty=new Border{Background=Brush("#141416"),BorderBrush=Brush("#1FFFFFFF"),BorderThickness=new(1),CornerRadius=new(14),Padding=new(24,22,24,22),Margin=new(0,18,0,4),Visibility=Visibility.Collapsed,Tag="DownloadsEmpty"};
         var emptyBody=new StackPanel();emptyBody.Children.Add(Text(T("Nothing downloading yet","لا شيء قيد التنزيل بعد"),15,weight:FontWeights.SemiBold));
@@ -414,7 +466,7 @@ public partial class MainWindow
     void DownloadsTop_Click(object sender,RoutedEventArgs e)=>ToggleDownloadsPopover();
     void UpdateDownloadsTop()
     {
-        if(downloads==null)return;var count=downloads.ActiveCount;var any=downloads.JobCount>0;
+        if(downloads==null)return;var count=downloads.ActiveCount;var any=count>0;
         DownloadsTop.Visibility=any?Visibility.Visible:Visibility.Collapsed;
         if(topDownloadCount!=count||DownloadsTop.Content==null){topDownloadCount=count;DownloadsTop.Content=DownloadIcon(count);}
         var label=T("Downloads","التنزيلات")+(count>0?" · "+count.ToString(Loc.Culture):"");DownloadsTop.ToolTip=label;System.Windows.Automation.AutomationProperties.SetName(DownloadsTop,label);

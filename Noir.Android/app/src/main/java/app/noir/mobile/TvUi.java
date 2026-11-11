@@ -134,8 +134,8 @@ public final class TvUi {
     /** A horizontal row: title label + a scroller holding `tiles`. Focus moving off either end stays in the row. */
     public static LinearLayout row(Activity a,String title,LinearLayout tiles){
         LinearLayout box=new LinearLayout(a);box.setOrientation(LinearLayout.VERTICAL);box.setClipChildren(false);box.setClipToPadding(false);
-        TextView label=text(a,title,18,WHITE,true);label.setPadding(dp(a,4),dp(a,14),0,dp(a,6));box.addView(label);
-        HorizontalScrollView scroller=new HorizontalScrollView(a);scroller.setHorizontalScrollBarEnabled(false);scroller.setClipChildren(false);scroller.setClipToPadding(false);scroller.setPadding(0,dp(a,8),dp(a,48),dp(a,8));
+        TextView label=text(a,title,18,WHITE,true);label.setPaddingRelative(dp(a,4),dp(a,14),0,dp(a,6));box.addView(label);
+        HorizontalScrollView scroller=new HorizontalScrollView(a);scroller.setHorizontalScrollBarEnabled(false);scroller.setClipChildren(false);scroller.setClipToPadding(false);scroller.setPaddingRelative(0,dp(a,8),dp(a,48),dp(a,8));
         tiles.setOrientation(LinearLayout.HORIZONTAL);tiles.setClipChildren(false);tiles.setClipToPadding(false);
         for(int i=0;i<tiles.getChildCount();i++){View t=tiles.getChildAt(i);t.setId(View.generateViewId());}
         int n=tiles.getChildCount();if(n>0){tiles.getChildAt(0).setNextFocusLeftId(View.NO_ID);tiles.getChildAt(n-1).setNextFocusRightId(tiles.getChildAt(n-1).getId());}

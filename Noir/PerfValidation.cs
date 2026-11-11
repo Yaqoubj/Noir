@@ -29,7 +29,7 @@ public partial class MainWindow
             await Time("Home",()=>Page("Home"));
             foreach(var sort in new[]{"A–Z","Recently watched"}){librarySort=sort;await Time("Shows "+sort,()=>Page("Shows"));await Time("Movies "+sort,()=>Page("Movies"));}
             librarySort="A–Z";collectionFilter="My List";await Time("My List",()=>Page("My List"));
-            foreach(var tab in TrackerTabs.Where(t=>t!="Add history")){await Time("History "+tab,()=>{trackerTab=tab;Navigate("History");});}
+            foreach(var tab in TrackerTabs.Where(t=>t!="Import")){await Time("History "+tab,()=>{trackerTab=tab;Navigate("History");});}
             foreach(var section in SettingsSections.Select(s=>s.Name)){await Time("Settings "+section,()=>{settingsSection=section;Navigate("Settings");});}
             discoveryFactory=()=>new DiscoveryClient(store.DataDirectory,new DiscoveryFixtureHandler());
             await Time("Discover",()=>{Navigate("Discover");});CancelDiscover();

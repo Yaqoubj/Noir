@@ -22,13 +22,16 @@ final class PhoneHistoryIo {
     interface Progress{void report(int done,int total);}
 
     // ---- Matching (the PC's rules: IMDb ID, TVDB via TVmaze, then exact or unique near title) ----
+    static volatile java.util.function.Function<List<PhoneHistory.Row>,Object[]> matchOverride; // test seam, null in production
     Plan resolve(String service,List<PhoneHistory.Row> rows,Progress progress)throws InterruptedException{
         Map<String,List<PhoneHistory.Row>> groups=new LinkedHashMap<>();for(PhoneHistory.Row r:rows)groups.computeIfAbsent(r.key(),k->new ArrayList<>()).add(r);
         Plan plan=new Plan();plan.service=service;ExecutorService pool=Executors.newFixedThreadPool(4);List<Future<Object[]>> futures=new ArrayList<>();
         int[] done={0};
-        for(List<PhoneHistory.Row> group:groups.values())futures.add(pool.submit(()->{try{return match(group);}finally{synchronized(done){done[0]++;if(progress!=null)progress.report(done[0],groups.size());}}}));
+        for(List<PhoneHistory.Row> group:groups.values())futures.add(pool.submit(()->{try{if(Thread.currentThread().isInterrupted())throw new InterruptedException();java.util.function.Function<List<PhoneHistory.Row>,Object[]> fake=matchOverride;return fake!=null?fake.apply(group):match(group);}finally{synchronized(done){done[0]++;if(progress!=null)progress.report(done[0],groups.size());}}}));
         pool.shutdown();
-        for(Future<Object[]> f:futures){try{Object[] r=f.get();if(r[0]!=null)plan.titles.add((Title)r[0]);@SuppressWarnings("unchecked")List<String> u=(List<String>)r[1];plan.unmatched.addAll(u);plan.lookupFailed|=(Boolean)r[2];}catch(ExecutionException e){plan.lookupFailed=true;plan.unmatched.add("A title couldn't be looked up.");}}
+        // Leaving early (the screen closed, the job was cancelled) stops every queued and running lookup.
+        try{for(Future<Object[]> f:futures){try{Object[] r=f.get();if(r[0]!=null)plan.titles.add((Title)r[0]);@SuppressWarnings("unchecked")List<String> u=(List<String>)r[1];plan.unmatched.addAll(u);plan.lookupFailed|=(Boolean)r[2];}catch(ExecutionException e){plan.lookupFailed=true;plan.unmatched.add("A title couldn't be looked up.");}}}
+        finally{if(!pool.isTerminated()){for(Future<Object[]> f:futures)f.cancel(true);pool.shutdownNow();}}
         return plan;
     }
     Object[] match(List<PhoneHistory.Row> group){
@@ -103,8 +106,13 @@ final class PhoneHistoryIo {
                 if(v.row!=null&&(v.row.service.equals("Noir")||v.row.service.equals("Backup"))?alreadyExact(item,at,unknown,rowSource):already(item,at,unknown))continue;
                 String viewing=data.markImported(item.optString("id"),at,unknown,approximate,rowSource,v.row==null?0:v.row.loggedAt);
                 added.put(new JSONArray().put(item.optString("id")).put(viewing));
-                JSONObject review=item.optJSONObject("review");
-                if((v.rating>0||v.row!=null&&!v.row.note.isEmpty())&&(review==null||review.optInt("rating")==0&&review.optString("note").isEmpty())){data.review(item.optString("id"),v.rating,v.row==null?"":v.row.note);if(v.rating>0)rated.put(item.optString("id"));}
+                synchronized(data){
+                    String id=item.optString("id");item=data.item(id);JSONObject review=item.optJSONObject("review");int ten=v.row!=null&&v.row.rating10>=0?v.row.rating10:v.rating*2;String note=v.row==null?"":v.row.note;
+                    if((ten>0||!note.isEmpty())&&DataStore.rating10(item)==0&&(review==null||review.optString("note").isEmpty())){
+                        JSONObject change=new JSONObject();DataStore.put(change,"id",id);DataStore.put(change,"before",review==null?new JSONObject():DataStore.copy(review));
+                        data.review10(id,ten,note);JSONObject written=data.item(id);DataStore.put(change,"written",written.optJSONObject("review"));DataStore.put(change,"at",written.optLong("reviewAt"));rated.put(change);
+                    }
+                }
             }
         }
         if(added.length()>0||rated.length()>0){JSONArray batches=data.stateArray("importBatches");JSONObject b=new JSONObject();DataStore.put(b,"id",batch);DataStore.put(b,"service",plan.service);DataStore.put(b,"at",System.currentTimeMillis());DataStore.put(b,"viewings",added);DataStore.put(b,"rated",rated);batches.put(b);
@@ -119,9 +127,13 @@ final class PhoneHistoryIo {
         JSONArray batches=data.stateArray("importBatches"),kept=new JSONArray();int n=0;
         for(JSONObject b:DataStore.objects(batches)){if(!b.optString("id").equals(batchId)){kept.put(b);continue;}
             for(int i=0;i<b.optJSONArray("viewings").length();i++){JSONArray pair=b.optJSONArray("viewings").optJSONArray(i);data.unview(pair.optString(0),pair.optString(1));n++;}
-            JSONArray rated=b.optJSONArray("rated");if(rated!=null)for(int i=0;i<rated.length();i++)data.review(rated.optString(i),0,"");}
+            JSONArray rated=b.optJSONArray("rated");if(rated!=null)for(JSONObject change:DataStore.objects(rated))synchronized(data){
+                String id=change.optString("id");JSONObject item=data.item(id),written=change.optJSONObject("written"),before=change.optJSONObject("before");
+                if(item!=null&&written!=null&&before!=null&&item.optLong("reviewAt")==change.optLong("at")&&sameReview(item.optJSONObject("review"),written))data.review10(id,before.has("rating10")?before.optInt("rating10"):before.optInt("rating")*2,before.optString("note"));
+            }}
         data.stateArray("importBatches",kept);if(lastBatch.equals(batchId))lastBatch="";data.syncSoon();return n;
     }
+    static boolean sameReview(JSONObject a,JSONObject b){return a!=null&&a.optInt("rating")==b.optInt("rating")&&a.optInt("rating10")==b.optInt("rating10")&&a.optString("note").equals(b.optString("note"));}
     /** source → {viewings, titles}. */
     Map<String,int[]> sources(){Map<String,int[]> result=new TreeMap<>();Map<String,Set<String>> titles=new HashMap<>();
         for(JSONObject i:DataStore.objects(data.items()))for(JSONObject v:DataStore.objects(i.optJSONArray("viewings"))){String s=v.optString("source","Noir");result.computeIfAbsent(s,k->new int[2])[0]++;titles.computeIfAbsent(s,k->new HashSet<>()).add(i.optString("group")+i.optString("id"));}

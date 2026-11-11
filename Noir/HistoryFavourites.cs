@@ -6,7 +6,7 @@ namespace Noir;
 public partial class MainWindow
 {
     bool HistoryLiked(VideoItem item)=>store.State.Likes.Contains(item.GroupKey)||store.EpisodesFor(item.GroupKey).Any(i=>store.State.Likes.Contains(i.Id));
-    string HistoryFavouriteLabel(VideoItem item)=>HistoryLiked(item)?T("♥ Remove from favourites","♥ إزالة من المفضلة"):T("♡ Favourite","♡ أضف إلى المفضلة");
+    string HistoryFavouriteLabel(VideoItem item)=>HistoryLiked(item)?T("[[heart-filled]] Remove from favourites","[[heart-filled]] إزالة من المفضلة"):T("[[heart]] Favourite","[[heart]] أضف إلى المفضلة");
     void ToggleHistoryFavourite(VideoItem item)
     {
         var keys=store.EpisodesFor(item.GroupKey).Select(i=>i.Id).Append(item.GroupKey).Distinct().ToList();var before=keys.Where(store.State.Likes.Contains).ToHashSet();var liked=HistoryLiked(item);
@@ -23,15 +23,15 @@ public partial class MainWindow
     }
     void AddHistoryTitleActions(ContextMenu menu,VideoItem item)
     {
-        var favourite=new MenuItem{Header=HistoryFavouriteLabel(item)};System.Windows.Automation.AutomationProperties.SetName(favourite,favourite.Header.ToString());favourite.Click+=(_,_)=>ToggleHistoryFavourite(item);menu.Items.Add(favourite);
-        var dropped=store.State.TitleStatuses.GetValueOrDefault(item.GroupKey)=="Dropped";var stop=new MenuItem{Header=dropped?T("Bring back","إعادة الإظهار"):T("Stop showing (I dropped this)","إيقاف الإظهار (توقفت عن متابعته)")};System.Windows.Automation.AutomationProperties.SetName(stop,stop.Header.ToString());stop.Click+=(_,_)=>{if(dropped)BringBack(item);else StopShowing(item);};menu.Items.Add(stop);menu.Items.Add(new Separator());
+        var favourite=new MenuItem{Header=HistoryFavouriteLabel(item)};System.Windows.Automation.AutomationProperties.SetName(favourite,IconSet.Plain(HistoryFavouriteLabel(item)));favourite.Click+=(_,_)=>ToggleHistoryFavourite(item);menu.Items.Add(favourite);
+        menu.Items.Add(new Separator());
     }
     FrameworkElement HistoryPillTabs()
     {
         var row=new WrapPanel{Margin=new(0,16,0,8)};var buttons=new List<Button>();
-        foreach(var tab in TrackerOnly?new[]{"Up next","Diary","Discover","Stats","Shows","Movies","Upcoming","Add history"}:TrackerTabs)
+        foreach(var tab in TrackerOnly?new[]{"Shows","Movies","Upcoming"}:TrackerTabs)
         {
-            var key=tab;var label=tab=="Up next"?T("Up next","التالي"):tab=="Add history"?T("Add history","أضف سجلّك"):T(tab);
+            var key=tab;var label=tab=="Up next"?T("Up next","التالي"):T(tab);
             var button=ActionButton(label,()=>{if(key=="Discover"){OpenLog(null);return;}trackerTab=key;trackerLimit=60;Render();ContentScroll.ScrollToTop();},trackerTab==key);button.Style=(Style)FindResource("Pill");button.Background=Brush(trackerTab==key?"#E4C084":"#222225");button.Foreground=Brush(trackerTab==key?"#16120C":"#C7C2BC");button.Padding=new(16,8,16,8);button.FontSize=13;button.Margin=new(0,0,8,6);System.Windows.Automation.AutomationProperties.SetName(button,label);row.Children.Add(button);buttons.Add(button);
             button.PreviewKeyDown+=(_,e)=>{var index=buttons.IndexOf(button);var step=e.Key==Key.Right?(Loc.Arabic?-1:1):e.Key==Key.Left?(Loc.Arabic?1:-1):0;if(step!=0){buttons[(index+step+buttons.Count)%buttons.Count].Focus();e.Handled=true;}};
         }

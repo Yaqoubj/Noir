@@ -26,6 +26,7 @@ public sealed class ProfileList
     public string Current {get;set;}="default";
     public bool AskOnStart {get;set;}=true;
     [System.Text.Json.Serialization.JsonIgnore] internal ProfileList? Baseline {get;set;}
+    [System.Text.Json.Serialization.JsonIgnore] public string? ReadFailurePath {get;internal set;}
 }
 public static class Profiles
 {
@@ -37,9 +38,18 @@ public static class Profiles
     static readonly JsonSerializerOptions Json=new(){WriteIndented=true,PropertyNameCaseInsensitive=true};
     public static ProfileList Load(string? root=null)
     {
-        var filePath=Path.Combine(root??Root,"profiles.json");ProfileList? list=null;
-        try{if(File.Exists(filePath))list=JsonSerializer.Deserialize<ProfileList>(File.ReadAllText(filePath),Json);}catch(Exception e)when(e is IOException or JsonException){}
+        var filePath=Path.GetFullPath(Path.Combine(root??Root,"profiles.json"));ProfileList? list=null;bool failed=false;
+        // A read can collide with Save's File.Move (sharing violation for a moment): retry briefly before calling the file unreadable,
+        // because an unreadable list blocks saves and makes the phone sync refuse PIN-protected profiles.
+        for(int attempt=0;;attempt++)
+        {
+            try{list=JsonSerializer.Deserialize<ProfileList>(File.ReadAllText(filePath),Json);if(list?.Profiles==null)throw new JsonException("The profile list is empty.");break;}
+            catch(Exception e)when(e is FileNotFoundException or DirectoryNotFoundException){break;}
+            catch(Exception e)when(e is IOException or UnauthorizedAccessException&&attempt<8){Thread.Sleep(25);}
+            catch(Exception e)when(e is IOException or JsonException or UnauthorizedAccessException){list=null;failed=true;break;}
+        }
         list??=new();
+        if(failed){list=new(){ReadFailurePath=filePath};}
         // Ids name folders (and a deleted profile's folder goes to the Recycle Bin), so anything odd is dropped.
         list.Profiles=list.Profiles.Where(p=>ValidId(p.Id)).DistinctBy(p=>p.Id).ToList();
         if(list.Profiles.All(p=>p.Id!="default"))list.Profiles.Insert(0,new(){Id="default",Name=Environment.UserName.Length>0?Environment.UserName:"Noir"});
@@ -49,10 +59,11 @@ public static class Profiles
     static ProfileList CopyList(ProfileList list)=>new(){Current=list.Current,AskOnStart=list.AskOnStart,Profiles=list.Profiles.Select(p=>new NoirProfile{Id=p.Id,Name=p.Name,Color=p.Color,PinHash=p.PinHash,LastUsed=p.LastUsed}).ToList()};
     public static void Save(ProfileList list,string? root=null)
     {
-        lock(Gate){var folder=root??Root;var filePath=Path.Combine(folder,"profiles.json");Directory.CreateDirectory(folder);
+        lock(Gate){if(list.ReadFailurePath!=null)throw new IOException("The profile list could not be read; it was left untouched at "+list.ReadFailurePath);var folder=root??Root;var filePath=Path.Combine(folder,"profiles.json");
+        var latest=Load(folder);if(latest.ReadFailurePath!=null){list.ReadFailurePath=latest.ReadFailurePath;throw new IOException("The profile list could not be read; it was left untouched at "+latest.ReadFailurePath);}Directory.CreateDirectory(folder);
         if(list.Baseline is {} before&&File.Exists(filePath))
         {
-            var latest=Load(folder);var old=before.Profiles.ToDictionary(p=>p.Id);var edited=list.Profiles.ToDictionary(p=>p.Id);
+            var old=before.Profiles.ToDictionary(p=>p.Id);var edited=list.Profiles.ToDictionary(p=>p.Id);
             latest.Profiles.RemoveAll(p=>old.ContainsKey(p.Id)&&!edited.ContainsKey(p.Id));
             foreach(var p in list.Profiles)
             {
@@ -124,7 +135,7 @@ public static class Profiles
         window.ShowDialog();
         return chosen;
     }
-    static string ReadLanguage(string id)
+    internal static string ReadLanguage(string id)
     {
         try
         {

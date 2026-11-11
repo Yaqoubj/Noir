@@ -16,7 +16,7 @@ public partial class MainWindow
             Navigate("History");UpdateLayout();await Task.Delay(200);
             var texts=Descendants(ContentPanel).OfType<TextBlock>().Select(t=>t.Text).ToList();
             Check(texts.Any(t=>t.Contains("episodes watched")),"History cards show watched counts and completion bars");
-            Check(texts.Any(t=>t.Contains("File unavailable")),"Deleted movie remains visible in History");
+            Check(texts.Any(t=>t.Contains("Not on this PC")),"Deleted movie remains visible in History");
             Check(Descendants(ContentPanel).OfType<ProgressBar>().Any(),"Poster cards have per-show progress indicators");
             CaptureLibrary(Path.Combine(store.DataDirectory,"history-cards.png"));
             var doro=store.EpisodesFor(store.Archive.First(i=>i.Title=="Dorohedoro").GroupKey);var resume=store.ContinueFor(doro);

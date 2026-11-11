@@ -15,9 +15,11 @@ import java.time.*;
 import java.util.*;
 import java.util.concurrent.*;
 
-// Everything the PC's "Add history" page does, on the phone: import files and lists, connect
+// Everything the PC's "Import" page does, on the phone: import files and lists, connect
 // Stremio, Nuvio and media servers, export, back up and restore, and undo imports or whole sources.
 public final class HistoryToolsActivity extends Activity {
+    static final String BACKUP_FAILED="Couldn't save the safety backup. History was not changed. Check storage and try again.";
+    static {Loc.AR.put(BACKUP_FAILED,"تعذر حفظ النسخة الاحتياطية الآمنة. لم يتغير السجل. تحقق من مساحة التخزين وحاول مجددًا.");}
     static final int OPEN_IMPORT=1,SAVE_EXPORT=2,SAVE_BACKUP=3,OPEN_RESTORE=4;
     final ExecutorService work=Executors.newSingleThreadExecutor();final Handler ui=new Handler(Looper.getMainLooper());
     long nuvioCursor;DataStore data;PhoneHistoryIo io;LinearLayout body;TextView status;String exportFormat="noir-json";PhoneHistoryIo.Plan plan;String paste="";volatile boolean busy;
@@ -30,10 +32,11 @@ public final class HistoryToolsActivity extends Activity {
     void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
     void say(String s){ui.post(()->{if(status!=null)status.setText(s);});}
     void render(){
+        String message=status==null?"":status.getText().toString();
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setFitsSystemWindows(true);root.setBackgroundColor(MainActivity.BLACK);root.setPadding(dp(20),dp(10),dp(20),dp(10));setContentView(root);
         LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);Button back=new Button(this);back.setText("‹");back.setTextColor(MainActivity.WHITE);back.setBackground(MainActivity.bg(MainActivity.PANEL,dp(12)));back.setContentDescription("Back");back.setOnClickListener(v->onBackPressed());header.addView(back,new LinearLayout.LayoutParams(dp(48),dp(48)));
         TextView title=text("Import, export & backup",22,MainActivity.WHITE);title.setTypeface(null,Typeface.BOLD);title.setPadding(dp(14),0,0,0);header.addView(title);root.addView(header);
-        ScrollView scroll=new ScrollView(this);body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);scroll.addView(body);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));status=text("",12,MainActivity.MUTED);root.addView(status);
+        ScrollView scroll=new ScrollView(this);body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);scroll.addView(body);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));status=text(message,12,MainActivity.MUTED);root.addView(status);
         if(plan!=null){review();return;}
         PhoneJustWatched.settings(this);
         heading("Import from another app");
@@ -207,13 +210,15 @@ public final class HistoryToolsActivity extends Activity {
 
     // ---- Automatic weekly backups in the app's own folder (kept: newest 8) ----
     static File[] autoBackups(android.content.Context c){File dir=new File(c.getExternalFilesDir(null),"backups");File[] files=dir.listFiles((d,n)->n.endsWith(".noirbackup"));if(files==null)return new File[0];Arrays.sort(files,(a,b)->Long.compare(b.lastModified(),a.lastModified()));return files;}
-    static void saveAutoBackup(android.content.Context c,DataStore data,String kind){
-        try{File dir=new File(c.getExternalFilesDir(null),"backups");dir.mkdirs();File file=new File(dir,"Noir-"+kind+"-"+LocalDate.now()+(kind.equals("auto")?"":"-"+System.currentTimeMillis())+".noirbackup");
-            try(OutputStream out=new FileOutputStream(file)){new PhoneHistoryIo(data,new DiscoveryClient(c)).writeBackup(out);}
+    static void saveAutoBackup(android.content.Context c,DataStore data,String kind)throws IOException{
+        File temp=null;
+        try{File external=c.getExternalFilesDir(null);if(external==null)throw new IOException("Storage unavailable");File dir=new File(external,"backups");if(!dir.isDirectory()&&!dir.mkdirs())throw new IOException("Backup directory unavailable");File file=new File(dir,"Noir-"+kind+"-"+LocalDate.now()+(kind.equals("auto")?"":"-"+System.currentTimeMillis())+".noirbackup");
+            temp=File.createTempFile("Noir-",".tmp",dir);try(OutputStream out=new FileOutputStream(temp)){new PhoneHistoryIo(data,new DiscoveryClient(c)).writeBackup(out);}
+            java.nio.file.Files.move(temp.toPath(),file.toPath(),java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             File[] all=autoBackups(c);int kept=0;for(File f:all)if(f.getName().startsWith("Noir-auto-")==kind.equals("auto")&&++kept>8)f.delete();
-        }catch(Exception ignored){}
+        }catch(Exception e){throw new IOException(Loc.t(BACKUP_FAILED),e);}finally{if(temp!=null&&temp.exists())temp.delete();}
     }
-    static void weekly(android.content.Context c,DataStore data){File[] all=autoBackups(c);for(File f:all)if(f.getName().startsWith("Noir-auto-")&&f.lastModified()>System.currentTimeMillis()-7*86400000L)return;if(data.items().length()>0)data.network.execute(()->saveAutoBackup(c,data,"auto"));}
+    static void weekly(android.content.Context c,DataStore data){File[] all=autoBackups(c);for(File f:all)if(f.getName().startsWith("Noir-auto-")&&f.lastModified()>System.currentTimeMillis()-7*86400000L)return;if(data.items().length()>0)data.network.execute(()->{try{saveAutoBackup(c,data,"auto");}catch(IOException e){android.util.Log.w("Noir","Automatic backup failed",e);}});}
     @Override public void onBackPressed(){if(plan!=null){plan=null;render();return;}super.onBackPressed();}
     @Override public void onDestroy(){work.shutdownNow();ui.removeCallbacksAndMessages(null);super.onDestroy();}
 }

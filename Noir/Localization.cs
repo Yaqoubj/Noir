@@ -19,6 +19,7 @@ static class Loc
     public static bool Latin(string text)=>text.Length>0&&!text.Any(c=>c>='؀'&&c<='ۿ');
     static readonly Dictionary<string,string> Ar=new()
     {
+        ["The profile list could not be read. It was left untouched at {0}. Profile changes will not be saved until it is fixed or removed."]="تعذرت قراءة قائمة الملفات الشخصية. تُركت دون تغيير في {0}. لن تُحفظ تغييرات الملفات الشخصية حتى يتم إصلاح الملف أو إزالته.",
         ["Size"]="الحجم",
         ["Free default"]="المصدر المجاني الافتراضي",
         ["Check"]="تحقق",
@@ -73,25 +74,27 @@ static class Loc
         ["Language"]="اللغة",["Phone paired"]="الهاتف متصل",["Tracker"]="المتتبع",["Your library"]="مكتبتك",
         ["YOUR LIBRARY"]="مكتبتك",["SEARCH"]="بحث",["FIND YOUR NEXT WATCH"]="اعثر على مشاهدتك التالية",["SAVED TO YOUR PC"]="محفوظ على جهازك",["PREFERENCES"]="التفضيلات",["YOUR VIEWING LIFE"]="مسيرتك في المشاهدة",["SAVED FOR LATER"]="محفوظ لوقت لاحق",
         ["Your evening, queued."]="أمسيتك، جاهزة.",
+        ["Rate show"]="قيّم المسلسل",["Rate"]="قيّم",["Stream"]="بث",["Download"]="تنزيل",["Mark watched"]="تسجيل المشاهدة",["Watched"]="شوهد",["Season watched"]="الموسم مشاهد",["Mark season watched"]="تسجيل مشاهدة الموسم",["Mark show watched"]="تسجيل مشاهدة المسلسل",["Watched up to…"]="شوهد حتى…",["Start over"]="من البداية",["Series"]="مسلسل",["Undo"]="تراجع",
+        ["[[play]]   Resume stream"]="[[play]]   استئناف البث",["[[info]]   Explore"]="[[info]]   استكشف",["MOVIE"]="فيلم",["SERIES"]="مسلسل",["SPOTLIGHT · MOVIE"]="الأبرز · فيلم",["SPOTLIGHT · SERIES"]="الأبرز · مسلسل",["ON YOUR PC"]="على جهازك",["IN MY LIST"]="في قائمتي",["IN LIBRARY"]="في المكتبة",
         // Hero
-        ["CONTINUE WATCHING"]="متابعة المشاهدة",["UP NEXT"]="التالي",["TONIGHT'S PICK"]="اختيار الليلة",["YOU JUST WATCHED"]="شاهدته للتو",["YOU FINISHED THIS SHOW"]="أنهيت هذا المسلسل",["UP NEXT · NOT ON THIS PC YET"]="التالي · ليس على جهازك بعد",
-        ["▶   Play"]="▶   تشغيل",["▶   Resume"]="▶   استئناف",["ⓘ   More info"]="ⓘ   مزيد من المعلومات",["↺   Start over"]="↺   من البداية",["↓  Get it on this PC"]="↓  نزّله على جهازك",["Downloading…"]="جارٍ التنزيل…",
-        ["★  Rate it"]="★  قيّمه",["★  Your rating"]="★  تقييمك",["↻  Watch again"]="↻  شاهده مجددًا",["Add to My List"]="إضافة إلى قائمتي",["In My List"]="في قائمتي",["＋  Add to My List"]="＋  إضافة إلى قائمتي",["✓  In My List"]="✓  في قائمتي",
+        ["CONTINUE WATCHING"]="متابعة المشاهدة",["UP NEXT"]="التالي",["TONIGHT'S PICK"]="اختيار الليلة",["YOU JUST WATCHED"]="شاهدته للتو",["YOU FINISHED THIS SHOW"]="أنهيت هذا المسلسل",["UP NEXT · NOT ON THIS PC"]="التالي · ليس على جهازك بعد",
+        ["[[play]]   Play"]="[[play]]   تشغيل",["[[play]]   Resume"]="[[play]]   استئناف",["[[info]]   More info"]="[[info]]   مزيد من المعلومات",["[[sync]]   Start over"]="[[sync]]   من البداية",["[[download]]  Get it on this PC"]="[[download]]  نزّله على جهازك",["Downloading…"]="جارٍ التنزيل…",
+        ["[[star-filled]]  Rate it"]="[[star-filled]]  قيّمه",["[[star-filled]]  Your rating"]="[[star-filled]]  تقييمك",["[[sync]]  Watch again"]="[[sync]]  شاهده مجددًا",["Add to My List"]="إضافة إلى قائمتي",["In My List"]="في قائمتي",["[[plus]]  Add to My List"]="[[plus]]  إضافة إلى قائمتي",["[[check]]  In My List"]="[[check]]  في قائمتي",
         ["Rate & note"]="التقييم والملاحظة",["Reviews & comments"]="المراجعات والتعليقات",["In My List · click to remove"]="في قائمتي · انقر للإزالة",["Year"]="السنة",["Runtime"]="مدة العرض",["More info"]="مزيد من المعلومات",
         // Home rows
-        ["Continue Watching"]="متابعة المشاهدة",["Resume where you stopped or play the next episode."]="تابع من حيث توقفت أو شغّل الحلقة التالية.",
+        ["Continue watching"]="متابعة المشاهدة",["Resume where you stopped or play the next episode."]="تابع من حيث توقفت أو شغّل الحلقة التالية.",
         ["Resume, play the next episode, or get it on this PC in one click."]="استأنف، أو شغّل الحلقة التالية، أو نزّلها على جهازك بنقرة واحدة.",
         ["Start a movie or episode. It will appear here when you return."]="ابدأ فيلمًا أو حلقة وسيظهر هنا عند عودتك.",
         ["Recently watched"]="شوهد مؤخرًا",["Recently added"]="أضيف مؤخرًا",["Genres"]="الأنواع",["Collections"]="المجموعات",["Because you watched…"]="لأنك شاهدت…",["Your shows"]="مسلسلاتك",["Your movies"]="أفلامك",["Your play queue"]="قائمة التشغيل",["See all"]="عرض الكل",
         ["Top 10 this week"]="أفضل 10 هذا الأسبوع",["Your services"]="خدماتك",["Connected to Noir. Click one to manage it."]="متصلة بـ Noir. انقر على أي منها لإدارتها.",["Most popular on Cinemeta right now."]="الأكثر شيوعًا على Cinemeta الآن.",
-        ["Coming up"]="قريبًا",["Previous"]="السابق",["More"]="المزيد",["Remove from Continue Watching"]="إزالة من متابعة المشاهدة",
+        ["Coming up"]="قريبًا",["Previous"]="السابق",["More"]="المزيد",["Remove from Continue watching"]="إزالة من متابعة المشاهدة",
         ["Up next · Ready to play"]="التالي · جاهز للتشغيل",["You're caught up"]="أنت على اطلاع",["NEW EPISODE"]="حلقة جديدة",["NEW EPISODE SOON"]="حلقة جديدة قريبًا",["DOWNLOADING"]="جارٍ التنزيل",["↓  GET IT ON THIS PC"]="↓  نزّله على جهازك",
-        ["Movie"]="فيلم",["Play"]="تشغيل",["Details & episodes"]="التفاصيل والحلقات",["Not on PC"]="ليس على الجهاز",["✓ Watched"]="✓ شوهد",["Your cinema starts here"]="سينماك تبدأ من هنا",["Add your movie and show folders in Settings."]="أضف مجلدات الأفلام والمسلسلات من الإعدادات.",["Add folders"]="إضافة مجلدات",
+        ["Movie"]="فيلم",["Play"]="تشغيل",["Details & episodes"]="التفاصيل والحلقات",["[[check]] Watched"]="[[check]] شوهد",["Your cinema starts here"]="سينماك تبدأ من هنا",["Add your movie and show folders in Settings."]="أضف مجلدات الأفلام والمسلسلات من الإعدادات.",["Add folders"]="إضافة مجلدات",
         ["No matches"]="لا نتائج",["Try another title."]="جرّب عنوانًا آخر.",["Your next watch"]="مشاهدتك التالية",["Use + My List on any title to keep it here."]="استخدم + قائمتي على أي عنوان لحفظه هنا.",
         // Filters
-        ["All genres"]="كل الأنواع",["A–Z"]="أ–ي",["+ Create collection"]="+ إنشاء مجموعة",
+        ["All genres"]="كل الأنواع",["A–Z"]="أ–ي",["[[plus]] Create collection"]="[[plus]] إنشاء مجموعة",
         // Tracker tabs
-        ["Up next"]="التالي",["Diary"]="اليوميات",["Stats"]="الإحصاءات",["Add history"]="إضافة سجل",
+        ["Up next"]="التالي",["Diary"]="اليوميات",["Stats"]="الإحصاءات",["Import"]="استيراد",["Dropped"]="متوقف",["Connect Trakt"]="ربط Trakt",["Connect Serializd"]="ربط Serializd",["Connect TorBox"]="ربط TorBox",["Connect Real-Debrid"]="ربط Real-Debrid",["Connect AIOStreams"]="ربط AIOStreams",["Sign in again"]="تسجيل الدخول مجددًا",["Files are organized as Show (Year) / Season 01 / Show (Year) S01E01.mkv."]="تُنظَّم الملفات هكذا: Show (Year) / Season 01 / Show (Year) S01E01.mkv.",["Subtitles come from the release or your subtitle source and stay beside the video for offline use."]="تأتي الترجمات من الإصدار أو من مصدر الترجمة وتبقى بجانب الفيديو للاستخدام دون اتصال.",["Automatic timing runs locally and keeps an original backup."]="يعمل الضبط التلقائي محليًا ويحتفظ بنسخة أصلية.",["Paste the API key (v3) or API Read Access Token from your TMDB account settings, then press Enter."]="الصق مفتاح API (الإصدار 3) أو رمز القراءة من إعدادات حسابك في TMDB ثم اضغط Enter.",["Dismiss"]="إغلاق",
         // Settings sections
         ["Playback"]="التشغيل",["Library"]="المكتبة",["Phone Sync"]="مزامنة الهاتف",["Community"]="المجتمع",["Advanced"]="متقدم",["English"]="English",["العربية"]="العربية",
         ["Choose the app language. Arabic mirrors the layout right to left."]="اختر لغة التطبيق. العربية تعكس الواجهة من اليمين إلى اليسار.",
@@ -103,7 +106,7 @@ static class Loc
         ["Labels beside the icons, or icons only. Automatic folds to icons in narrow windows."]="أسماء بجانب الأيقونات أو أيقونات فقط. الوضع التلقائي يكتفي بالأيقونات في النوافذ الضيقة.",
         ["Hide descriptions of episodes I haven't finished"]="إخفاء أوصاف الحلقات التي لم أكملها",
         ["titles"]="عنوان",["watched"]="مشاهدة",["Tracker only"]="المتابعة فقط",["Library & tracker"]="المكتبة والمتابعة",["Your stats"]="إحصاءاتك",["Your diary"]="يومياتك",
-        ["connected"]="متصل",["waiting to sync"]="بانتظار المزامنة",["everything is up to date"]="كل شيء محدّث",["⟳  Sync everything now"]="⟳  زامن الكل الآن",["Waiting to sync"]="بانتظار المزامنة",
+        ["connected"]="متصل",["waiting to sync"]="بانتظار المزامنة",["everything is up to date"]="كل شيء محدّث",["[[sync]]  Sync everything now"]="[[sync]]  زامن الكل الآن",["Waiting to sync"]="بانتظار المزامنة",
         ["Sync your watches"]="زامن مشاهداتك",["Kept in step automatically while Noir runs. Undo any import from Backup."]="تبقى متطابقة تلقائيًا أثناء تشغيل Noir. يمكنك التراجع عن أي استيراد من النسخ الاحتياطي.",
         ["Media servers"]="خوادم الوسائط",["Download original files and import what you've watched. Read-only: nothing on the server changes."]="نزّل الملفات الأصلية واستورد ما شاهدته. للقراءة فقط: لا يتغير شيء على الخادم.",
         ["Import history"]="استيراد السجل",["Bring in what you watched elsewhere. You review everything before it's added, and re-importing never duplicates."]="أحضر ما شاهدته في مكان آخر. تراجع كل شيء قبل إضافته، وإعادة الاستيراد لا تكرر شيئًا.",
@@ -113,23 +116,23 @@ static class Loc
         ["Connect Stremio"]="ربط Stremio",["Connect Nuvio"]="ربط Nuvio",["Switch profile"]="تبديل الملف",["Import watched"]="استيراد المشاهَد",["Test"]="اختبار",["Remove"]="إزالة",["Manage"]="إدارة",["Set up"]="إعداد",
         ["Choose file…"]="اختيار ملف…",["Add a media server"]="إضافة خادم وسائط",["Add Jellyfin / Emby"]="إضافة Jellyfin / Emby",["Connect Plex"]="ربط Plex",["waiting"]="بالانتظار",["tries"]="محاولات",["and"]="و",
         ["Don't send this one"]="لا ترسل هذا",["Check Stremio automatically"]="افحص Stremio تلقائيًا",["Check Nuvio automatically"]="افحص Nuvio تلقائيًا",["Mark my Noir watches in Nuvio"]="سجّل مشاهداتي في Nuvio",
-        ["Stream in Nuvio"]="شاهد في Nuvio",["▶  Stream in Nuvio"]="▶  شاهد في Nuvio",["▶  Stream in Stremio"]="▶  شاهد في Stremio",["Open in Nuvio on your phone"]="افتح في Nuvio على هاتفك",["Get Nuvio"]="احصل على Nuvio",["Close"]="إغلاق",
+        ["Stream in Nuvio"]="شاهد في Nuvio",["[[play]]  Stream in Nuvio"]="[[play]]  شاهد في Nuvio",["[[play]]  Stream in Stremio"]="[[play]]  شاهد في Stremio",["Open in Nuvio on your phone"]="افتح في Nuvio على هاتفك",["Get Nuvio"]="احصل على Nuvio",["Close"]="إغلاق",
         ["Scan with your phone's camera to open this title in Nuvio. Install Nuvio Desktop to open titles on this PC directly."]="امسح الرمز بكاميرا هاتفك لفتح هذا العنوان في Nuvio. ثبّت Nuvio لسطح المكتب لفتح العناوين على هذا الجهاز مباشرة.",
         ["Fix match"]="تصحيح المطابقة",["Refresh information"]="تحديث المعلومات",["Retry now"]="أعد المحاولة الآن",["reasons"]="أسباب",["retrying"]="إعادة المحاولة",["Open on "]="افتح على ",
         ["Correct match / episode numbers"]="تصحيح المطابقة / أرقام الحلقات",["Mark my watches on "]="سجّل مشاهداتي على ",["Syncing everything…"]="جارٍ مزامنة الكل…",
         // Library grid and Discover
         ["Sort"]="الترتيب",["Genre"]="النوع",["Watching"]="أشاهده",["Not started"]="لم يبدأ",["Finished"]="انتهى",["On this PC"]="على هذا الجهاز",["Everything"]="الكل",["of"]="من",["Jump to"]="انتقل إلى",
-        ["Show more"]="عرض المزيد",["remaining"]="متبقية",["episodes"]="حلقة",["Not on this PC"]="ليس على هذا الجهاز",["Resume"]="استئناف",["Clear filters"]="مسح الفلاتر",["Nothing matches"]="لا شيء مطابق",["Try another filter."]="جرّب فلترًا آخر.",
+        ["Show more"]="عرض المزيد",["remaining"]="متبقية",["episodes"]="حلقة",["Not on this PC"]="ليس على هذا الحاسوب",["Resume"]="استئناف",["Clear filters"]="مسح الفلاتر",["Nothing matches"]="لا شيء مطابق",["Try another filter."]="جرّب فلترًا آخر.",
         ["popular now"]="الرائج الآن",["popular movies"]="أفلام رائجة",["popular shows"]="مسلسلات رائجة",["Popular shows"]="مسلسلات رائجة",["Popular movies"]="أفلام رائجة",["Already in your library"]="موجود في مكتبتك",["All"]="الكل",["TV shows"]="مسلسلات",
         // Profiles
-        ["Profiles"]="الملفات الشخصية",["Who's watching?"]="من يشاهد؟",["Watching now"]="يشاهد الآن",["Switch to"]="التبديل إلى",["+ Add profile"]="+ إضافة ملف",["Switch"]="تبديل",["Edit"]="تعديل",["Delete…"]="حذف…",["Delete"]="حذف",
+        ["Profiles"]="الملفات الشخصية",["Who's watching?"]="من يشاهد؟",["Watching now"]="يشاهد الآن",["Switch to"]="التبديل إلى",["[[plus]] Add profile"]="[[plus]] إضافة ملف",["Switch"]="تبديل",["Edit"]="تعديل",["Delete…"]="حذف…",["Delete"]="حذف",
         ["New profile"]="ملف جديد",["Starts empty"]="يبدأ فارغًا",["Name"]="الاسم",["Create"]="إنشاء",["Cancel"]="إلغاء",["Save"]="حفظ",["Remove PIN"]="إزالة الرمز",["Unlock"]="فتح",["Switch profile"]="تبديل الملف",
         ["Ask who's watching when Noir starts"]="اسأل من يشاهد عند تشغيل Noir",["last used"]="آخر استخدام",["Not used yet"]="لم يُستخدم بعد",["Enter the PIN for"]="أدخل رمز",["That PIN isn't right."]="الرمز غير صحيح.",
         ["Profile saved."]="تم حفظ الملف.",["Profile created. Switch to it whenever you like."]="تم إنشاء الملف. بدّل إليه متى شئت.",["Give the profile a name."]="أعطِ الملف اسمًا.",
         ["Each profile is completely separate: its own library folders, history, settings, downloads and connections. Only one runs at a time."]="كل ملف منفصل تمامًا: مجلداته وسجله وإعداداته وتنزيلاته واتصالاته. يعمل ملف واحد فقط في كل مرة.",
         // Streaming
-        ["▶   Stream"]="▶   بث",["▶   Resume stream"]="▶   استئناف البث",["↓  Download"]="↓  تنزيل",["▶ Stream"]="▶ بث",["▶  STREAM"]="▶  بث",["▶  Stream"]="▶  بث",["▶   Stream"]="▶   بث",["↓   Download"]="↓   تنزيل",
-        ["Stream now"]="بث الآن",["Choose a stream…"]="اختر بثًا…",["Choose a stream"]="اختر بثًا",["▶ Stream next"]="▶ بث التالي",["Download to this PC"]="تنزيل على هذا الجهاز",
+        ["[[play]]   Stream"]="[[play]]   بث",["[[play]]   Resume stream"]="[[play]]   استئناف البث",["[[download]]  Download"]="[[download]]  تنزيل",["[[play]] Stream"]="[[play]] بث",["▶  STREAM"]="▶  بث",["[[play]]  Stream"]="[[play]]  بث",["[[play]]   Stream"]="[[play]]   بث",["[[download]]   Download"]="[[download]]   تنزيل",
+        ["Stream now"]="بث الآن",["Choose a stream…"]="اختر بثًا…",["Choose a stream"]="اختر بثًا",["[[play]] Stream next"]="[[play]] بث التالي",["Download to this PC"]="تنزيل على هذا الجهاز",
         ["Export"]="تصدير",["How you use Noir"]="كيف تستخدم Noir",["Running in the background"]="التشغيل في الخلفية",["Keyboard shortcuts"]="اختصارات لوحة المفاتيح",
         // Genres (Cinemeta / TVmaze names)
         ["Action"]="أكشن",["Adventure"]="مغامرة",["Animation"]="رسوم متحركة",["Anime"]="أنمي",["Biography"]="سيرة ذاتية",["Comedy"]="كوميديا",["Crime"]="جريمة",["Documentary"]="وثائقي",["Drama"]="دراما",

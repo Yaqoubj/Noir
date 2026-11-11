@@ -9,6 +9,7 @@ import java.util.*;
 final class TitleActions {
     final MainActivity a;
     Dialog dialog;NoirSheet sheet;
+    static {String[][] words={{"Watch now","شاهد الآن"},{"Stream now","بث الآن"},{"OTHER APPS","تطبيقات أخرى"},{"WATCH & ORGANIZE","المشاهدة والتنظيم"},{"DOWNLOADS","التنزيلات"},{"YOUR ACTIVITY & DETAILS","نشاطك والتفاصيل"},{"Mark watched","تحديد كمشاهد"},{"Mark unwatched","تحديد كغير مشاهد"},{"Play queue","قائمة التشغيل"},{"Collections","المجموعات"},{"Link phone file","ربط ملف الهاتف"},{"Rating & note","التقييم والملاحظة"},{"Viewing dates","تواريخ المشاهدة"},{"Comments","التعليقات"},{"Description","الوصف"},{"Correct match","تصحيح المطابقة"},{"Start over","البدء من جديد"},{"Stream in Stremio","شاهد في Stremio"},{"Stream in Nuvio","شاهد في Nuvio"}};for(String[] w:words)Loc.AR.putIfAbsent(w[0],w[1]);}
     TitleActions(MainActivity activity) { a=activity; }
 
     void dismiss() { if(dialog!=null) { Dialog old=dialog;dialog=null;sheet=null;old.dismiss(); } }
@@ -21,40 +22,42 @@ final class TitleActions {
         // The one obvious action is pinned under the list; everything else stays reachable by scrolling.
         if(!PhoneExperience.trackerOnly(a.data)){
             if(a.playable(item)) {
-                s.footerPrimary(MainActivity.position(item)>0&&!MainActivity.completed(item)?"▶ Resume · "+DataStore.time(MainActivity.position(item)):"▶ Watch now","Watch now or resume",()->choose(item,0));
+                NoirIcons.buttonIcon(s.footerPrimary(MainActivity.position(item)>0&&!MainActivity.completed(item)?Loc.t("Resume")+" · "+DataStore.time(MainActivity.position(item)):"Watch now","Watch now or resume",()->choose(item,0)),"play");
             } else if(PhoneStream.available(a)&&item.optString("imdb").matches("tt\\d+")){
-                s.footerPrimary("▶ Stream now","Stream now",()->PhoneStream.start(a,item,false));
-                s.row("≡","Choose a stream…",null,true,null,()->{dismiss();PhoneStream.start(a,item,true);});
-            } else s.footerPrimary("▶ Set up streaming","Set up streaming",()->PhoneStream.start(a,item,false));
-            if(item.optString("imdb").matches("tt\\d+")){
-                s.row("▶","Stream in Stremio",null,true,null,()->{dismiss();a.stremio(item);}).setContentDescription(Loc.t("Stream in Stremio"));
-                s.row("▶","Stream in Nuvio",null,true,null,()->{dismiss();a.nuvio(item);}).setContentDescription(Loc.t("Stream in Nuvio"));
-            }
+                NoirIcons.buttonIcon(s.footerPrimary("Stream now","Stream now",()->PhoneStream.start(a,item,false)),"play");
+                NoirIcons.row(s,"list","Choose a stream…",null,true,null,()->{dismiss();PhoneStream.start(a,item,true);});
+            } else NoirIcons.buttonIcon(s.footerPrimary("Set up streaming","Set up streaming",()->PhoneStream.start(a,item,false)),"streaming");
         }
         s.section("WATCH & ORGANIZE");
         List<NoirSheet.Tile> organize=new ArrayList<>(List.of(
-            action(MainActivity.completed(item)?"↶":"✓",MainActivity.completed(item)?"Mark unwatched":"Mark watched",()->choose(item,2)),
+            action(MainActivity.completed(item)?"undo":"check",MainActivity.completed(item)?"Mark unwatched":"Mark watched",()->choose(item,2)),
             listTile(item),
-            action("▤","Play queue",()->choose(item,7)),
-            action("◉","Viewing status",()->choose(item,8)),
-            action("▦","Collections",()->choose(item,9)),
-            action("↺","Start over",()->choose(item,1),a.playable(item))));if(PhoneExperience.trackerOnly(a.data))organize.removeIf(t->t.label.equals("Play queue")||t.label.equals("Start over"));s.tiles(3,organize);
-        if(!PhoneExperience.trackerOnly(a.data)&&!TvUi.isTv(a)){s.section("DOWNLOADS");Loc.AR.put("Download…","تنزيل…");s.row("↓","Download…",null,true,null,()->{dismiss();PhoneDownloadsActivity.open(a,item,false);});s.row("⌁","Link phone file",null,true,null,()->choose(item,3));}
+            action("queue","Play queue",()->choose(item,7)),
+            action("eye","Viewing status",()->choose(item,8)),
+            action("collections","Collections",()->choose(item,9)),
+            action("restart","Start over",()->choose(item,1),a.playable(item))));organize.removeIf(t->!t.enabled);if(PhoneExperience.trackerOnly(a.data))organize.removeIf(t->t.label.equals("Play queue")||t.label.equals("Start over"));NoirIcons.tiles(s,3,organize);
+        if(!PhoneExperience.trackerOnly(a.data)&&!TvUi.isTv(a)){s.section("DOWNLOADS");Loc.AR.put("Download…","تنزيل…");NoirIcons.row(s,"downloads","Download…",null,true,null,()->{dismiss();PhoneDownloadsActivity.open(a,item,false);});NoirIcons.row(s,"link","Link phone file",null,true,null,()->choose(item,3));}
         s.section("YOUR ACTIVITY & DETAILS");
-        s.tiles(3,List.of(
-            action("☆","Rating & note",()->{dismiss();PhoneTracker.quickRate(a,item);}),
-            action(a.data.liked(item.optString("group"))?"♥":"♡","Favourite",()->{PhoneTracker.toggleFavourite(a.data,item);dismiss();a.renderKeep();}),
-            action("◷","Viewing dates",()->choose(item,6)),
-            action("💬","Comments",()->choose(item,4)),
-            action("ⓘ","Description",()->choose(item,13)),
-            action("⌕","Correct match",()->choose(item,11))));
+        NoirIcons.tiles(s,3,List.of(
+            action("star","Rating & note",()->{dismiss();PhoneTracker.quickRate(a,item);}),
+            action(a.data.liked(item.optString("group"))?"heartfill":"heart","Favourite",()->{PhoneTracker.toggleFavourite(a.data,item);dismiss();a.renderKeep();}),
+            action("clock","Viewing dates",()->choose(item,6)),
+            action("comment","Comments",()->choose(item,4)),
+            action("info","Description",()->choose(item,13)),
+            action("search","Correct match",()->choose(item,11))));
+        // Other apps sit below Noir's own actions.
+        if(!PhoneExperience.trackerOnly(a.data)&&item.optString("imdb").matches("tt\\d+")){
+            s.section("OTHER APPS");
+            NoirIcons.row(s,"external","Stream in Stremio",null,true,null,()->{dismiss();a.stremio(item);}).setContentDescription(Loc.t("Stream in Stremio"));
+            NoirIcons.row(s,"external","Stream in Nuvio",null,true,null,()->{dismiss();a.nuvio(item);}).setContentDescription(Loc.t("Stream in Nuvio"));
+        }
         boolean dropped=item.optString("status").equals("Dropped");
         s.link(dropped?"Bring back":"Stop showing (I dropped this)",false,true,()->{if(dropped)a.tracker.bringBack(item);else a.tracker.stopShowing(item);});
         s.dialog.setOnDismissListener(d->{if(dialog==s.dialog){dialog=null;sheet=null;}});s.show();
     }
 
     void choose(JSONObject item,int option){dismiss();a.option(item,option);}
-    NoirSheet.Tile listTile(JSONObject item){NoirSheet.Tile t=action(item.optBoolean("listed")?"✓":"＋","My List",()->{JSONObject fresh=a.data.item(item.optString("id"));boolean listed=fresh!=null&&fresh.optBoolean("listed");JSONObject op=a.data.operation(item.optString("id"),"list");DataStore.put(op,"value",!listed);a.data.queue(op);a.data.syncSoon();a.listBadges(item.optString("group"),!listed);a.updateStatus();});t.state=()->{JSONObject fresh=a.data.item(item.optString("id"));return fresh!=null&&fresh.optBoolean("listed");};return t;}
+    NoirSheet.Tile listTile(JSONObject item){NoirSheet.Tile t=action(item.optBoolean("listed")?"check":"plus","My List",()->{JSONObject fresh=a.data.item(item.optString("id"));boolean listed=fresh!=null&&fresh.optBoolean("listed");JSONObject op=a.data.operation(item.optString("id"),"list");DataStore.put(op,"value",!listed);a.data.queue(op);a.data.syncSoon();a.listBadges(item.optString("group"),!listed);a.updateStatus();});t.state=()->{JSONObject fresh=a.data.item(item.optString("id"));return fresh!=null&&fresh.optBoolean("listed");};return t;}
     NoirSheet.Tile action(String icon,String label,Runnable run){return action(icon,label,run,true);}
     NoirSheet.Tile action(String icon,String label,Runnable run,boolean enabled){return new NoirSheet.Tile(icon,label,run,enabled);}
 

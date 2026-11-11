@@ -44,21 +44,23 @@ public partial class MainWindow
             Check(page=="History"&&HomeNav.Visibility==Visibility.Collapsed&&MovieNav.Visibility==Visibility.Collapsed,"Tracker only opens History and hides the file library");
             Check(new LibraryStore(store.DataDirectory).State.AppMode=="Tracker","The tracker choice persists after reopening");
             Check(NavLinks.Children.OfType<Button>().Where(b=>b.Visibility==Visibility.Visible).Take(4).SequenceEqual(new[]{HistoryNav,trackerDiaryNav!,DiscoverNav,trackerStatsNav!}),"Tracker navigation starts with Next, Diary, Discover and Stats");
-            Check(trackerLogNav?.Visibility==Visibility.Visible&&DownloadsNav.Visibility==Visibility.Collapsed&&ScanNav.Visibility==Visibility.Collapsed,"Tracker keeps Log visible and hides playback setup actions");
+            Check(trackerLogNav?.Visibility!=Visibility.Visible&&DownloadsNav.Visibility==Visibility.Collapsed&&ScanNav.Visibility==Visibility.Collapsed,"Tracker drops the rail Log button (the page header has Log) and hides playback setup actions");
             var goal=HistoryPrefs.WeeklyGoal;HistoryPrefs.WeeklyGoal=7;HistoryPrefs.Save(store.DataDirectory);Check(HistorySettings.Load(store.DataDirectory).WeeklyGoal==7,"The weekly goal persists per profile");HistoryPrefs.WeeklyGoal=goal;HistoryPrefs.Save(store.DataDirectory);
             trackerTab="Diary";Navigate("History");await Settle();Check(Descendants(ContentPanel).OfType<System.Windows.Controls.Image>().Any(),"Visual diary renders cached posters");Shot("visual-diary");
             var diaryItem=store.Archive.First(i=>store.ViewingHistory(i).Count>0);var diaryBefore=store.Snapshot([diaryItem]);store.LogRewatch(new(diaryItem,DateTimeOffset.UtcNow),"Validation");var diaryViews=store.ViewingHistory(diaryItem);var removedView=diaryViews.Last();
-            var diaryRow=DiaryRow(diaryItem,removedView);Descendants(diaryRow).OfType<Button>().First(b=>System.Windows.Automation.AutomationProperties.GetName(b)=="Remove this viewing").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            var diaryRow=DiaryRow(diaryItem,removedView);var diaryMore=Descendants(diaryRow).OfType<Button>().First(b=>System.Windows.Automation.AutomationProperties.GetName(b).StartsWith("More options for"));diaryMore.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));diaryMore.ContextMenu!.Items.OfType<MenuItem>().First(m=>IconSet.Src(m.Header)=="Remove this viewing").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));diaryMore.ContextMenu.IsOpen=false;
             Check(store.ViewingHistory(diaryItem).Count==diaryViews.Count-1&&store.ViewingHistory(diaryItem).All(v=>v.Id!=removedView.Id),"Diary delete removes only that viewing");
             Descendants(undoBar!).OfType<Button>().First(b=>b.Content as string=="Undo").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));Check(store.ViewingHistory(diaryItem).Count==diaryViews.Count,"Diary Undo restores the deleted viewing");store.Restore(diaryBefore);
             trackerTab="Stats";Navigate("History");await Settle();Check(Descendants(ContentPanel).OfType<TextBlock>().Any(t=>t.Text=="Year in review"),"Stats includes a year in review");Shot("year-review");
-            SetLanguage("ar");await Settle();Check(PageTitle.Text=="حكاية مشاهداتك"&&SearchPlaceholder.Text=="ابحث في سجلك"&&PageEyebrow.Text=="حكاية مشاهداتك"&&Descendants(ContentPanel).OfType<TextBlock>().Any(t=>t.Text=="حصاد السنة"),"New History labels have Arabic translations");Shot("history-ar");SetLanguage("en");
+            SetLanguage("ar");await Settle();Check(PageTitle.Text=="السجل"&&SearchPlaceholder.Text=="ابحث في سجلك"&&Descendants(ContentPanel).OfType<TextBlock>().Any(t=>t.Text=="حصاد السنة"),"New History labels have Arabic translations");Shot("history-ar");SetLanguage("en");
             DiscoverNav.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));await Settle();Check(logging,"Tracker Discover opens the quick logging search");CloseLog();
             Navigate("Home");Check(page=="History","Home leads to History in tracker mode");
             Navigate("Shows");Check(page=="History"&&trackerTab=="Shows","Shows opens the tracker's Shows tab");
             trackerTab="Up next";Navigate("History");await Settle();Shot("tracker-only");
-            var order=ContentPanel.Children.OfType<FrameworkElement>().ToList();var watchIndex=order.FindIndex(e=>e.Tag as string=="HistoryWatchNext");var recentIndex=order.FindIndex(e=>e.Tag as string=="HistoryRecentlyWatched");var statsIndex=order.FindIndex(e=>e.Tag as string=="HistoryStatsStrip");Check(watchIndex>=0&&recentIndex==watchIndex+1&&statsIndex>recentIndex,"Tracker-only puts Recently watched directly after Watch next and stats below both");
-            var selectedPill=Descendants(ContentPanel).OfType<Button>().First(b=>b.Content as string=="Up next");Check(selectedPill.Background.ToString()=="#FFE4C084","Tracker-only highlights the selected pill in gold");
+            var order=ContentPanel.Children.OfType<FrameworkElement>().ToList();var watchIndex=order.FindIndex(e=>e.Tag as string=="HistoryWatchNext");var recentIndex=order.FindIndex(e=>e.Tag as string=="HistoryRecentlyWatched");var statsIndex=order.FindIndex(e=>e.Tag as string=="HistoryStatsStrip");Check(watchIndex>=0&&recentIndex==watchIndex+1&&statsIndex>recentIndex,"Tracker-only puts Recently watched directly after Up next and stats below both");
+            // U4: the tracker rail already holds Next, Diary, Discover and Stats, so the pill row offers only the other destinations.
+            Check(!Descendants(ContentPanel).OfType<Button>().Any(b=>b.Content as string is "Up next" or "Diary" or "Stats" or "Import"),"Tracker-only pills never repeat a rail destination");
+            trackerTab="Shows";Render();await Settle();var selectedPill=Descendants(ContentPanel).OfType<Button>().First(b=>b.Content as string=="Shows");Check(selectedPill.Background.ToString()=="#FFE4C084","Tracker-only highlights the selected pill in gold");trackerTab="Up next";Render();await Settle();
 
             var continuation=TrackedShows().First(t=>t.Status=="Watching"&&t.Next!=null);var continuationItem=continuation.Next!;var countBefore=store.ViewingHistory(continuationItem).Count;var continuationCard=TrackerRow(continuation,false);
             Descendants(continuationCard).OfType<Button>().Single(b=>System.Windows.Automation.AutomationProperties.GetName(b)=="Mark "+continuationItem.EpisodeLabel+" watched").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));await Settle(600);
@@ -67,7 +69,7 @@ public partial class MainWindow
             settingsSection="Profile";Navigate("Settings");await Settle();Shot("settings-mode");
             ChooseAppMode("Library");Check(HomeNav.Visibility==Visibility.Visible,"Switching back restores the library pages");
             // Smart check-offs, driven through the real popups.
-            Button Find(string text)=>Descendants(((Border)smartPopup!.Child).Child).OfType<Button>().First(b=>(b.Content as string??"").StartsWith(text));
+            Button Find(string text)=>Descendants(((Border)smartPopup!.Child).Child).OfType<Button>().First(b=>IconSet.Src(b.Content).StartsWith(text));
             void Press(string text){Find(text).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));}
             var all=store.EpisodesFor(key).Where(i=>i.Season>0&&store.Aired(i,DateTimeOffset.UtcNow)).OrderBy(i=>i.Season).ThenBy(i=>i.Episode).ToList();
             var target=all[Math.Min(5,all.Count-1)];store.Unwatch(all.Where(i=>LibraryStore.Before(i,target)||i==target));
@@ -81,7 +83,7 @@ public partial class MainWindow
             Check(!store.ViewingHistory(target)[0].DateUnknown,"The tapped episode is dated now");
             var middle=earlier[earlier.Count/2];store.Unwatch([middle,earlier[earlier.Count/2+1]]);Navigate("History");await Settle();
             Check(Descendants(ContentPanel).OfType<Button>().Any(b=>(b.Content as string??"").StartsWith("Skipped ")),"Up next offers to fill a skipped episode");Shot("smart-gap");
-            var views=store.ViewingHistory(target).Count;SmartWatchedClick(target);Press("↻  Log a rewatch");await Settle();
+            var views=store.ViewingHistory(target).Count;SmartWatchedClick(target);Press("[[sync]]  Log a rewatch");await Settle();
             Check(store.ViewingHistory(target).Count==views+1,"An already-watched check offers a rewatch");
             SmartWatchedClick(earlier[0]);Press("Remove from history");await Settle(200);Check(smartPopup!=null,"Removing an early episode asks about the later ones");
             Press("Just ");await Settle();Check(!store.EverWatched(earlier[0])&&store.EverWatched(target),"Just this one leaves later episodes checked");
@@ -89,7 +91,7 @@ public partial class MainWindow
             Check(ShowEpisodes(target).All(store.EverWatched),"Mark whole show checks off every released episode");
             Check(undoBar!=null&&Descendants(undoBar).OfType<TextBlock>().Any(t=>t.Text.Contains("rating")),"Finishing the show offers a rating");Shot("smart-finished");
             // Adding history: quick add, a pasted list, grouped review, approximate dates, no "recent" intrusion.
-            trackerTab="Add history";Navigate("History");var wait=DateTime.UtcNow.AddSeconds(25);while(addTitles==null&&DateTime.UtcNow<wait)await Task.Delay(200);await Settle(1200);
+            trackerTab="Import";Navigate("History");var wait=DateTime.UtcNow.AddSeconds(25);while(addTitles==null&&DateTime.UtcNow<wait)await Task.Delay(200);await Settle(1200);
             Check(addTitles?.Count>0,"Quick add shows popular titles to tap");Shot("add-quick");
             var popular=addTitles!.First(t=>!t.IsMovie&&TrackedGroup(t)==null);picks[popular.Id]=new(popular,0,0);
             pasteText="Inception (2010)\nThe Office S2\nArrival";await ReviewPicks();

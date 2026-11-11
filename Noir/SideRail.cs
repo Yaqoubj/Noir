@@ -5,7 +5,7 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 
 namespace Noir;
-// The side rail: every page with an icon and label, a profile card and the language switch.
+// The side rail: every page with an icon and label, a profile card (the language switch lives in its menu).
 // Narrow windows (or the toggle) fold it to icons only; Arabic puts it on the right.
 public partial class MainWindow
 {
@@ -26,7 +26,7 @@ public partial class MainWindow
         navItems.Clear();
         foreach(var (button,label,glyph) in NavPages)
         {
-            var icon=new Border{Width=26,Height=24,Child=button==DownloadsNav?DownloadIcon(lastDownloadCount):Icon(glyph,19)};
+            var icon=new Border{Width=26,Height=24,Child=Icon(glyph,19)};
             var text=new TextBlock{Text=T(label),FontSize=Density.NavFont,Margin=new(14,0,0,0),VerticalAlignment=VerticalAlignment.Center,TextTrimming=TextTrimming.CharacterEllipsis};
             var row=new StackPanel{Orientation=Orientation.Horizontal};row.Children.Add(icon);row.Children.Add(text);
             button.Content=row;navItems[button]=(label,text,icon);System.Windows.Automation.AutomationProperties.SetName(button,T(label));
@@ -56,24 +56,13 @@ public partial class MainWindow
         {
             item.Text.Visibility=railCompact?Visibility.Collapsed:Visibility.Visible;
             button.HorizontalContentAlignment=railCompact?HorizontalAlignment.Center:HorizontalAlignment.Left;
-            button.ToolTip=railCompact?T(item.Label):button==DownloadsNav&&lastDownloadCount>0?$"{T("Downloads")} · {lastDownloadCount}":null;
+            button.ToolTip=railCompact?T(item.Label):null;
         }
         NavDivider.Margin=new(railCompact?8:12,12,railCompact?8:12,12);BuildRailFooter();
     }
     void BuildRailFooter()
     {
         RailFooter.Children.Clear();
-        // Language: a two-way segmented switch; the narrow rail shows one button for the other language.
-        var languages=new Border{Background=Brush("#16FFFFFF"),CornerRadius=new(10),Padding=new(3),Margin=new(0,0,0,12)};
-        var segments=new System.Windows.Controls.Primitives.UniformGrid{Columns=railCompact?1:2,Rows=1};languages.Child=segments;
-        foreach(var (code,label,shortLabel) in new[]{("en","English","EN"),("ar","العربية","ع")}.Where(l=>!railCompact||l.Item1!=store.State.Language))
-        {
-            var on=store.State.Language==code&&!railCompact;
-            var b=new Button{Content=railCompact?shortLabel:label,Padding=new(railCompact?0:10,7,railCompact?0:10,7),FontSize=12.5,Background=Brush(on?"#F4F1EB":"Transparent"),Foreground=Brush(on?"#111113":"#C7C2BC"),FontWeight=on?FontWeights.SemiBold:FontWeights.Normal,ToolTip=T("Language")+" · "+label};
-            b.FlowDirection=code=="ar"?FlowDirection.RightToLeft:FlowDirection.LeftToRight;
-            System.Windows.Automation.AutomationProperties.SetName(b,T("Language")+" "+label);b.Click+=(_,_)=>SetLanguage(code);b.HorizontalContentAlignment=HorizontalAlignment.Center;b.Margin=new(1);segments.Children.Add(b);
-        }
-        RailFooter.Children.Add(languages);
         // Profile: who this library belongs to and how much it holds; opens your stats.
         var name=ProfileName;
         var avatar=Profiles.Avatar(DisplayProfile,38);

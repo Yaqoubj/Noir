@@ -349,6 +349,7 @@ public sealed partial class LibraryStore
     {
         lock(gate){foreach(var e in EntriesFor(group).Where(e=>e.Item.ImdbId.Length==0))e.Item.ImdbId=imdb;Save();}
     }
+    internal Action? RegisterDownloadLocked {get;set;}
     public void RegisterDownload(VideoItem item,string path)
     {
         lock(gate)
@@ -356,7 +357,8 @@ public sealed partial class LibraryStore
             if(item.Id.Length==0)item.Id=Guid.NewGuid().ToString("N");
             if(!State.Catalog.TryGetValue(item.Id,out var entry)){item.Path=path;item.Available=true;entry=new(){Item=item,Fingerprint=Fingerprint(path)};State.Catalog[item.Id]=entry;}
             entry.Item.Path=path;entry.Item.Available=true;if(!entry.Paths.Contains(path,StringComparer.OrdinalIgnoreCase))entry.Paths.Add(path);
-            Scan(out _);Save();
+            RegisterDownloadLocked?.Invoke();
         }
+        Scan(out _);Save();
     }
 }

@@ -29,7 +29,7 @@ public partial class MainWindow
     };
     Button CardMenu(VideoItem item)
     {
-        var button=new Button {Content="⋯",Width=Density.MoreWidth,Height=Density.MoreHeight,FontSize=Density.MoreFont,Padding=new(0),Background=Brush("#D9101012"),HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Top,Margin=new(8),ToolTip="Options for "+item.Label};
+        var button=new Button {Content="[[more]]",Width=Density.MoreWidth,Height=Density.MoreHeight,FontSize=Density.MoreFont,Padding=new(0),Background=Brush("#D9101012"),HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Top,Margin=new(8),ToolTip="Options for "+item.Label};
         System.Windows.Automation.AutomationProperties.SetName(button,"Options for "+item.Label);
         button.Click+=(_,e)=>{e.Handled=true;var menu=ItemMenu(item);menu.PlacementTarget=button;menu.Placement=PlacementMode.Bottom;menu.IsOpen=true;};
         // Shown only while the pointer is over the card (or it has focus), so rows stay clean.
@@ -37,7 +37,8 @@ public partial class MainWindow
         button.GotKeyboardFocus+=(_,_)=>button.Opacity=1;button.LostKeyboardFocus+=(_,_)=>button.Opacity=0;
         return button;
     }
-    FrameworkElement ContinueShelf(IEnumerable<UpNext> videos,string label="Continue Watching",string subtitle="Pick up from your saved time, or play the next episode.")
+    // U31 (P4): "See all" is the header link only; the trailing "See all" tile a rail adds beside it is dropped.
+    FrameworkElement ContinueShelf(IEnumerable<UpNext> videos,string label="Continue watching",string subtitle="Pick up from your saved time, or play the next episode.")
     {
         if(page!="Home")return Rail(label,subtitle,videos.Select(entry=>HoverCard(Lift(ContinueCard(entry.Item,entry)),store.EpisodesFor(entry.Item.GroupKey))).ToList());
         var layout=HomeLayout.Load(store.DataDirectory);homePosterTitles=layout.ShowPosterTitles;return Rail(label,subtitle,videos.Select(entry=>HomeContinueCard(entry,layout.ContinueStyle!="Poster")).ToList(),()=>{trackerTab="Up next";Navigate("History");});
@@ -52,7 +53,7 @@ public partial class MainWindow
         picture.Children.Add(new Border{IsHitTestVisible=false,Background=new LinearGradientBrush(Colors.Transparent,Color.FromArgb(235,11,11,13),90)});var caption=new StackPanel{Margin=new(14,0,14,14),VerticalAlignment=VerticalAlignment.Bottom,IsHitTestVisible=false};
         if(wide)caption.Children.Add(HomeTitleMark(item,48,250,19));else if(homePosterTitles)caption.Children.Add(Text(item.Title,15,weight:FontWeights.SemiBold));
         var episode=item.IsMovie?"":T("S{0} E{1}","م{0} ح{1}",item.Season,item.Episode);var remaining=progress is {Completed:false,Position:>0,Duration:>0}?Loc.MinutesLeft(Math.Max(1,(int)Math.Ceiling((progress.Duration-progress.Position)/60))):entry.Kind==UpNextKind.Upcoming?T("Coming soon","قريبًا"):entry.Kind==UpNextKind.NotOnPc?job!=null?T("Downloading…","جارٍ التنزيل…"):T("Not on this PC","ليس على هذا الكمبيوتر"):T("Ready to play","جاهز للمشاهدة");var line=Text(string.Join(" · ",new[]{episode,remaining}.Where(x=>x.Length>0)),12,"#D9D4CC");caption.Children.Add(line);picture.Children.Add(caption);
-        picture.Children.Add(CardMenu(item));var remove=ActionButton("✕",()=>{store.State.HiddenContinue.Add(item.GroupKey);store.Save();Render();Undoable(T("Hidden from Continue watching","أُخفي من متابعة المشاهدة"),()=>{store.State.HiddenContinue.Remove(item.GroupKey);store.Save();Render();});});remove.HorizontalAlignment=HorizontalAlignment.Left;remove.VerticalAlignment=VerticalAlignment.Top;remove.Margin=new(8);remove.Width=30;remove.Height=30;remove.Padding=new(0);remove.Opacity=0;System.Windows.Automation.AutomationProperties.SetName(remove,T("Hide {0} from Continue watching","إخفاء {0} من متابعة المشاهدة",item.Title));picture.Children.Add(remove);RevealOnFocus(panel,remove);
+        picture.Children.Add(CardMenu(item));var remove=ActionButton("[[close]]",()=>{store.State.HiddenContinue.Add(item.GroupKey);store.Save();Render();Undoable(T("Hidden from Continue watching","أُخفي من متابعة المشاهدة"),()=>{store.State.HiddenContinue.Remove(item.GroupKey);store.Save();Render();});});remove.HorizontalAlignment=HorizontalAlignment.Left;remove.VerticalAlignment=VerticalAlignment.Top;remove.Margin=new(8);remove.Width=30;remove.Height=30;remove.Padding=new(0);remove.Opacity=0;System.Windows.Automation.AutomationProperties.SetName(remove,T("Hide {0} from Continue watching","إخفاء {0} من متابعة المشاهدة",item.Title));picture.Children.Add(remove);RevealOnFocus(panel,remove);
         if(progress is {Completed:false,Position:>0,Duration:>0})picture.Children.Add(new ProgressBar{Maximum=progress.Duration,Value=progress.Position,Height=3,VerticalAlignment=VerticalAlignment.Bottom,Foreground=Brush("#E4C084"),Background=Brush("#55000000"),IsHitTestVisible=false,BorderThickness=new(0)});
         var edge=new Border{CornerRadius=new(12),ClipToBounds=true,Child=picture,BorderBrush=Brush("Transparent"),BorderThickness=new(1.5)};panel.Children.Add(edge);LazyMenu(panel,item);return FollowHomeHero(Lift(panel,edge),()=>item);
     }
