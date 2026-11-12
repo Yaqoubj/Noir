@@ -19,7 +19,7 @@ final class NoirIcons {
             case "language":return R.drawable.ic_noir_language;case "size":return R.drawable.ic_noir_size;case "tips":return R.drawable.ic_noir_tips;case "about":return R.drawable.ic_noir_about;case "clock":return R.drawable.ic_noir_clock;
             case "play":return R.drawable.ic_noir_play;case "pause":return R.drawable.ic_noir_pause;case "back10":return R.drawable.ic_noir_back10;case "fwd10":return R.drawable.ic_noir_fwd10;case "next":return R.drawable.ic_noir_next;case "plus":return R.drawable.ic_noir_plus;
             case "undo":return R.drawable.ic_noir_undo;case "queue":return R.drawable.ic_noir_queue;case "eye":return R.drawable.ic_noir_eye;case "collections":return R.drawable.ic_noir_collections;case "link":return R.drawable.ic_noir_link;case "star":return R.drawable.ic_noir_star;
-            case "heart":return R.drawable.ic_noir_heart;case "heartfill":return R.drawable.ic_noir_heartfill;case "comment":return R.drawable.ic_noir_comment;case "info":return R.drawable.ic_noir_info;case "restart":return R.drawable.ic_noir_restart;case "external":return R.drawable.ic_noir_external;
+            case "heart":return R.drawable.ic_noir_heart;case "heartfill":return R.drawable.ic_noir_heartfill;case "comment":return R.drawable.ic_noir_comment;case "info":return R.drawable.ic_noir_info;case "restart":return R.drawable.ic_noir_restart;case "external":return R.drawable.ic_noir_external;case "close":return R.drawable.ic_noir_close;case "chevron":return R.drawable.ic_noir_chevron;case "keyup":return R.drawable.ic_noir_keyup;case "keydown":return R.drawable.ic_noir_keydown;case "keyleft":return R.drawable.ic_noir_keyleft;case "keyright":return R.drawable.ic_noir_keyright;
             default:return 0;
         }
     }

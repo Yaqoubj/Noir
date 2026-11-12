@@ -4,6 +4,7 @@ import android.content.*;
 import android.content.res.Configuration;
 import android.graphics.*;
 import android.graphics.drawable.GradientDrawable;
+import android.text.SpannableStringBuilder;
 import android.util.LruCache;
 import android.view.*;
 import android.widget.*;
@@ -18,7 +19,7 @@ import java.util.concurrent.*;
 public final class TvUi {
     private TvUi(){}
     // Player labels for its TV-only branch (PlayerPrefs.t falls back to Loc).
-    static {Loc.AR.put("Audio & subtitles","الصوت والترجمة");Loc.AR.put("▲ Audio & subtitles  ·  ▼ Chapters  ·  With controls hidden, ◀ ▶ seek (hold for faster)","▲ الصوت والترجمة  ·  ▼ الفصول  ·  عند إخفاء عناصر التحكم، ◀ ▶ للتقديم والإرجاع (اضغط مطولًا للإسراع)");}
+    static {Loc.AR.put("Audio & subtitles","الصوت والترجمة");Loc.AR.putIfAbsent("Movie","فيلم");Loc.AR.put("▲ Audio & subtitles  ·  ▼ Chapters  ·  With controls hidden, ◀ ▶ seek (hold for faster)","▲ الصوت والترجمة  ·  ▼ الفصول  ·  عند إخفاء عناصر التحكم، ◀ ▶ للتقديم والإرجاع (اضغط مطولًا للإسراع)");}
     public static final int BLACK=Color.rgb(12,12,14),PANEL=Color.rgb(27,27,30),RAISED=Color.rgb(40,40,44),GOLD=Color.rgb(228,192,132),WHITE=Color.rgb(244,241,235),MUTED=Color.rgb(160,157,151);
     /** Tile sizes in dp. Posters are 2:3, landscape tiles 16:9. */
     public static final int POSTER_W=120,POSTER_H=180,WIDE_W=200,WIDE_H=112;
@@ -81,8 +82,21 @@ public final class TvUi {
         a.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BLACK));return root;
     }
     public static TextView text(Context c,String s,float sp,int color,boolean bold){
-        TextView t=new TextView(c);t.setText(s);t.setTextSize(sp);t.setTextColor(color);if(bold)t.setTypeface(Typeface.DEFAULT_BOLD);t.setIncludeFontPadding(false);return t;
+        TextView t=new TextView(c);t.setTextSize(sp);t.setTextColor(color);if(bold)t.setTypeface(Typeface.DEFAULT_BOLD);t.setIncludeFontPadding(false);setGlyphs(t,s);return t;
     }
+    /** U114: the text characters used as icons (✓ ✕ ＋ ▲ ▼ ◀ ▶ ›) are drawn as icons inside the text, sized and colored like it. The characters stay in the text, so screen readers and tests still see them. › points forward, so it mirrors in Arabic; ▲ ▼ ◀ ▶ name remote keys and keep their direction. */
+    static void setGlyphs(TextView v,CharSequence s){v.setText(glyphs(v,s));}
+    static CharSequence glyphs(TextView into,CharSequence s){
+        if(s==null)return "";SpannableStringBuilder out=null;int size=Math.round(into.getTextSize()*1.05f);
+        for(int i=0;i<s.length();i++){String name=glyph(s.charAt(i));if(name==null)continue;if(out==null)out=new SpannableStringBuilder(s);android.graphics.drawable.Drawable d=NoirIcons.drawable(into.getContext(),name,into.getCurrentTextColor());d.setBounds(0,0,size,size);if(Loc.arabic)d.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);out.setSpan(new android.text.style.ImageSpan(d,Build.VERSION.SDK_INT>=29?android.text.style.DynamicDrawableSpan.ALIGN_CENTER:android.text.style.DynamicDrawableSpan.ALIGN_BASELINE),i,i+1,android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);}
+        return out==null?s:out;
+    }
+    static String glyph(char c){switch(c){case '✓':return "check";case '✕':return "close";case '＋':return "plus";case '▲':return "keyup";case '▼':return "keydown";case '◀':return "keyleft";case '▶':return "keyright";case '›':return "chevron";default:return null;}}
+    /** U112: in Arabic a TV dialog gets a right-to-left frame: title on the right (even an English title, as on Home), buttons from the right. Fields that hold addresses, codes or digits set their own left-to-right direction. Call before show(). */
+    static <D extends Dialog> D frame(D d){if(Loc.arabic&&d.getWindow()!=null){View decor=d.getWindow().getDecorView();decor.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);decor.setTextDirection(View.TEXT_DIRECTION_RTL);
+            /* The TV button bar pins its direction to the system locale; let it follow the frame once the dialog content is in place. */
+            decor.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener(){public void onViewAttachedToWindow(View v){for(int id:new int[]{android.R.id.button1,android.R.id.button2,android.R.id.button3}){View b=v.findViewById(id);if(b!=null&&b.getParent() instanceof View)((View)b.getParent()).setLayoutDirection(View.LAYOUT_DIRECTION_INHERIT);}}public void onViewDetachedFromWindow(View v){}});}return d;}
+    static AlertDialog show(AlertDialog.Builder b){AlertDialog d=frame(b.create());d.show();return d;}
 
     /** Makes any view a TV focus target: grows a little and gets a gold ring while focused; OK/Enter runs the click. */
     public static void focusable(View v,int fill,int radiusPx){

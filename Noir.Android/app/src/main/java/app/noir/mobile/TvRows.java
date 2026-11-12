@@ -43,7 +43,7 @@ final class TvRows {
         candidates.sort((x,y)->{boolean a=x.kind.equals(NoirUi.UPCOMING),b=y.kind.equals(NoirUi.UPCOMING);return a!=b?(a?1:-1):Long.compare(y.activity,x.activity);});
         for(NoirUi.Next n:candidates){JSONObject i=n.item;boolean resume=MainActivity.position(i)>0&&!MainActivity.completed(i);String sub=i.optBoolean("movie")?"":MainActivity.episode(i)+" · ";sub+=resume?Loc.t("Resume")+" "+DataStore.time(MainActivity.position(i)):n.kind.equals(NoirUi.UPCOMING)?Loc.t("Coming up"):Loc.t("Next episode");(resume?continuing:next).add(new Tile(i,sub));}
         if(!continuing.tiles.isEmpty())rows.add(continuing);if(!next.tiles.isEmpty())rows.add(next);
-        Map<String,Row> available=new LinkedHashMap<>();Row r=new Row("ready","Ready",false,false);for(Tile t:ready)r.add(t);available.put(r.id,r);
+        Map<String,Row> available=new LinkedHashMap<>();Row r=new Row("ready","Keep ready",false,false);for(Tile t:ready)r.add(t);available.put(r.id,r);
         r=new Row("list","My List",false,false);for(Tile t:listed)r.add(t);available.put(r.id,r);
         List<SmartLists.Title> titles=new ArrayList<>();for(List<JSONObject> g:groups)titles.add(SmartLists.read(g,settings,credits.getOrDefault(g.get(0).optString("group"),Collections.emptyList()),this::smartPlayable));
         Map<String,List<SmartLists.Pick>> smart=SmartLists.build(titles,now,Loc.arabic);
