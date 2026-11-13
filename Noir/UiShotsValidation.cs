@@ -14,6 +14,8 @@ namespace Noir;
 // --ui-shots <out-dir> [--ui-screens a,b,c] [--ui-sizes 940,1320]: each screen at each width x 844 client pixels, English and Arabic, Compact and Comfortable.
 // Runs on a copied profile only (the validation runner's rule); it never writes the real one. No real network call: Discover uses fixture handlers, downloads use a fake provider.
 // Separate popups, context menus and windows are copied from their own screen rectangle and saved as <screen>-popup-...
+// --ui-render draws every capture from Noir's own visuals instead of copying the screen: for runs on a hidden desktop
+// (work/run-hidden.ps1), where nothing reaches the screen. The player's video frame is not drawn in that mode.
 public partial class MainWindow
 {
     System.Threading.ManualResetEventSlim? statsGate; // held while a stats capture waits (HistoryStats.BeginStatsWork)
@@ -56,6 +58,7 @@ public partial class MainWindow
             .ToArray();
         if (sizes == null || sizes.Length == 0)
             sizes = [940, 1320];
+        var renderOnly = args.Contains("--ui-render");
         var log = new List<string>();
         void Note(string m)
         {
@@ -149,7 +152,7 @@ public partial class MainWindow
                 }
             } // SRCCOPY only: CAPTUREBLT also copies VLC's leftover overlay window (black over later library screens); the overlay is drawn in below instead
             // Another app's window over Noir (e.g. a full-screen night overlay) makes a screen copy useless: render Noir's own visual instead and say so.
-            if (source is { ActualWidth: > 1, ActualHeight: > 1 } && CoveredByOtherApp(c))
+            if (source is { ActualWidth: > 1, ActualHeight: > 1 } && (renderOnly || CoveredByOtherApp(c)))
             {
                 using (var g = Drawing.Graphics.FromImage(bitmap))
                     g.Clear(Drawing.Color.FromArgb(0x0B, 0x0B, 0x0D));
@@ -160,7 +163,8 @@ public partial class MainWindow
                     y,
                     ReferenceEquals(source, LibraryRoot) && LibraryRoot.Parent is Grid host ? host : source
                 );
-                Note($"RENDERED {name}: the screen is covered by another app; drawn from Noir's own visual");
+                if (!renderOnly)
+                    Note($"RENDERED {name}: the screen is covered by another app; drawn from Noir's own visual");
             }
             // The player's controls live in VLC's separate overlay window, which a screen copy misses: draw that visual over the video frame.
             if (overlay is { ActualWidth: > 1, ActualHeight: > 1 })
@@ -313,6 +317,7 @@ public partial class MainWindow
             new RoutedEventHandler((sender, _) => lastMenu = sender as ContextMenu)
         );
         var pops = new List<FrameworkElement>();
+        byte[]? homeLayoutBackup = null; // the copy's own Home layout while a tile-size capture has changed it
         var skip = false;
         var onlyPopups = false;
         // Opens a menu by clicking a button that builds one, and registers it for a popup copy.
@@ -552,6 +557,15 @@ public partial class MainWindow
         {
             statsGate?.Set();
             statsGate = null;
+            if (homeLayoutBackup != null)
+            {
+                var layoutPath = Path.Combine(store.DataDirectory, "home-layout.json");
+                if (homeLayoutBackup.Length == 0)
+                    File.Delete(layoutPath);
+                else
+                    File.WriteAllBytes(layoutPath, homeLayoutBackup);
+                homeLayoutBackup = null;
+            }
             DropFixture();
             CloseAllSheets();
             CloseShortcutSheet();
@@ -859,6 +873,24 @@ public partial class MainWindow
         // Home
         AddNow("home", () => Navigate("Home"));
         AddNow("home-end", () => Navigate("Home"), 1);
+        // Edit Home → Tile size: Home drawn with small and large tiles (the layout file is put back in Reset).
+        foreach (var (size, scroll) in new[] { ("S", 0d), ("S", .25), ("L", 0d), ("L", .25) })
+            AddNow(
+                "home-size-" + size.ToLowerInvariant() + (scroll > 0 ? "-rows" : ""),
+                () =>
+                {
+                    var layoutPath = Path.Combine(store.DataDirectory, "home-layout.json");
+                    homeLayoutBackup ??= File.Exists(layoutPath) ? File.ReadAllBytes(layoutPath) : [];
+                    var layout = HomeLayout.Load(store.DataDirectory);
+                    layout.CardSize = size;
+                    layout.Save(store.DataDirectory);
+                    Navigate("Home");
+                },
+                scroll
+            );
+        // The whole page in steps, for reviewing Home top to bottom.
+        foreach (var stop in new[] { 1, 2, 3, 4, 5, 6, 7 })
+            AddNow("home-walk" + stop, () => Navigate("Home"), stop / 8d);
         Add("home-edit", async () =>
         {
             Navigate("Home");
@@ -974,6 +1006,24 @@ public partial class MainWindow
             },
             1
         );
+        // The poster's hover actions, shown on every card of the page so a still picture can show them.
+        Add(
+            "discover-hover",
+            async () =>
+            {
+                SearchBox.Text = "";
+                Navigate("Discover");
+                await Settle(900);
+                foreach (
+                    var quick in Descendants(ContentPanel).OfType<Grid>().Where(g => Equals(g.Tag, "DiscoverQuickActions"))
+                )
+                {
+                    quick.BeginAnimation(OpacityProperty, null);
+                    quick.Opacity = 1;
+                }
+            },
+            .5
+        );
         Add("discover-search", async () =>
         {
             Navigate("Discover");
@@ -1037,6 +1087,8 @@ public partial class MainWindow
         // History
         AddNow("history-upnext", () => History("Up next"));
         AddNow("history-upnext-end", () => History("Up next"), 1);
+        AddNow("history-upnext-walk1", () => History("Up next"), 1 / 3d);
+        AddNow("history-upnext-walk2", () => History("Up next"), 2 / 3d);
         AddNow("history-shows", () => History("Shows"));
         AddNow("history-movies", () => History("Movies"));
         AddNow("history-diary", () => History("Diary"));
@@ -1117,6 +1169,25 @@ public partial class MainWindow
             downloadsTab = "On this PC";
             Navigate("Downloads");
         });
+        AddNow("downloads-keep-ready", () =>
+        {
+            downloadsTab = "Keep ready";
+            Navigate("Downloads");
+        });
+        // Both Downloads tabs in steps, for reviewing the page top to bottom.
+        foreach (var stop in new[] { 1, 2, 3 })
+        {
+            AddNow("downloads-walk" + stop, () => Navigate("Downloads"), stop / 3d);
+            AddNow(
+                "downloads-pc-walk" + stop,
+                () =>
+                {
+                    downloadsTab = "On this PC";
+                    Navigate("Downloads");
+                },
+                stop / 3d
+            );
+        }
         Add("downloads-popover", async () =>
         {
             Navigate("Home");
@@ -1162,11 +1233,10 @@ public partial class MainWindow
         });
         Add("preparation-centre", async () =>
         {
+            downloadsTab = "Keep ready";
             Navigate("Downloads");
             await Settle(500);
-            if (keepReadyExpander != null)
             {
-                keepReadyExpander.IsExpanded = true;
                 await Settle(300);
                 RefreshReadyCentre();
                 await Settle(300);
@@ -1570,6 +1640,30 @@ public partial class MainWindow
             await Task.Delay(500);
             pops.Add((FrameworkElement)openIn.Items[0]);
         });
+        // Home with every status tile showing: a download (fixture jobs), a website that stopped syncing, an episode
+        // airing tonight and files to tidy. Last in the list because the seeded sync state stays for later screens.
+        AddNow("home-status", () =>
+        {
+            SeedSync();
+            var show = store.Archive.FirstOrDefault(i => !i.IsMovie && !i.Id.StartsWith("b2-"));
+            if (show != null)
+            {
+                var list = store.State.EpisodeSchedules.GetValueOrDefault(show.GroupKey) ?? [];
+                list.RemoveAll(e => e.Title == "Shots tonight");
+                list.Add(
+                    new()
+                    {
+                        Season = 9,
+                        Episode = 9,
+                        Title = "Shots tonight",
+                        AirsAt = DateTimeOffset.Now.Date.AddHours(23).ToUniversalTime(),
+                    }
+                );
+                store.State.EpisodeSchedules[show.GroupKey] = list;
+            }
+            tidyCount = 6;
+            Navigate("Home");
+        });
         var originalDensity = Density.Mode;
         var originalLanguage = Loc.Arabic ? "ar" : "en";
         try
@@ -1586,8 +1680,15 @@ public partial class MainWindow
             foreach (var width in sizes)
             {
                 await Size(width, 844);
-                foreach (var density in new[] { UiDensity.Compact, UiDensity.Comfortable })
-                foreach (var language in new[] { "en", "ar" })
+                // --ui-langs en,ar and --ui-densities compact,comfortable narrow a run (default: all four).
+                var langs = Arg("--ui-langs")?.Split(',', StringSplitOptions.RemoveEmptyEntries) ?? ["en", "ar"];
+                var densities = Arg("--ui-densities")?.Split(',', StringSplitOptions.RemoveEmptyEntries);
+                foreach (
+                    var density in new[] { UiDensity.Compact, UiDensity.Comfortable }.Where(d =>
+                        densities == null || densities.Contains(d.ToString(), StringComparer.OrdinalIgnoreCase)
+                    )
+                )
+                foreach (var language in langs)
                 {
                     Density.Set(density, save: false);
                     SetLanguage(language);

@@ -110,10 +110,15 @@ public partial class MainWindow
                     .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             var watch = Section("HistoryWatchNext");
             var recent = Section("HistoryRecentlyWatched");
-            var stats = Section("HistoryStatsStrip");
+            // U134: the totals, weekly goal and sync line sit under the History title, not below the page.
+            var stats = Descendants(ContentPanel)
+                .OfType<FrameworkElement>()
+                .First(e => e.Tag as string == "HistoryStatsStrip");
             Check(
-                ContentPanel.Children.IndexOf(watch) < ContentPanel.Children.IndexOf(stats),
-                "Up next comes before the stats and weekly goal strip"
+                Descendants(ContentPanel.Children[0]).Contains(stats)
+                    && ContentPanel.Children.IndexOf(watch) > 0
+                    && Descendants(ContentPanel).OfType<Button>().Any(b => IconSet.Plain(IconSet.Src(b.Content)) == "Export"),
+                "U134/U136 the viewing totals and weekly goal sit in the History header, with Export beside Import"
             );
             Check(
                 ContentPanel.Children.IndexOf(recent) == ContentPanel.Children.IndexOf(watch) + 1,

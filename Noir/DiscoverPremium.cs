@@ -151,15 +151,6 @@ public partial class MainWindow
                             )
                         );
                 }
-                var inLibrary = rest.Where(t => store.Archive.Any(i => i.ImdbId == t.Id)).ToList();
-                if (inLibrary.Count > 0)
-                    ContentPanel.Children.Add(
-                        Rail(
-                            "Already in your library",
-                            string.Empty,
-                            inLibrary.Select(t => DiscoverCard(t, token, revision)).ToList()
-                        )
-                    );
             }
             else
                 DiscoverGrid(rest, token, revision, discoverFilter == "Movies" ? "Popular movies" : "Popular shows");
@@ -450,15 +441,21 @@ public partial class MainWindow
             ToolTip = T("Explore {0}", "استكشف {0}", title.Name),
         };
         button.Click += (_, _) => _ = OpenDiscover(title);
+        // Stream, Download and My List appear over the poster on hover or keyboard focus (U143).
+        var quick = DiscoverQuickActions(title, existing);
+        var frame = new Grid();
+        frame.Children.Add(button);
+        frame.Children.Add(quick);
         var edge = new Border
         {
             CornerRadius = new(10),
             ClipToBounds = true,
-            Child = button,
+            Child = frame,
             BorderThickness = new(1.5),
             BorderBrush = Brush("#00000000"),
         };
         body.Children.Add(edge);
+        RevealOnFocus(body, quick);
         var name = Text(title.Name, 14, weight: FontWeights.SemiBold);
         name.Margin = new(0, 9, 0, 2);
         name.TextTrimming = TextTrimming.CharacterEllipsis;
@@ -508,6 +505,90 @@ public partial class MainWindow
             }
         }
         return Lift(body, edge);
+    }
+
+    // What you can do with a title you have just met, without opening it first.
+    FrameworkElement DiscoverQuickActions(DiscoverTitle title, List<VideoItem> existing)
+    {
+        var overlay = new Grid
+        {
+            Opacity = 0,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Background = new LinearGradientBrush(Colors.Transparent, Color.FromArgb(240, 8, 8, 10), 90),
+            Tag = "DiscoverQuickActions",
+        };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new(10, 34, 10, 12) };
+        overlay.Children.Add(row);
+        void Small(string icon, string tip, Action act, bool primary = false)
+        {
+            var b = ActionButton(icon, act, primary);
+            b.ToolTip = tip;
+            System.Windows.Automation.AutomationProperties.SetName(b, tip + " " + title.Name);
+            b.Padding = new(primary ? 13 : 12, 7, primary ? 13 : 12, 7);
+            b.Margin = new(0, 0, 7, 0);
+            row.Children.Add(b);
+        }
+        var local = existing.FirstOrDefault(CanPlay);
+        if (local != null)
+            Small("[[play]]", T("Play"), () => _ = PlayVideo(local), true);
+        else if (!TrackerOnly)
+        {
+            if (StreamOffered)
+                Small("[[play]]", T("Stream now", "بث الآن"), () => DiscoverQuick(title, false), true);
+            if (downloads != null)
+                Small("[[download]]", T("Download", "تنزيل"), () => DiscoverQuick(title, true));
+        }
+        var listed = existing.Count > 0 && store.State.Watchlist.Contains(existing[0].GroupKey);
+        Small(
+            listed ? "[[check]]" : "[[plus]]",
+            T(listed ? "In My List · click to remove" : "Add to My List"),
+            () => ToggleDiscoveredWatchlist(title)
+        );
+        return overlay;
+    }
+
+    // Stream or download straight from a card or the spotlight. A show from a catalog row has no episode list yet,
+    // so it is fetched first; the next episode to watch is the one that streams or downloads.
+    async void DiscoverQuick(DiscoverTitle title, bool download)
+    {
+        try
+        {
+            var full = title;
+            if (!title.IsMovie && title.Episodes.Count == 0)
+            {
+                Status.Text = T("Getting the episode list…", "جارٍ جلب قائمة الحلقات…");
+                using var client = DiscoverClient();
+                full = await client.Details(title, default);
+                if (closing)
+                    return;
+                Status.Text = "";
+            }
+            var existing = store.Archive.FirstOrDefault(i => i.ImdbId == full.Id && i.IsMovie == full.IsMovie);
+            var next = full.IsMovie ? null : NextToStream(full, existing);
+            if (!full.IsMovie && next == null)
+            {
+                Status.Text = T("No released episode to play yet.", "لا توجد حلقة صادرة للتشغيل بعد.");
+                return;
+            }
+            if (download)
+                DiscoverDownload(full, next?.Season ?? 0, next?.Episode ?? 0, false);
+            else
+                DiscoverStream(full, next?.Season ?? 0, next?.Episode ?? 0);
+        }
+        catch (Exception e)
+            when (e
+                    is System.Net.Http.HttpRequestException
+                        or TaskCanceledException
+                        or IOException
+                        or System.Text.Json.JsonException
+            )
+        {
+            store.Log(e);
+            Status.Text = T(
+                "Couldn't load this title. Check your connection and try again.",
+                "تعذّر تحميل هذا العنوان. تحقق من الاتصال وحاول مجددًا."
+            );
+        }
     }
 
     // Full-bleed artwork for a Discover title; the background is fetched if it isn't cached yet.
@@ -633,7 +714,22 @@ public partial class MainWindow
         }
         else
         {
-            actions.Children.Add(BigButton("[[info]]   Explore", () => _ = OpenDiscover(title), true));
+            // The spotlight offers what Noir does with a title: stream it, download it, save it. "Explore" is
+            // "More info" and no longer the gold action; "Add to library" stays in the title page's More menu (U144).
+            var group = existing != null ? store.EpisodesFor(existing.GroupKey) : [];
+            var local = group.Any(CanPlay) ? ChoiceFor(group) : null;
+            var acted = false;
+            if (local != null)
+            {
+                actions.Children.Add(HeroGold("[[play]]   Play", () => _ = PlayVideo(local)));
+                acted = true;
+            }
+            else if (!TrackerOnly && StreamOffered)
+            {
+                actions.Children.Add(HeroGold("[[play]]   Stream", () => DiscoverQuick(title, false)));
+                actions.Children.Add(HeroButton("[[download]]  Download", () => DiscoverQuick(title, true), false));
+                acted = true;
+            }
             var listed = existing != null && store.State.Watchlist.Contains(existing.GroupKey);
             var listBtn = HeroButton(
                 listed ? "[[check]]  In My List" : "[[plus]]  Add to My List",
@@ -642,22 +738,14 @@ public partial class MainWindow
             );
             listBtn.ToolTip = T(listed ? "In My List · click to remove" : "Add to My List");
             actions.Children.Add(listBtn);
-            var inLibrary = existing != null && store.InLibrary(existing.GroupKey);
-            var libBtn = HeroButton(
-                inLibrary
-                    ? T("[[check]]  In your library", "[[check]]  في مكتبتك")
-                    : T("[[plus]]  Add to library", "[[plus]]  أضف إلى المكتبة"),
-                () =>
-                {
-                    var key = existing?.GroupKey ?? store.AddDiscovered(title, false)[0].GroupKey;
-                    store.SetInLibrary(key, !inLibrary);
-                    Render();
-                    Status.Text = inLibrary ? "Removed from your library. History stays." : "Added to your library.";
-                },
-                false
-            );
-            libBtn.ToolTip = T(inLibrary ? "In your library · click to remove" : "Add to library");
-            actions.Children.Add(libBtn);
+            var info = acted
+                ? HeroButton("[[info]]   More info", () => _ = OpenDiscover(title), false)
+                : BigButton("[[info]]   More info", () => _ = OpenDiscover(title), true);
+            info.ToolTip = T("More about {0}", "المزيد عن {0}", title.Name);
+            if (acted)
+                actions.Children.Add(info);
+            else
+                actions.Children.Insert(0, info);
         }
         panel.Children.Add(detailRow ?? actions);
         grid.Children.Add(panel);
@@ -918,7 +1006,7 @@ public partial class MainWindow
             .Episodes.Where(e => e.Season == discoverSeason && (e.AirsAt == null || e.AirsAt <= DateTimeOffset.UtcNow))
             .ToList();
         var tools = new DockPanel { Margin = new(0, 10, 0, 16) };
-        var seasonButton = ActionButton("Find season downloads", () =>
+        var seasonButton = ActionButton(T("Download season", "تنزيل الموسم"), () =>
             DiscoverDownload(title, discoverSeason, released[0].Episode, true)
         );
         seasonButton.IsEnabled = released.Count > 0;
@@ -927,7 +1015,12 @@ public partial class MainWindow
         tools.Children.Add(seasonButton);
         tools.Children.Add(
             Body(
-                $"{released.Count} of {title.Episodes.Count(e => e.Season == discoverSeason)} episodes released. Choose one, or find a season pack; episodes you have are skipped.",
+                T(
+                    "{0} of {1} episodes released. Choose one, or download the whole season; episodes you already have are skipped.",
+                    "صدرت {0} من {1} حلقات. اختر حلقة أو نزّل الموسم كاملًا؛ الحلقات الموجودة لديك تُتخطّى.",
+                    released.Count,
+                    title.Episodes.Count(e => e.Season == discoverSeason)
+                ),
                 13
             )
         );

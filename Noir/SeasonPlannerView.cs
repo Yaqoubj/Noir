@@ -18,7 +18,11 @@ public partial class MainWindow
         var manager = downloads;
         var window = OpenSheet(T("Download", "تنزيل"), item.Title, SheetKind.Side, 900);
         // The footer carries the running summary on the left and the actions at the end.
-        var summary = Text("Choose your scope. Noir will compare packs and episode links.", 13, "#C7C2BC");
+        var summary = Text(
+            T("Choose what to download, then find releases.", "اختر ما تريد تنزيله ثم ابحث عن الإصدارات."),
+            13,
+            "#C7C2BC"
+        );
         var feedback = Body("", 12);
         feedback.Margin = new(0, 2, 0, 0);
         var footerText = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new(0, 0, 16, 0) };
@@ -57,7 +61,11 @@ public partial class MainWindow
                                 .ToList(),
                         }
                     );
-                    Status.Text = $"Queued {ids.Count} episodes for this PC.";
+                    Status.Text = T(
+                        "Queued {0} episodes for this PC.",
+                        "أُضيفت {0} إلى قائمة التنزيل على هذا الكمبيوتر.",
+                        ids.Count
+                    );
                     window.Close(true);
                     ShowDownloads();
                 }
@@ -66,7 +74,10 @@ public partial class MainWindow
                     feedback.Text =
                         e is System.IO.IOException
                             ? e.Message
-                            : "Couldn't queue this plan. Refresh sources and try again.";
+                            : T(
+                                "Couldn't queue this plan. Refresh sources and try again.",
+                                "تعذّرت إضافة هذه الخطة. حدّث المصادر وحاول مجددًا."
+                            );
                 }
             },
             true
@@ -83,7 +94,7 @@ public partial class MainWindow
         content.Children.Add(
             new Expander
             {
-                Header = "Source availability",
+                Header = T("Where the files come from", "مصادر الملفات"),
                 Content = sources,
                 Margin = new(0, 12, 0, 4),
             }
@@ -146,7 +157,10 @@ public partial class MainWindow
             }
             plan = null;
             download.IsEnabled = false;
-            summary.Text = "Update your plan to review these choices.";
+            summary.Text = T(
+                "Your choices changed. Find releases again to see them.",
+                "تغيّرت اختياراتك. ابحث عن الإصدارات مجددًا لرؤيتها."
+            );
             rows.Children.Clear();
         }
         void OptionsChanged()
@@ -237,6 +251,16 @@ public partial class MainWindow
                 T("After your furthest watched episode", "بعد آخر حلقة شاهدتها")
             );
             controls.Children.Add(cards);
+            // Keyboard focus sits on the chosen card, so the white focus outline is never on a different card than the gold one.
+            if (cards.Children.OfType<Button>().FirstOrDefault(b => Equals(b.Tag, "DownloadScope:" + request.Scope)) is { } chosenCard)
+                Dispatcher.BeginInvoke(
+                    () =>
+                    {
+                        if (chosenCard.IsVisible && System.Windows.Input.Keyboard.FocusedElement is not TextBox)
+                            chosenCard.Focus();
+                    },
+                    System.Windows.Threading.DispatcherPriority.Input
+                );
             if (request.Scope == "Next N episodes")
             {
                 var stepper = new StackPanel { Orientation = Orientation.Horizontal, Margin = new(0, 0, 0, 8) };
@@ -244,13 +268,13 @@ public partial class MainWindow
                 stepLabel.VerticalAlignment = VerticalAlignment.Center;
                 stepLabel.Margin = new(0, 0, 12, 0);
                 stepper.Children.Add(stepLabel);
-                var minus = ActionButton("−", () =>
+                var minus = ActionButton("[[minus]]", () =>
                 {
                     next = Math.Max(1, int.Parse(next) - 1).ToString();
                     request.Scope = "Next N episodes";
                     OptionsChanged();
                 });
-                var plus = ActionButton("+", () =>
+                var plus = ActionButton("[[plus]]", () =>
                 {
                     next = Math.Min(25, int.Parse(next) + 1).ToString();
                     request.Scope = "Next N episodes";
@@ -493,7 +517,9 @@ public partial class MainWindow
                 options.Children.Add(list);
             }
             var line =
-                preference.Resolution
+                T("Quality and limits", "الجودة والحدود")
+                + ": "
+                + preference.Resolution
                 + " · "
                 + (
                     preference.MaxEpisodeBytes > 0
@@ -505,8 +531,7 @@ public partial class MainWindow
                     request.MaxTotalBytes > 0
                         ? T("{0} total", "إجمالي {0}", DownloadNaming.Size(request.MaxTotalBytes))
                         : T("no total limit", "بلا حد إجمالي")
-                )
-                + " ›";
+                );
             optionsOpen |= request.Scope is "Specific episodes" or "From episode N" or "Several seasons / whole show";
             var more = new Expander
             {
@@ -526,7 +551,7 @@ public partial class MainWindow
             var rule = manager.AutomaticRule(item.Id);
             var auto = new CheckBox
             {
-                Content = T("Auto-download new episodes", "تنزيل الحلقات الجديدة تلقائيًا"),
+                Content = T("Keep this show ready", "إبقاء هذا المسلسل جاهزًا"),
                 IsChecked = preference.AutoDownload || rule != null,
                 Margin = new(0, 12, 0, 4),
             };
@@ -544,10 +569,14 @@ public partial class MainWindow
                 }
             });
             sameAsDefault.Visibility = preference.KeepReadyEnabled == null ? Visibility.Collapsed : Visibility.Visible;
+            var readyNote = T(
+                "Noir downloads the next episodes ahead, so they are ready when you are.",
+                "ينزّل Noir الحلقات القادمة مسبقًا لتكون جاهزة عند حاجتك."
+            );
             var autoHint = Body(
                 preference.KeepReadyEnabled == null && rule != null
                     ? T("On by default: {0}", "مفعّل افتراضيًا: {0}", ReadyText(rule))
-                    : "",
+                    : readyNote,
                 12
             );
             auto.Checked += (_, _) =>
@@ -558,7 +587,7 @@ public partial class MainWindow
                 preference.KeepReadyEnabled = true;
                 SavePreference();
                 sameAsDefault.Visibility = Visibility.Visible;
-                autoHint.Text = "";
+                autoHint.Text = readyNote;
                 ShowKeepReady(item);
             };
             auto.Unchecked += (_, _) =>
@@ -569,17 +598,20 @@ public partial class MainWindow
                 preference.KeepReadyEnabled = false;
                 SavePreference();
                 sameAsDefault.Visibility = Visibility.Visible;
-                autoHint.Text = "";
+                autoHint.Text = readyNote;
             };
             controls.Children.Add(auto);
             controls.Children.Add(autoHint);
             controls.Children.Add(sameAsDefault);
-            controls.Children.Add(
-                ActionButton(
-                    T("Keep ready · choose episodes & storage", "إبقاء الحلقات جاهزة · اختيار العدد والمساحة"),
-                    () => ShowKeepReady(item)
-                )
+            var readyOptions = ActionButton(
+                "[[sliders]]  " + T("Keep ready options", "خيارات إبقاء الحلقات جاهزة"),
+                () => ShowKeepReady(item)
             );
+            readyOptions.ToolTip = T(
+                "How far ahead to download and when watched files are removed, for this show.",
+                "كم حلقة تُنزَّل مسبقًا ومتى تُزال الملفات المشاهدة، لهذا المسلسل."
+            );
+            controls.Children.Add(readyOptions);
         }
         void UpdateSummary()
         {
@@ -599,16 +631,56 @@ public partial class MainWindow
                     || selected.Sum(o => o.File.Size > 0 ? o.File.Size : preference.MaxEpisodeBytes)
                         <= request.MaxTotalBytes
                 );
-            summary.Text =
-                $"{selected.Count} episodes · {DownloadNaming.Size(bytes)}{(unknown > 0 ? $" + {unknown} unknown sizes" : "")} · {DownloadNaming.Size(plan.FreeBytes)} free · {missing} not found";
-            progressText.Text =
-                $"{plan.ExistingEpisodes} on PC · {plan.QueuedEpisodes} queued · {plan.Episodes.Count(e => e.State == "Unaired")} not aired";
-            feedback.Text =
-                (!fits ? "Not enough space. Exclude episodes or choose smaller files. " : "")
-                + "Save to: "
-                + plan.Folder
-                + (plan.ScheduleKnown ? "" : " · Schedule unavailable; known episodes only");
-            download.Content = $"Download {selected.Count} episodes";
+            string Episodes(int n) => Loc.Count(n, "episode", "episodes", "حلقة واحدة", "حلقتان", "حلقات", "حلقة");
+            SetMarked(
+                summary,
+                Episodes(selected.Count)
+                    + " · "
+                    + Ltr
+                    + DownloadNaming.Size(bytes)
+                    + End
+                    + (
+                        unknown > 0
+                            ? " + " + T("{0} unknown sizes", "{0} بحجم غير معروف", unknown)
+                            : ""
+                    )
+                    + " · "
+                    + T("{0} free", "{0} متاحة", Ltr + DownloadNaming.Size(plan.FreeBytes) + End)
+                    + " · "
+                    + T("{0} not found", "{0} غير موجودة", missing)
+            );
+            progressText.Text = T(
+                "{0} on PC · {1} queued · {2} not aired",
+                "{0} على الكمبيوتر · {1} في القائمة · {2} لم تُعرض بعد",
+                plan.ExistingEpisodes,
+                plan.QueuedEpisodes,
+                plan.Episodes.Count(e => e.State == "Unaired")
+            );
+            SetMarked(
+                feedback,
+                (
+                    !fits
+                        ? T(
+                            "Not enough space. Exclude episodes or choose smaller files. ",
+                            "المساحة لا تكفي. استبعد حلقات أو اختر ملفات أصغر. "
+                        )
+                        : ""
+                )
+                    + T("Save to: ", "الحفظ في: ")
+                    + Ltr
+                    + plan.Folder
+                    + End
+                    + (
+                        plan.ScheduleKnown
+                            ? ""
+                            : " · "
+                                + T(
+                                    "Schedule unavailable; known episodes only",
+                                    "الجدول غير متاح؛ الحلقات المعروفة فقط"
+                                )
+                    )
+            );
+            download.Content = T("Download", "تنزيل") + " " + Episodes(selected.Count);
             download.IsEnabled = selected.Count > 0 && fits;
         }
         void RenderRows()
@@ -618,7 +690,7 @@ public partial class MainWindow
                 return;
             foreach (var season in plan.Episodes.GroupBy(e => e.Season))
             {
-                rows.Children.Add(Heading("Season " + season.Key));
+                rows.Children.Add(Heading(T("Season {0}", "الموسم {0}", season.Key)));
                 foreach (var episode in season)
                 {
                     var chosen = picks.GetValueOrDefault(episode);
@@ -630,7 +702,7 @@ public partial class MainWindow
                     var check = new CheckBox
                     {
                         Content = Text(
-                            $"E{episode.Episode:00}  {(episode.Title.Length > 0 ? episode.Title : "Episode " + episode.Episode)}",
+                            $"E{episode.Episode:00}  {(episode.Title.Length > 0 ? episode.Title : T("Episode {0}", "الحلقة {0}", episode.Episode))}",
                             15,
                             weight: FontWeights.SemiBold
                         ),
@@ -684,12 +756,20 @@ public partial class MainWindow
                         Body(
                             episode.Chosen?.File.Id == chosen?.File.Id
                                 ? episode.Reason
-                                : "Your choice · " + (chosen?.CacheState ?? episode.State),
+                                : T("Your choice", "اختيارك") + " · " + (chosen?.CacheState ?? episode.State),
                             12
                         )
                     );
                     change.IsEnabled = episode.Alternatives.Count > 0;
-                    change.ToolTip = $"{episode.Alternatives.Count} available options";
+                    change.ToolTip = Loc.Count(
+                        episode.Alternatives.Count,
+                        "available option",
+                        "available options",
+                        "خيار واحد متاح",
+                        "خياران متاحان",
+                        "خيارات متاحة",
+                        "خيارًا متاحًا"
+                    );
                     change.Click += (_, _) =>
                     {
                         var menu = new ContextMenu();
@@ -746,7 +826,7 @@ public partial class MainWindow
             var version = ++revision;
             Invalidate(false);
             feedback.Text = "";
-            progressText.Text = "Comparing packs, episode links and your servers…";
+            progressText.Text = T("Looking for releases…", "جارٍ البحث عن الإصدارات…");
             refresh.IsEnabled = false;
             sources.Children.Clear();
             try
@@ -771,7 +851,8 @@ public partial class MainWindow
                 var progress = new Progress<DownloadSourceStatus>(s =>
                 {
                     if (version == revision && !active.IsCancellationRequested)
-                        progressText.Text = s.Source + " · " + s.State + " · " + s.Message;
+                        // What it is doing in words; the stage names ("Planner · Checking") were internal.
+                        progressText.Text = (s.Source is "Planner" or "" ? "" : s.Source + " · ") + s.Message;
                 });
                 var result = await manager.PlanSeason(item.Id, request, progress, active.Token);
                 if (active.IsCancellationRequested || version != revision)
@@ -797,7 +878,7 @@ public partial class MainWindow
             {
                 if (version == revision)
                 {
-                    progressText.Text = "Couldn't build this plan.";
+                    progressText.Text = T("Couldn't find releases. Try again.", "تعذّر العثور على إصدارات. حاول مجددًا.");
                     feedback.Text =
                         e is System.IO.IOException ? e.Message : "Check source availability and try Refresh plan.";
                 }

@@ -455,14 +455,18 @@ public partial class MainWindow
             homeRowNames[id] = SmartName(id);
             HomeRow(id, () =>
             {
-                if (rows[id].Count == 0)
+                if (rows[id].Count < HomeLayout.SmartRowMin)
                     return;
                 var cards = new List<FrameworkElement>();
                 foreach (var pick in rows[id].Take(20))
                 {
                     if (!index.TryGetValue(pick.Key, out var group))
                         continue;
-                    var card = new StackPanel { Width = 176, Margin = new(0, 0, 18, 12) };
+                    var card = new StackPanel
+                    {
+                        Width = Density.PosterWidth,
+                        Margin = new(0, 0, Density.CardGap, 12),
+                    };
                     var poster = PosterCard(group);
                     poster.Margin = new(0);
                     card.Children.Add(poster);

@@ -112,11 +112,14 @@ public partial class MainWindow
                 Descendants(readyCentreHost!).OfType<TextBlock>().Any(t => t.Text == "Keep ready budget reached"),
                 "Keep ready explains exact storage block"
             );
-            keepReadyExpander!.IsExpanded = true;
+            Descendants(ContentPanel)
+                .OfType<Button>()
+                .First(b => Equals(b.Tag, "DownloadsTab:Keep ready"))
+                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             UpdateLayout();
             Check(
-                Descendants(ContentPanel).OfType<Expander>().Any(x => ReferenceEquals(x, keepReadyExpander)),
-                "The Keep ready centre sits under a Keep ready block on the Downloads page"
+                readyCentreHost!.IsVisible && Descendants(ContentPanel).Contains(readyCentreHost),
+                "U130 Keep ready has its own tab on the Downloads page"
             );
             var expander = Descendants(readyCentreHost!).OfType<Expander>().First();
             expander.IsExpanded = true;

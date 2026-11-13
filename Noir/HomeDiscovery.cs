@@ -353,7 +353,6 @@ public partial class MainWindow
             .OrderByDescending(g => g.Max(HistoryDate))
             .DistinctBy(g => g[0].ImdbId.Length > 0 ? g[0].ImdbId : g[0].GroupKey)
             .ToList();
-        var becauseShown = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (id, index) in new[] { ("because", 0), ("because-2", 1) })
         {
             var seed = history.ElementAtOrDefault(index);
@@ -363,7 +362,7 @@ public partial class MainWindow
             {
                 if (seed == null)
                     return;
-                var cards = HomeBecauseCards(seed, local, becauseShown);
+                var cards = HomeBecauseCards(seed, local, homeShown);
                 if (cards.Count > 0)
                     ContentPanel.Children.Add(Rail(homeRowNames[id], "", cards, () => Navigate("Discover")));
             });
@@ -426,10 +425,10 @@ public partial class MainWindow
                     .Range(0, channels.Select(c => c.Count).DefaultIfEmpty().Max())
                     .SelectMany(i => channels.Where(c => i < c.Count).Select(c => c[i]));
                 var seen = seeds.Select(g => g[0].ImdbId).ToHashSet();
-                var picks = choices
-                    .Where(p => HomeDiscovery.Eligible(store, p.Title) && seen.Add(p.Title.Id))
-                    .Take(20)
-                    .ToList();
+                var picks = FreshFirst(
+                    choices.Where(p => HomeDiscovery.Eligible(store, p.Title) && seen.Add(p.Title.Id)).Take(80),
+                    p => p.Title.Id
+                );
                 if (picks.Count > 0)
                     ContentPanel.Children.Add(
                         Rail(
@@ -465,7 +464,7 @@ public partial class MainWindow
                             ? score
                             : 0
                     );
-                var picks = HomeDiscovery.Picks(store, pool);
+                var picks = FreshFirst(HomeDiscovery.Picks(store, pool, null, 80), t => t.Id);
                 if (picks.Count > 0)
                     ContentPanel.Children.Add(
                         Rail(homeRowNames[id], "", picks.Select(t => HomeDiscoverCard(t)).ToList(), () =>

@@ -227,7 +227,7 @@ public partial class MainWindow
                 Density.Compact ? 24 : sidePad,
                 0,
                 Density.Compact ? 24 : sidePad,
-                Density.Compact ? (detail ? 24 : 38)
+                Density.Compact ? (detail ? 24 : 32)
                     : detail ? 42
                     : 70
             ),
@@ -258,7 +258,7 @@ public partial class MainWindow
         // The title's own logo artwork when Cinemeta has one; otherwise the name in display type.
         if (TitleLogo(item, Density.HeroLogoHeight(detail), Density.HeroLogoWidth) is { } logo)
         {
-            logo.Margin = new(0, 18, 0, 18);
+            logo.Margin = Density.Compact && !detail ? new(0, 12, 0, 12) : new(0, 18, 0, 18);
             panel.Children.Add(logo);
         }
         else
@@ -293,9 +293,12 @@ public partial class MainWindow
             panel.Children.Add(ep);
         }
         var summaryText = item.Summary.Length > 0 ? item.Summary : "";
+        TextBlock? summaryBlock = null;
+        var summaryLines = 3;
         if (summaryText.Length > 0)
         {
             var summary = Bidi(Text(summaryText, Density.HeroSummary, "#C9C4BD"));
+            summaryBlock = summary;
             summary.MaxHeight = Density.HeroSummaryMax;
             summary.LineHeight = Density.HeroSummaryLine;
             summary.TextTrimming = TextTrimming.WordEllipsis;
@@ -437,6 +440,32 @@ public partial class MainWindow
                 ? HeroHeight(detail)
                 : Math.Max(HeroHeight(detail), panel.DesiredSize.Height + TopBar.Height + 24);
         }
+        // Compact heroes have a fixed height. When the words do not fit, the summary gives up lines (3, 2, 1, none)
+        // instead of pushing the label at the top out of the card; it gets them back when the window grows.
+        // Worked out from the sizes layout really gave, each time the words or the card change size.
+        void FitSummary()
+        {
+            if (!Density.Compact || summaryBlock == null || grid.ActualHeight <= 0 || panel.ActualHeight <= 0)
+                return;
+            var line = Density.HeroSummaryLine;
+            var over = panel.ActualHeight + panel.Margin.Bottom - (grid.ActualHeight - 14);
+            var drawn = summaryBlock.IsVisible ? (int)Math.Round(summaryBlock.ActualHeight / line) : 0;
+            int lines;
+            if (over > 0)
+                lines = Math.Max(0, drawn - (int)Math.Ceiling(over / line));
+            else if (summaryLines < 3)
+                // A hidden summary also took its 12 px top margin with it.
+                lines = Math.Min(3, summaryLines + (int)Math.Floor((-over - (summaryLines == 0 ? 12 : 0)) / line));
+            else
+                return;
+            if (lines == summaryLines)
+                return;
+            summaryLines = lines;
+            summaryBlock.Visibility = lines == 0 ? Visibility.Collapsed : Visibility.Visible;
+            summaryBlock.MaxHeight = Math.Max(1, lines) * line;
+        }
+        panel.SizeChanged += (_, _) => FitSummary();
+        grid.SizeChanged += (_, _) => FitSummary();
         return Density.Compact ? (detail ? ContainedHero(grid, 6) : grid) : Bleed(grid, detail ? 6 : 0);
     }
 
@@ -963,13 +992,26 @@ public partial class MainWindow
             )
                 Show(index + 1, true);
         };
+        // The hero is a share of the window's height: follow the window when it is resized instead of keeping the
+        // height Home was first drawn with.
+        void Resize(object sender, SizeChangedEventArgs e)
+        {
+            if (!e.HeightChanged)
+                return;
+            host.Height = Math.Max(Density.CarouselMin, HeroHeight(false));
+            if (Density.Compact && shown != null)
+                shown.Height = host.Height;
+        }
         host.Loaded += (_, _) =>
         {
+            ContentScroll.SizeChanged -= Resize;
+            ContentScroll.SizeChanged += Resize;
             if (Motion.Enabled && !validationMode)
                 timer.Start();
         };
         host.Unloaded += (_, _) =>
         {
+            ContentScroll.SizeChanged -= Resize;
             timer.Stop();
             if (homeHeroFocus == FocusTitle)
             {

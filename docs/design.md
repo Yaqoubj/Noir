@@ -13,6 +13,26 @@ One page for anyone changing a screen on PC, phone or TV. The look (dark surface
 
 When a screen breaks a rule, prefer, in this order: remove, merge, rename, reorder, reweight. Adding a control or a screen is a feature, not a fix. Decisions are logged in `work/sharpen-round/ui-decisions.md` (U-numbers).
 
+## Home
+Noir is a downloader, an organizer, a streamer and a library, and Home has to show all four, not only the library.
+- **Status strip** under the hero: one quiet tile per thing Noir is doing or has waiting (downloads, a website that stopped syncing, the next episode airing, files to tidy, free space). A tile with nothing to say is not drawn; each opens the place where you act on it. "Edit Home" sits at its end.
+- **Your own rows first** by default: Continue watching, play queue, My List, Keep ready, Recently added, Coming up; then Top 10 and discovery; then smart rows, genres and the library. A saved layout keeps its own order.
+- **No thin or repeated rows.** A row Noir fills by itself needs 3 titles (4 for a genre row). A discovery row shows titles not yet on the page before repeating one.
+- **A title that is not on this PC** offers Stream now and Download where you meet it (the hero, the poster's hover actions), not only in the right-click menu.
+
+## Downloads
+- **Three tab cards**, one per job of the page: Queue (downloader), On this PC (organizer), Keep ready (automatic). Each card carries its own live line, so the numbers show whichever tab is open.
+- **Tools are buttons, not menu items.** Organize files and Free up space sit on the On this PC toolbar; Clear finished shows on Queue while there is something to clear; Automatic rules opens from Keep ready.
+- **Rows carry artwork**: a show's poster on its row, a film mark on the Movies group.
+
+## History
+- **The header carries the page's facts**: totals, weekly goal and where watches are synced sit in one line under the title, on every tab. Nothing that summarises the page goes below its content.
+- **Import and Export are a pair** of header buttons; the three-dot menu holds the occasional tools (year story, compare taste, calendar file, shortcuts).
+
+## Discover
+- **A title you have just met can be acted on where it stands**: the spotlight and every poster's hover actions offer Stream, Download and My List; the preview panel has its actions right under the synopsis.
+- **Discover shows what you do not have.** Titles already in the library keep their badge in the rows; there is no row of them.
+
 ## Vocabulary
 | Thing | English | Arabic | Not |
 |---|---|---|---|

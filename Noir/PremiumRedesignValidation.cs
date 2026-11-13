@@ -126,16 +126,57 @@ public partial class MainWindow
             Check(discoverResults?.Titles.Count > 0, "Discover loads its spotlight and popular rails");
             await Settle();
             CaptureLibrary(Path.Combine(store.DataDirectory, "premium-discover.png"));
+            // Premium round, Discover (U142–U144).
+            var quickRows = Descendants(ContentPanel)
+                .OfType<Grid>()
+                .Where(g => Equals(g.Tag, "DiscoverQuickActions"))
+                .ToList();
+            string Named(Button b) => System.Windows.Automation.AutomationProperties.GetName(b);
+            Check(
+                quickRows.Count > 0
+                    && quickRows.All(g => Descendants(g).OfType<Button>().Any(b => Named(b).Contains("My List")))
+                    && (
+                        downloads == null
+                        || TrackerOnly
+                        || quickRows.Any(g => Descendants(g).OfType<Button>().Any(b => Named(b).StartsWith("Download")))
+                    ),
+                "U143 Discover cards carry hover actions: My List always, Stream and Download when available"
+            );
+            var spotlight = Descendants(ContentPanel)
+                .OfType<Button>()
+                .Select(b => IconSet.Plain(IconSet.Src(b.Content)))
+                .ToList();
+            Check(
+                spotlight.Contains("More info")
+                    && !spotlight.Contains("Explore")
+                    && !spotlight.Contains("Add to library")
+                    && (downloads == null || TrackerOnly || spotlight.Contains("Stream") || spotlight.Contains("Play")),
+                "U144 the Discover spotlight offers Stream, Download, My List and More info"
+            );
             var count = store.State.Viewings.Count;
             var show = discoverResults!.Titles.First(t => !t.IsMovie);
             await OpenDiscover(show);
             await Settle();
             Check(discoverPanel != null, "Discover opens the preview side panel first");
+            var panelButtons = Descendants(discoverPanel!).OfType<Button>().ToList();
+            var fullPage = panelButtons.FirstOrDefault(b => Named(b) == "Full page");
+            var castHeading = Descendants(discoverPanel!)
+                .OfType<TextBlock>()
+                .FirstOrDefault(t => t.Text == T("Cast & crew"));
+            Check(
+                fullPage != null
+                    && (
+                        castHeading == null
+                        || fullPage.TranslatePoint(new Point(), discoverPanel).Y
+                            < castHeading.TranslatePoint(new Point(), discoverPanel).Y
+                    ),
+                "U142 the preview panel's actions come before the cast"
+            );
             CloseDiscoverPanel();
             await OpenDiscoverFull(show);
             await Settle();
             Check(
-                Descendants(ContentPanel).OfType<Button>().Any(b => b.Content as string == "Find season downloads"),
+                Descendants(ContentPanel).OfType<Button>().Any(b => b.Content as string == "Download season"),
                 "Discover keeps whole-season download action"
             );
             discoverSeason = 2;

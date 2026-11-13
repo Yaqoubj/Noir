@@ -34,63 +34,109 @@ public partial class MainWindow
                 : Dispatcher.Invoke(() => current?.Path.Equals(path, StringComparison.OrdinalIgnoreCase) == true);
     }
 
-    void BuildDownloadTabs(StackPanel page, StackPanel queue, StackPanel library, Action queueUpdate)
+    static ControlTemplate DownloadTabTemplate()
+    {
+        var border = new FrameworkElementFactory(typeof(Border), "Chrome");
+        border.SetValue(Border.CornerRadiusProperty, new CornerRadius(12));
+        border.SetValue(Border.PaddingProperty, new Thickness(12, 10, 14, 10));
+        foreach (
+            var (target, source) in new[]
+            {
+                (Border.BackgroundProperty, "Background"),
+                (Border.BorderBrushProperty, "BorderBrush"),
+                (Border.BorderThicknessProperty, "BorderThickness"),
+            }
+        )
+            border.SetBinding(
+                target,
+                new System.Windows.Data.Binding(source)
+                {
+                    RelativeSource = System.Windows.Data.RelativeSource.TemplatedParent,
+                }
+            );
+        var content = new FrameworkElementFactory(typeof(ContentPresenter));
+        content.SetValue(VerticalAlignmentProperty, VerticalAlignment.Center);
+        border.AppendChild(content);
+        return new ControlTemplate(typeof(Button)) { VisualTree = border };
+    }
+
+    // The three tabs of Downloads, drawn as cards: an icon, the tab's name and its live line (U130).
+    void BuildDownloadTabs(StackPanel page, StackPanel queue, StackPanel library, StackPanel ready)
     {
         PrepareDownloadManagement();
         downloadsTab ??= downloads!.ActiveCount > 0 ? "Queue" : "On this PC";
-        var header = new DockPanel { Margin = new(0, 4, 0, 12) };
-        var actions = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
-        DockPanel.SetDock(actions, Dock.Right);
-        header.Children.Add(actions);
-        // U46: "Clear finished" and "Free up space" live in one three-dot menu.
-        var more = ManageButton("[[more]]", () => { });
-        more.Padding = new(10, 2, 10, 7);
-        more.FontSize = 16;
-        more.ToolTip = T("More", "المزيد");
-        DownloadName(more, T("More downloads actions", "المزيد من إجراءات التنزيل"));
-        more.Tag = "DownloadsMore";
-        var menu = new ContextMenu { FlowDirection = FlowDirection };
-        var clear = new MenuItem { Header = T("Clear finished", "مسح المكتمل") };
-        DownloadName(clear, (string)clear.Header);
-        clear.Click += (_, _) =>
+        if (downloadsTab is not ("Queue" or "On this PC" or "Keep ready"))
+            downloadsTab = "Queue";
+        var tabs = new System.Windows.Controls.Primitives.UniformGrid
         {
-            downloads!.ClearFinished();
-            queueUpdate();
+            Rows = 1,
+            MaxWidth = 1080,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new(-5, 4, 0, Density.Pick(14, 18)),
         };
-        var free = new MenuItem { Header = T("Free up space", "تحرير مساحة") };
-        DownloadName(free, (string)free.Header);
-        free.Click += (_, _) => ShowDownloadFreeSpace();
-        menu.Items.Add(clear);
-        menu.Items.Add(free);
-        more.Click += (_, e) =>
-        {
-            e.Handled = true;
-            more.ContextMenu = menu;
-            menu.PlacementTarget = more;
-            menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
-            menu.IsOpen = true;
-        };
-        more.ContextMenu = menu;
-        actions.Children.Add(more);
-        var tabs = new StackPanel { Orientation = Orientation.Horizontal };
-        header.Children.Add(tabs);
         bool loaded = false;
-        Button queueTab = null!,
-            pcTab = null!;
-        queueTab = PillOption(T("Queue", "قائمة التنزيل"), () => Select("Queue"), false);
-        pcTab = PillOption(T("On this PC", "على هذا الكمبيوتر"), () => Select("On this PC"), false);
-        tabs.Children.Add(queueTab);
-        tabs.Children.Add(pcTab);
-        page.Children.Insert(0, header);
+        var cards = new Dictionary<string, (Button Card, System.Windows.Shapes.Path? Icon, TextBlock Name)>();
+        void Card(string key, string icon, string name, TextBlock note)
+        {
+            var mark = IconSet.Draw(icon, 17) as System.Windows.Shapes.Path;
+            var badge = new Border
+            {
+                Width = 34,
+                Height = 34,
+                CornerRadius = new(9),
+                Background = Brush("#14FFFFFF"),
+                Margin = new(0, 0, 11, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = mark,
+            };
+            var title = Text(name, 14, weight: FontWeights.SemiBold);
+            title.TextWrapping = TextWrapping.NoWrap;
+            var words = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            words.Children.Add(title);
+            if (note.Parent is Panel old)
+                old.Children.Remove(note);
+            words.Children.Add(note);
+            var row = new DockPanel();
+            DockPanel.SetDock(badge, Dock.Left);
+            row.Children.Add(badge);
+            row.Children.Add(words);
+            var card = new Button
+            {
+                Content = row,
+                Template = DownloadTabTemplate(),
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                Margin = new(5, 0, 5, 0),
+                MinWidth = 200,
+                Tag = "DownloadsTab:" + key,
+                Cursor = System.Windows.Input.Cursors.Hand,
+            };
+            DownloadName(card, name);
+            Motion.ButtonFeedback(card);
+            card.Click += (_, _) => Select(key);
+            cards[key] = (card, mark, title);
+            tabs.Children.Add(card);
+        }
+        Card("Queue", "download", T("Queue", "قائمة التنزيل"), downloadsQueueNote!);
+        Card("On this PC", "drive", T("On this PC", "على هذا الكمبيوتر"), downloadsPcNote!);
+        Card("Keep ready", "check", T("Keep ready", "إبقاء الحلقات جاهزة"), downloadsReadyNote!);
+        page.Children.Insert(0, tabs);
         void Select(string tab)
         {
             downloadsTab = tab;
             queue.Visibility = tab == "Queue" ? Visibility.Visible : Visibility.Collapsed;
-            library.Visibility = tab == "Queue" ? Visibility.Collapsed : Visibility.Visible;
-            clear.Visibility = queue.Visibility;
-            StylePillOption(queueTab, tab == "Queue");
-            StylePillOption(pcTab, tab != "Queue");
-            if (tab != "Queue" && !loaded)
+            library.Visibility = tab == "On this PC" ? Visibility.Visible : Visibility.Collapsed;
+            ready.Visibility = tab == "Keep ready" ? Visibility.Visible : Visibility.Collapsed;
+            foreach (var (key, c) in cards)
+            {
+                var on = key == tab;
+                c.Card.Background = Brush(on ? "#1F1B14" : "#141416");
+                c.Card.BorderBrush = Brush(on ? "#E4C084" : "#1FFFFFFF");
+                c.Card.BorderThickness = new(on ? 1.4 : 1);
+                c.Name.Foreground = Brush(on ? "#F0D3A0" : "#F4F1EB");
+                if (c.Icon != null)
+                    c.Icon.Stroke = Brush(on ? "#E4C084" : "#C7C2BC");
+            }
+            if (tab == "On this PC" && !loaded)
             {
                 loaded = true;
                 _ = BuildDownloadLibrary(library);
@@ -102,8 +148,29 @@ public partial class MainWindow
     async Task BuildDownloadLibrary(StackPanel host)
     {
         host.Children.Clear();
-        var filters = new WrapPanel { Margin = new(0, 0, 0, 12) };
-        host.Children.Add(filters);
+        var bar = new DockPanel { Margin = new(0, 0, 0, 12) };
+        var manageTools = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Top };
+        DockPanel.SetDock(manageTools, Dock.Right);
+        var organize = ManageButton("[[folder]]  " + T("Organize files", "تنظيم الملفات"), OpenOrganizer);
+        DownloadName(organize, T("Organize files", "تنظيم الملفات"));
+        organize.ToolTip = T(
+            "Rename and sort your videos into show and season folders, with a preview and Undo.",
+            "أعد تسمية الفيديوهات وافرزها في مجلدات المسلسلات والمواسم، مع معاينة وتراجع."
+        );
+        organize.Margin = new(8, 0, 0, 0);
+        var freeUp = ManageButton("[[drive]]  " + T("Free up space", "تحرير مساحة"), ShowDownloadFreeSpace);
+        DownloadName(freeUp, T("Free up space", "تحرير مساحة"));
+        freeUp.ToolTip = T(
+            "Find watched episodes, leftovers, samples and duplicate copies you can remove.",
+            "اعثر على حلقات مشاهدة وملفات متبقية وعينات ونسخ مكررة يمكن إزالتها."
+        );
+        freeUp.Margin = new(8, 0, 0, 0);
+        manageTools.Children.Add(organize);
+        manageTools.Children.Add(freeUp);
+        bar.Children.Add(manageTools);
+        var filters = new WrapPanel();
+        bar.Children.Add(filters);
+        host.Children.Add(bar);
         foreach (
             var pair in new[]
             {
@@ -194,12 +261,18 @@ public partial class MainWindow
             {
                 var all = group.Files;
                 var body = new StackPanel();
-                var header = LocalRow(group.Key == "movies" ? T("Movies", "الأفلام") : group.Name, all, null);
+                var header = LocalRow(
+                    group.Key == "movies" ? T("Movies", "الأفلام") : group.Name,
+                    all,
+                    null,
+                    group.Key == "movies" ? "" : all.Select(f => f.Item.Poster).FirstOrDefault(File.Exists) ?? ""
+                );
                 var expander = new Expander
                 {
                     Header = header,
                     Content = body,
-                    Margin = new(0, 0, 0, 10),
+                    // The shared expander header pads itself by 9 px above and below; pull the cards to a 10 px gap.
+                    Margin = new(0, -6, 0, -7),
                     HorizontalContentAlignment = HorizontalAlignment.Stretch,
                     Tag = "DownloadLibraryGroup:" + group.Key,
                 };
@@ -278,7 +351,8 @@ public partial class MainWindow
                                     : file.Item.EpisodeLabel
                                         + (file.Item.EpisodeTitle.Length > 0 ? " · " + file.Item.EpisodeTitle : ""),
                                 [file],
-                                file
+                                file,
+                                file.Item.IsMovie && File.Exists(file.Item.Poster) ? file.Item.Poster : null
                             )
                         );
                     count += 60;
@@ -291,12 +365,46 @@ public partial class MainWindow
                 }
                 Next();
             }
-            FrameworkElement LocalRow(string title, List<DownloadLocalFile> files, DownloadLocalFile? file)
+            // art: a poster path draws a thumbnail; "" draws the film mark (the Movies group); null draws none (seasons, episodes).
+            FrameworkElement LocalRow(
+                string title,
+                List<DownloadLocalFile> files,
+                DownloadLocalFile? file,
+                string? art = null
+            )
             {
                 var row = new Grid { Margin = new(0, 3, 0, 3) };
+                row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
                 row.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
                 row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
-                var text = new StackPanel { Margin = new(6, 8, 12, 8) };
+                if (art != null)
+                {
+                    var thumb = new Border
+                    {
+                        Width = 36,
+                        Height = 54,
+                        CornerRadius = new(6),
+                        Background = Brush("#1C1C1F"),
+                        Margin = new(8, 5, 6, 5),
+                        VerticalAlignment = VerticalAlignment.Center,
+                        ClipToBounds = true,
+                    };
+                    if (art.Length > 0)
+                    {
+                        thumb.Child = Art(art, title, 54, true, false);
+                        thumb.Clip = new System.Windows.Media.RectangleGeometry(new Rect(0, 0, 36, 54), 6, 6);
+                    }
+                    else
+                    {
+                        var film = Icon("M3,4 L21,4 L21,20 L3,20 Z M7,4 L7,20 M17,4 L17,20 M3,8 L7,8 M3,12 L7,12 M3,16 L7,16 M17,8 L21,8 M17,12 L21,12 M17,16 L21,16", 20, "#C7C2BC");
+                        film.HorizontalAlignment = HorizontalAlignment.Center;
+                        film.VerticalAlignment = VerticalAlignment.Center;
+                        thumb.Child = film;
+                    }
+                    row.Children.Add(thumb);
+                }
+                var text = new StackPanel { Margin = new(6, 8, 12, 8), VerticalAlignment = VerticalAlignment.Center };
+                Grid.SetColumn(text, 1);
                 text.Children.Add(Text(title, 14, "#F4F1EB", FontWeights.SemiBold));
                 var count = files.Count;
                 var seen = files.Count(f => f.Watched);
@@ -324,7 +432,7 @@ public partial class MainWindow
                     Orientation = Orientation.Horizontal,
                     VerticalAlignment = VerticalAlignment.Center,
                 };
-                Grid.SetColumn(tools, 1);
+                Grid.SetColumn(tools, 2);
                 row.Children.Add(tools);
                 var trash = ManageButton("", () => ShowDownloadDelete(title, files));
                 trash.FontFamily = new System.Windows.Media.FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets");

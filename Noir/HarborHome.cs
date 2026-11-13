@@ -336,7 +336,7 @@ public partial class MainWindow
             StrokeThickness = 2.4,
             Fill = Brush("#0B0B0D"),
             Stretch = Stretch.Uniform,
-            Height = Density.Pick(145, 168),
+            Height = Density.Scaled(Density.Pick(145, 168)),
             FlowDirection = FlowDirection.LeftToRight,
             IsHitTestVisible = false,
             VerticalAlignment = VerticalAlignment.Bottom,
@@ -361,6 +361,8 @@ public partial class MainWindow
                 return;
         }
         var cards = topTen.Select((title, index) => TopTenCard(title, index + 1)).ToList();
+        if (page == "Home")
+            homeShown.UnionWith(topTen.Select(t => t.Id));
         if (cards.Count > 0)
             ContentPanel.Children.Add(
                 Rail(
@@ -407,20 +409,20 @@ public partial class MainWindow
     {
         var card = new Grid
         {
-            Width = rank == 10 ? Density.Pick(232, 262) : Density.Pick(188, 212),
-            Height = Density.Pick(224, 250),
+            Width = Density.Scaled(rank == 10 ? Density.Pick(232, 262) : Density.Pick(188, 212)),
+            Height = Density.Scaled(Density.Pick(174, 195)) + Density.Pick(50, 55),
             Margin = new(0, 0, 10, 0),
             Background = Brush("Transparent"),
         };
         card.Children.Add(Numeral(rank));
         var column = new StackPanel
         {
-            Width = Density.Pick(116, 130),
+            Width = Density.Scaled(Density.Pick(116, 130)),
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top,
         };
-        FrameworkElement picture = Art(title.Poster, title.Name, Density.Pick(174, 195), true);
-        var framed = new Grid { Height = Density.Pick(174, 195) };
+        FrameworkElement picture = Art(title.Poster, title.Name, Density.Scaled(Density.Pick(174, 195)), true);
+        var framed = new Grid { Height = Density.Scaled(Density.Pick(174, 195)) };
         framed.Children.Add(picture);
         framed.Children.Add(
             new Border

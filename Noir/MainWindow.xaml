@@ -44,7 +44,7 @@
     <!-- Floating top bar: a centred search pill over the artwork, solid once the page scrolls. -->
     <Grid x:Name="TopBar" VerticalAlignment="Top" Height="{DynamicResource Density.TopBar}">
      <Border IsHitTestVisible="False"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#B30B0B0D" Offset="0"/><GradientStop Color="#000B0B0D" Offset="1"/></LinearGradientBrush></Border.Background></Border>
-     <Border x:Name="TopBarFill" Background="#F20D0D0F" Opacity="0" IsHitTestVisible="False" BorderBrush="#1FFFFFFF" BorderThickness="0,0,0,1"/>
+     <Border x:Name="TopBarFill" Background="#FF0D0D0F" Opacity="0" IsHitTestVisible="False" BorderBrush="#1FFFFFFF" BorderThickness="0,0,0,1"/>
      <Grid x:Name="TopBarContent" Margin="36,0,28,0">
       <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
       <Button x:Name="RailToggle" Style="{StaticResource TopIcon}" Click="RailToggle_Click" ToolTip="Show or hide labels" AutomationProperties.Name="Toggle side menu" Margin="0"/>

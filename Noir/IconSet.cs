@@ -26,6 +26,7 @@ public static class IconSet
         ["back"] = "M20,12 L5,12 M11,6 L5,12 L11,18",
         ["forward"] = "M4,12 L19,12 M13,6 L19,12 L13,18",
         ["plus"] = "M12,5 L12,19 M5,12 L19,12",
+        ["minus"] = "M5,12 L19,12",
         ["check"] = "M5,12.5 L10,17.5 L19,7",
         ["close"] = "M6,6 L18,18 M18,6 L6,18",
         ["heart"] =
@@ -39,7 +40,13 @@ public static class IconSet
         ["contrast"] = "M12,3 A9,9 0 1 0 12,21 A9,9 0 1 0 12,3 M12,3 L12,21 A9,9 0 0 0 12,3 Z",
         ["swap"] = "M8,4 L8,20 M4,8 L8,4 L12,8 M16,20 L16,4 M12,16 L16,20 L20,16",
         ["chevron"] = "M9,5 L16,12 L9,19",
+        ["chevron-left"] = "M15,5 L8,12 L15,19",
         ["chevron-down"] = "M5,9 L12,16 L19,9",
+        ["folder"] =
+            "M3,7 L3,18 A1,1 0 0 0 4,19 L20,19 A1,1 0 0 0 21,18 L21,9 A1,1 0 0 0 20,8 L12,8 L10,5.5 L4,5.5 A1,1 0 0 0 3,6.5 Z",
+        ["calendar"] = "M4,6.5 L20,6.5 L20,20 L4,20 Z M4,10.5 L20,10.5 M8,4 L8,8 M16,4 L16,8",
+        ["drive"] = "M4,14 L6.5,5 L17.5,5 L20,14 M4,14 L20,14 L20,19 L4,19 Z M16.5,16.5 L16.6,16.5",
+        ["sliders"] = "M4,7 L20,7 M4,12 L20,12 M4,17 L20,17 M9,5 L9,9 M15,10 L15,14 M7,15 L7,19",
         ["sparkle"] = "M12,3 L14,10 L21,12 L14,14 L12,21 L10,14 L3,12 L10,10 Z",
         ["external"] = "M7,17 L17,7 M9,7 L17,7 L17,15",
         ["smile"] = "M12,3 A9,9 0 1 0 12,21 A9,9 0 1 0 12,3 M9,9.5 L9,9.6 M15,9.5 L15,9.6 M8,14 Q12,18.5 16,14",
@@ -132,7 +139,7 @@ public static class IconSet
                 System.Windows.Shapes.Shape.FillProperty,
                 new Binding("Foreground") { RelativeSource = owner }
             );
-        if (key is not ("back" or "forward" or "chevron"))
+        if (key is not ("back" or "forward" or "chevron" or "chevron-left"))
             path.FlowDirection = FlowDirection.LeftToRight; /* A1-8: only arrows mirror in Arabic; play, tick, heart and the rest keep their shape */
         if (size > 0)
         {

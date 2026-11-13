@@ -354,11 +354,6 @@ public partial class MainWindow
         Add("Compare taste with a friend", "قارن ذوقك مع صديق", () => OpenTaste());
         Add("Export the episode calendar (.ics)", "تصدير تقويم الحلقات (.ics)", ExportUpcomingCalendar);
         menu.Items.Add(new Separator());
-        Add("Back up or export history", "نسخ السجل احتياطيًا أو تصديره", () =>
-        {
-            settingsSection = "Backup";
-            Navigate("Settings");
-        });
         Add("Shortcuts & tips  (?)", "الاختصارات والنصائح  (?)", () => ToggleShortcutSheet(false));
         menu.PlacementTarget = target;
         menu.Placement = PlacementMode.Bottom;

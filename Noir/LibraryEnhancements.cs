@@ -192,7 +192,9 @@ public partial class MainWindow
             IsHitTestVisible = false,
         };
         if (wide)
-            caption.Children.Add(HomeTitleMark(item, 48, 250, 19));
+            caption.Children.Add(
+                HomeTitleMark(item, Density.Scaled(48), Math.Min(250, Density.ContinueWidth - 28), 19)
+            );
         else if (homePosterTitles)
             caption.Children.Add(Text(item.Title, 15, weight: FontWeights.SemiBold));
         var episode = item.IsMovie ? "" : T("S{0} E{1}", "م{0} ح{1}", item.Season, item.Episode);

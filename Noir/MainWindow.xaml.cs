@@ -344,6 +344,7 @@ public partial class MainWindow : Window
             if (closing)
                 return;
             items = result.found;
+            tidyCount = null; // the library changed: Home's "files to tidy" tile counts again
             UpdateLibraryCount();
             warningToast = result.warnings.Count > 0;
             Status.Text =
@@ -490,6 +491,9 @@ public partial class MainWindow : Window
         }
         if (TrackerOnly && page == "Home")
             page = "History";
+        // Home's own tile size applies to Home's rows only; every other page draws its cards at their normal size.
+        Density.CardScale =
+            page == "Home" && detailKey == null ? HomeLayout.Scale(HomeLayout.Load(store.DataDirectory).CardSize) : 1;
         var context = page + "|" + detailKey + "|" + SearchBox.Text;
         var offset = context == renderedContext ? ContentScroll.VerticalOffset : 0;
         animateCards = offset == 0 && !quietRender;
@@ -571,6 +575,7 @@ public partial class MainWindow : Window
                 return;
             }
             PageTitle.Text = T(page == "Home" ? "Your evening, queued." : page);
+            homeHero = null;
             var query = SearchBox.Text.Trim();
             // Library pages list library titles; Home also keeps shows you're actively watching elsewhere.
             StartupTrace.Mark("Page grouping started");
@@ -683,7 +688,7 @@ public partial class MainWindow : Window
                     slides.Add((ChoiceFor(pick), pick, false, false));
                 StartupTrace.Mark("Home hero planning ended");
                 StartupTrace.Mark("Home hero build started");
-                ContentPanel.Children.Add(HeroCarousel(slides));
+                ContentPanel.Children.Add(homeHero = HeroCarousel(slides));
                 StartupTrace.Mark("Home hero build ended");
                 StartupTrace.Mark("Home continue section started");
                 if (continuations.Count > 0)

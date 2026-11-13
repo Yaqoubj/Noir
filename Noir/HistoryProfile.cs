@@ -61,10 +61,17 @@ public partial class MainWindow
         var body = new StackPanel();
         shell.Child = body;
         var head = new DockPanel();
+        // Nothing picked yet: the card is half as tall and its one line says what the four slots are for.
+        var noneYet = store.State.Favorites.Count == 0;
         var hint = Text(
-            T("Drag to reorder · right-click to edit", "اسحب للترتيب · انقر بالزر الأيمن للتعديل"),
-            10.5,
-            "#8F887D"
+            noneYet
+                ? T(
+                    "The four titles that define your taste. Pick them here, or tap the heart on any title.",
+                    "الأعمال الأربعة التي تعبّر عن ذوقك. اخترها هنا أو اضغط القلب على أي عمل."
+                )
+                : T("Drag to reorder · right-click to edit", "اسحب للترتيب · انقر بالزر الأيمن للتعديل"),
+            noneYet ? 12 : 10.5,
+            noneYet ? "#AAA6A0" : "#8F887D"
         );
         hint.VerticalAlignment = VerticalAlignment.Center;
         DockPanel.SetDock(hint, Dock.Right);
@@ -74,7 +81,7 @@ public partial class MainWindow
         var slots = new UniformGrid
         {
             Columns = 4,
-            MaxWidth = 520,
+            MaxWidth = noneYet ? 300 : 520,
             HorizontalAlignment = HorizontalAlignment.Left,
             Margin = new(0, 12, 0, 0),
         };
@@ -85,19 +92,19 @@ public partial class MainWindow
             var index = n;
             var key = n < favorites.Count ? favorites[n] : "";
             var item = key.Length > 0 ? store.Archive.FirstOrDefault(i => i.GroupKey == key) : null;
-            var picture = new Grid { Height = 132, Width = 88 };
+            var picture = new Grid { Height = noneYet ? 66 : 132, Width = noneYet ? 44 : 88 };
             if (item != null)
                 picture.Children.Add(HistoryArt(item, 132));
             else
             {
                 picture.Background = Brush("#211E1A");
-                var plus = IconSet.Draw("plus", 26);
+                var plus = IconSet.Draw("plus", noneYet ? 18 : 26);
                 ((System.Windows.Shapes.Shape)plus).Stroke = Brush("#E4C084");
                 plus.HorizontalAlignment = HorizontalAlignment.Center;
                 plus.VerticalAlignment = VerticalAlignment.Center;
                 picture.Children.Add(plus);
             }
-            var panel = new StackPanel { Width = 100, Margin = new(0, 0, 14, 0) };
+            var panel = new StackPanel { Width = noneYet ? 56 : 100, Margin = new(0, 0, 14, 0) };
             var button = new Button
             {
                 Content = new Border
@@ -123,7 +130,9 @@ public partial class MainWindow
             caption.TextWrapping = TextWrapping.NoWrap;
             caption.TextTrimming = TextTrimming.CharacterEllipsis;
             caption.Margin = new(0, 6, 0, 0);
-            panel.Children.Add(caption);
+            // An empty slot says "Pick a top-four title" in its tooltip; four copies of that under the slots is noise.
+            if (item != null)
+                panel.Children.Add(caption);
             slots.Children.Add(panel);
             button.Click += (_, _) =>
             {

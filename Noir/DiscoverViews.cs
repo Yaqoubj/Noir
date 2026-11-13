@@ -136,8 +136,9 @@ public partial class MainWindow
             synopsisText = synopsis;
             synopsis.LineHeight = 20;
             info.Children.Add(synopsis);
-            if (CastStripFor(t) is { } cast)
-                info.Children.Add(cast);
+            // The actions sit right under the synopsis; cast and extras follow. They used to come after the cast,
+            // which pushed Stream and Download off the first screen of the panel (U142).
+            var cast = CastStripFor(t);
             var actions = new WrapPanel { Margin = new(0, 16, 0, 0) };
             info.Children.Add(actions);
             void Act(string text, Action action, bool primary = false)
@@ -206,6 +207,8 @@ public partial class MainWindow
             full.Margin = new(0, 4, 0, 0);
             System.Windows.Automation.AutomationProperties.SetName(full, "Full page");
             info.Children.Add(full);
+            if (cast != null)
+                info.Children.Add(cast);
         }
         Paint(title, false);
         try

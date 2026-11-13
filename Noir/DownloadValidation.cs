@@ -205,13 +205,13 @@ public partial class MainWindow
             Check(episodeBoxes.Count == 2, "Season planner lists both known episodes");
             episodeBoxes[1].IsChecked = false;
             Check(
-                Descendants(planner).OfType<Button>().Any(b => b.Content as string == "Download 1 episodes"),
+                Descendants(planner).OfType<Button>().Any(b => b.Content as string == "Download 1 episode"),
                 "Excluding an episode updates the primary action"
             );
             episodeBoxes[1].IsChecked = true;
             var auto = Descendants(planner)
                 .OfType<CheckBox>()
-                .Single(b => b.Content as string == "Auto-download new episodes");
+                .Single(b => b.Content as string == "Keep this show ready");
             auto.IsChecked = true;
             Check(
                 downloads.SeasonPreferences(item.Id).AutoDownload,
@@ -530,12 +530,13 @@ public partial class MainWindow
                 && !buttons.Any(x => x.Content as string == "Resume all" && x.Visibility == Visibility.Visible),
             "Pause all shows only when there is something to pause"
         );
-        var summary = Descendants(ContentPanel).OfType<TextBlock>().First(t => t.Text.Contains("free on"));
+        // The numbers sit on the tab cards (U130): the queue's counts on Queue, free space on On this PC.
+        var summary = downloadsQueueNote!;
         var summaryOk =
             summary.Text.StartsWith("1 downloading")
             && summary.Text.Contains("2 waiting")
             && summary.Text.Contains("1 needs attention")
-            && summary.Text.Contains("10.0 GB free on");
+            && downloadsPcNote!.Text.Contains("10.0 GB free on");
         Check(
             summaryOk,
             "The summary line counts downloads and shows free space on the download drive"
@@ -690,25 +691,29 @@ public partial class MainWindow
         Navigate("Downloads");
         await Task.Delay(200);
         Check(
-            Descendants(ContentPanel).OfType<Button>().Any(b => b.Content as string == "Queue")
-                && Descendants(ContentPanel).OfType<Button>().Any(b => b.Content as string == "On this PC")
-                && Descendants(ContentPanel)
-                    .OfType<Button>()
-                    .FirstOrDefault(b => Equals(b.Tag, "DownloadsMore"))
-                    ?.ContextMenu
-                    is { } downloadsMenu
-                && downloadsMenu.Items.OfType<MenuItem>().Any(m => m.Header as string == "Free up space")
-                && downloadsMenu.Items.OfType<MenuItem>().Any(m => m.Header as string == "Clear finished"),
-            "Downloads has Queue / On this PC tabs and the management actions in one three-dot menu"
+            new[] { "Queue", "On this PC", "Keep ready" }.All(tab =>
+                Descendants(ContentPanel).OfType<Button>().Any(b => Equals(b.Tag, "DownloadsTab:" + tab))
+            )
+                && !Descendants(ContentPanel).OfType<Button>().Any(b => Equals(b.Tag, "DownloadsMore")),
+            "U130 Downloads has Queue / On this PC / Keep ready tab cards and no three-dot menu"
         );
         var local = await Task.Run(() => manager.LocalLibrary());
         var files = local.SelectMany(g => g.Files).ToList();
         Check(files.Count > 0, "Completed local files appear in the headless library model");
         Descendants(ContentPanel)
             .OfType<Button>()
-            .First(b => b.Content as string == "On this PC")
+            .First(b => Equals(b.Tag, "DownloadsTab:On this PC"))
             .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         await Task.Delay(400);
+        var pcButtons = Descendants(ContentPanel)
+            .OfType<Button>()
+            .Where(b => b.IsVisible)
+            .Select(b => System.Windows.Automation.AutomationProperties.GetName(b))
+            .ToList();
+        Check(
+            pcButtons.Contains("Organize files") && pcButtons.Contains("Free up space"),
+            "U131 On this PC offers Organize files and Free up space as buttons"
+        );
         var show = Descendants(ContentPanel)
             .OfType<Expander>()
             .First(e => e.Tag is string tag && tag.StartsWith("DownloadLibraryGroup:"));
@@ -820,7 +825,12 @@ public partial class MainWindow
         Navigate("Downloads");
         await Task.Delay(300);
         Check(
-            Descendants(ContentPanel).OfType<Button>().Any(b => b.Content as string == "على هذا الكمبيوتر")
+            Descendants(ContentPanel)
+                .OfType<Button>()
+                .Any(b =>
+                    Equals(b.Tag, "DownloadsTab:On this PC")
+                    && System.Windows.Automation.AutomationProperties.GetName(b) == "على هذا الكمبيوتر"
+                )
                 && ContentPanel.FlowDirection == FlowDirection.RightToLeft,
             "The local library tabs and layout are Arabic and RTL"
         );

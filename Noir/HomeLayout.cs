@@ -19,10 +19,28 @@ public sealed class HomeLayout
     public int Version { get; set; }
     public string ContinueStyle { get; set; } = "Wide";
     public bool ShowPosterTitles { get; set; } = true;
+
+    // "S", "M" or "L": how big Home's tiles are drawn (some people find the default feels zoomed in).
+    public string CardSize { get; set; } = "M";
+
+    public static double Scale(string? size) =>
+        size switch
+        {
+            "S" => .8,
+            "L" => 1.2,
+            _ => 1,
+        };
     public static readonly string[] DiscoveryRows = ["because-2", "picked", "fav-like", "genre-popular", "genre-top"];
+    // Your own things first (what you queued, saved, kept ready, just added and what airs next), then discovery,
+    // then the library's smart rows. A saved layout keeps its own order; this is only what a new Home starts with.
     public static readonly string[] Defaults =
     [
         "continue",
+        "queue",
+        "list",
+        "ready",
+        "recently-added",
+        "upcoming",
         "top10",
         "because",
         "because-2",
@@ -34,18 +52,17 @@ public sealed class HomeLayout
         "comfort",
         "directors",
         "short-tonight",
-        "list",
-        "ready",
         "genres",
         "collections",
-        "recently-added",
-        "services",
         "recently-watched",
         "shows",
         "movies",
-        "queue",
-        "upcoming",
+        "services",
     ];
+
+    // A row Noir fills by itself needs this many titles to be worth a row; one or two posters under a heading read as a gap.
+    public const int SmartRowMin = 3;
+    public const int GenreRowMin = 4;
     public List<HomeRowSetting> Rows { get; set; } = [];
 
     public List<HomeRowSetting> Resolve(IEnumerable<string> available)
@@ -143,6 +160,21 @@ public sealed class HomeLayout
 public partial class MainWindow
 {
     Dictionary<string, Action>? homeRowBuilders;
+    FrameworkElement? homeHero; // this render's hero, so the status strip can sit right under it
+
+    // Discovery titles already on Home this render, in page order: later rows show something new before repeating one.
+    readonly HashSet<string> homeShown = new(StringComparer.OrdinalIgnoreCase);
+
+    List<T> FreshFirst<T>(IEnumerable<T> candidates, Func<T, string> id, int limit = 20)
+    {
+        var all = candidates.ToList();
+        var picks = all.Where(c => !homeShown.Contains(id(c))).Take(limit).ToList();
+        var floor = Math.Min(12, limit);
+        if (picks.Count < floor)
+            picks.AddRange(all.Where(c => homeShown.Contains(id(c))).Take(floor - picks.Count));
+        homeShown.UnionWith(picks.Select(id));
+        return picks;
+    }
     readonly Dictionary<string, string> homeRowNames = new();
 
     void HomeRow(string id, Action render)
@@ -205,6 +237,7 @@ public partial class MainWindow
             .ToList();
         homeRowBuilders = new();
         homeRowNames.Clear();
+        homeShown.Clear();
         StartupTrace.Mark("Home rows prepared");
         RegisterSmartRows(groups);
         StartupTrace.Mark("Home smart rows registered");
@@ -212,20 +245,7 @@ public partial class MainWindow
         HomeRow("ready", () =>
         {
             if (ReadyShelf() is { } shelf)
-            {
-                foreach (
-                    var card in ViewElements(shelf)
-                        .OfType<Border>()
-                        .Where(b => b.Child is StackPanel column && column.Children.OfType<TextBlock>().Any())
-                )
-                {
-                    var title = ((StackPanel)card.Child).Children.OfType<TextBlock>().First().Text;
-                    var item = HomeItemTitled(title);
-                    if (item != null)
-                        FollowHomeHero(card, () => item);
-                }
                 ContentPanel.Children.Add(shelf);
-            }
         });
         HomeRow("services", RenderServices);
         HomeRow("top10", RenderTopTen);
@@ -266,8 +286,22 @@ public partial class MainWindow
             );
         HomeRow("genres", () =>
         {
-            foreach (var genre in genres.OrderByDescending(x => local.Count(g => g[0].Genres.Contains(x))).Take(3))
+            // Up to three genre rows, biggest first. A genre with too few titles, or with only titles an earlier
+            // genre row already showed (Anime under Adventure), is skipped.
+            var drawn = new List<HashSet<string>>();
+            foreach (var genre in genres.OrderByDescending(x => local.Count(g => g[0].Genres.Contains(x))))
+            {
+                if (drawn.Count == 3)
+                    break;
+                var keys = local
+                    .Where(g => g[0].Genres.Split('·', StringSplitOptions.TrimEntries).Contains(genre))
+                    .Select(g => g[0].GroupKey)
+                    .ToHashSet();
+                if (keys.Count < HomeLayout.GenreRowMin || drawn.Any(keys.IsSubsetOf))
+                    continue;
+                drawn.Add(keys);
                 Genre(genre);
+            }
         });
         foreach (var genre in genres)
         {
@@ -304,10 +338,21 @@ public partial class MainWindow
                 build();
                 StartupTrace.Mark("Home row built: " + row.Id);
             }
-        var edit = ActionButton(T("Edit Home", "تعديل الرئيسية"), () => HomeLayoutEditor(builders.Keys));
-        edit.Margin = new(0, 36, 0, 24);
-        System.Windows.Automation.AutomationProperties.SetName(edit, "Edit Home");
-        ContentPanel.Children.Add(edit);
+        // The status strip sits under the hero and carries "Edit Home"; only a page with no strip keeps the button at its end.
+        if (HomeStatusStrip(groups, builders.Keys) is { } strip)
+            ContentPanel.Children.Insert(
+                homeHero != null && ContentPanel.Children.Contains(homeHero)
+                    ? ContentPanel.Children.IndexOf(homeHero) + 1
+                    : 0,
+                strip
+            );
+        else
+        {
+            var edit = ActionButton(T("Edit Home", "تعديل الرئيسية"), () => HomeLayoutEditor(builders.Keys));
+            edit.Margin = new(0, 36, 0, 24);
+            System.Windows.Automation.AutomationProperties.SetName(edit, "Edit Home");
+            ContentPanel.Children.Add(edit);
+        }
         lastWatched.Clear();
     }
 
@@ -362,6 +407,45 @@ public partial class MainWindow
             Commit();
         };
         panel.Children.Add(titles);
+        panel.Children.Add(
+            SheetSection(
+                T("Tile size", "حجم البطاقات"),
+                T("How big posters and cards are drawn on Home.", "حجم الملصقات والبطاقات في الرئيسية.")
+            )
+        );
+        var sizes = new WrapPanel { Margin = new(0, 4, 0, 12) };
+        void DrawSizes()
+        {
+            sizes.Children.Clear();
+            foreach (
+                var (id, label) in new[]
+                {
+                    ("S", T("Small", "صغير")),
+                    ("M", T("Medium", "متوسط")),
+                    ("L", T("Large", "كبير")),
+                }
+            )
+            {
+                var pill = PillOption(
+                    label,
+                    () =>
+                    {
+                        layout.CardSize = id;
+                        Commit();
+                        DrawSizes();
+                    },
+                    (layout.CardSize is "S" or "L" ? layout.CardSize : "M") == id
+                );
+                pill.Margin = new(0, 0, 8, 0);
+                System.Windows.Automation.AutomationProperties.SetName(
+                    pill,
+                    T("Tile size", "حجم البطاقات") + " " + label
+                );
+                sizes.Children.Add(pill);
+            }
+        }
+        DrawSizes();
+        panel.Children.Add(sizes);
         panel.Children.Add(
             SheetSection(
                 T("Rows", "الصفوف"),

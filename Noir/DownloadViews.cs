@@ -1232,13 +1232,30 @@ public partial class MainWindow
 #if NOIR_VALIDATE
         QueueReadyValidation();
 #endif
+        // Three tabs, one per job of this page: what is downloading, what is on this PC, what Noir keeps ready.
+        // Each tab card carries its own live line, so the numbers are visible whichever tab is open.
         var queue = new StackPanel();
         var library = new StackPanel();
+        var ready = new StackPanel();
         page.Children.Add(queue);
         page.Children.Add(library);
+        page.Children.Add(ready);
+        TextBlock Note()
+        {
+            var note = Text("", 12, DimText);
+            note.TextWrapping = TextWrapping.NoWrap;
+            note.TextTrimming = TextTrimming.CharacterEllipsis;
+            note.Margin = new(0, 2, 0, 0);
+            return note;
+        }
+        downloadsQueueNote = Note();
+        downloadsPcNote = Note();
+        downloadsReadyNote = Note();
+        readyCentreHost = new Border { Child = PreparationCentre() };
+        ready.Children.Add(readyCentreHost);
         downloadPageUpdate = BuildDownloadPage(queue);
         downloadPageUpdate();
-        BuildDownloadTabs(page, queue, library, downloadPageUpdate);
+        BuildDownloadTabs(page, queue, library, ready);
     }
 
     // ---- Downloads page: one calm row per job, grouped by what the user can do about it ----
@@ -1246,8 +1263,9 @@ public partial class MainWindow
         DoneGreen = "#8FCB9B",
         DownloadGold = "#E4C084",
         DownloadRed = "#E5736B";
-    Expander? keepReadyExpander;
-    bool keepReadyOpen;
+    TextBlock? downloadsQueueNote,
+        downloadsPcNote,
+        downloadsReadyNote; // the live line under each Downloads tab
 
     sealed class DownloadRowView
     {
@@ -1787,11 +1805,7 @@ public partial class MainWindow
         head.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
         head.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         // The page chrome already shows the title; this row is the live summary and the quiet tools.
-        var titles = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        var summary = Text("", 13, "#C7C2BC");
-        summary.Margin = new(0, 0, 12, 0);
-        titles.Children.Add(summary);
-        head.Children.Add(titles);
+        var summary = downloadsQueueNote!;
         var tools = new WrapPanel
         {
             VerticalAlignment = VerticalAlignment.Center,
@@ -1816,7 +1830,13 @@ public partial class MainWindow
             ControlAll("pause", j => j.Status is "Queued" or "Preparing" or "Downloading" or "Subtitles")
         );
         var resumeAll = Quiet(T("Resume all", "استئناف الكل"), () => ControlAll("resume", j => j.Status == "Paused"));
-        foreach (var b in new[] { pauseAll, resumeAll })
+        // "Clear finished" used to sit in a three-dot menu; it shows here while there is something to clear.
+        var clearDone = Quiet(T("Clear finished", "مسح المكتمل"), () =>
+        {
+            manager.ClearFinished();
+            update();
+        });
+        foreach (var b in new[] { pauseAll, resumeAll, clearDone })
             tools.Children.Add(b);
         page.Children.Add(head);
         var empty = new Border
@@ -1898,32 +1918,6 @@ public partial class MainWindow
         showMore.Margin = new(0, 2, 0, 0);
         showMore.Visibility = Visibility.Collapsed;
         sections["ready"].Box.Children.Add(showMore);
-        readyCentreHost = new Border { Child = PreparationCentre() };
-        var keepHeader = new StackPanel { Orientation = Orientation.Horizontal };
-        keepHeader.Children.Add(
-            Text(T("Keep ready", "إبقاء الحلقات جاهزة"), Density.Pick(13.5, 15), weight: FontWeights.SemiBold)
-        );
-        var keepNote = Text(
-            T("Next episodes prepared on this PC", "الحلقات القادمة المحضّرة على هذا الكمبيوتر"),
-            12,
-            DimText
-        );
-        keepNote.Margin = new(10, 1, 0, 0);
-        keepHeader.Children.Add(keepNote);
-        keepReadyExpander = new Expander
-        {
-            Header = keepHeader,
-            Content = readyCentreHost,
-            Margin = new(0, Density.Pick(22, 28), 0, 12),
-            IsExpanded = keepReadyOpen,
-        };
-        keepReadyExpander.Expanded += (_, _) => keepReadyOpen = true;
-        keepReadyExpander.Collapsed += (_, _) => keepReadyOpen = false;
-        System.Windows.Automation.AutomationProperties.SetName(
-            keepReadyExpander,
-            T("Keep ready", "إبقاء الحلقات جاهزة")
-        );
-        page.Children.Add(keepReadyExpander);
         var rows = new Dictionary<string, DownloadRowView>();
         List<(string Text, bool Latin)> freeParts = [];
         var freeAt = DateTime.MinValue;
@@ -1987,6 +1981,10 @@ public partial class MainWindow
                 now.Count + waiting.Count(j => j.Status == "Queued") > 1 ? Visibility.Visible : Visibility.Collapsed;
             resumeAll.Visibility =
                 waiting.Count(j => j.Status == "Paused") > 1 ? Visibility.Visible : Visibility.Collapsed;
+            clearDone.Visibility = done.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            head.Visibility = new[] { pauseAll, resumeAll, clearDone }.Any(b => b.Visibility == Visibility.Visible)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
             var line = new List<string>();
             if (now.Count > 0)
                 line.Add(T("{0} downloading", "{0} قيد التنزيل", now.Count));
@@ -2009,21 +2007,47 @@ public partial class MainWindow
                 freeAt = DateTime.UtcNow;
                 freeParts = DownloadFreeSpaceParts(manager);
             }
-            var pieces = new List<(string Text, string Color, bool Latin, bool Bold)>
+            summary.Text = string.Join(" · ", line);
+            // On this PC: how many videos are here and how much room is left on their drive.
+            var onPc = store.Archive.Count(i => i.Available);
+            var pcPieces = new List<(string Text, string Color, bool Latin, bool Bold)>
             {
-                (string.Join(" · ", line), "#C7C2BC", false, false),
+                (Videos(onPc), DimText, false, false),
             };
             if (freeParts.Count > 0)
             {
-                pieces.Add((" · ", "#6F6B66", false, false));
-                pieces.AddRange(freeParts.Select(p => (p.Text, "#C7C2BC", p.Latin, false)));
+                pcPieces.Add((" · ", "#6F6B66", false, false));
+                pcPieces.AddRange(freeParts.Select(p => (p.Text, DimText, p.Latin, false)));
             }
             if (Loc.Arabic)
-                FillInlines(summary, pieces);
+                FillInlines(downloadsPcNote!, pcPieces);
             else
             {
-                summary.Inlines.Clear();
-                summary.Text = string.Concat(pieces.Select(p => p.Text));
+                downloadsPcNote!.Inlines.Clear();
+                downloadsPcNote.Text = string.Concat(pcPieces.Select(p => p.Text));
+            }
+            // Keep ready: what is waiting offline and how much of its budget is used.
+            var keepState = manager.ReadyViewState;
+            var offline = keepState.Titles.Values.Count(t => t.State == "Offline");
+            var keepPieces = new List<(string Text, string Color, bool Latin, bool Bold)>();
+            if (keepState.Paused)
+                keepPieces.Add((ReadyText("Preparation paused"), DimText, false, false));
+            else if (keepState.Titles.Count == 0)
+                keepPieces.Add((T("Not switched on for any show yet", "غير مفعّل لأي مسلسل بعد"), DimText, false, false));
+            else
+            {
+                keepPieces.Add((T("{0} ready offline", "{0} جاهزة دون اتصال", offline), DimText, false, false));
+                keepPieces.Add((" · ", "#6F6B66", false, false));
+                keepPieces.Add((ReadySize(manager.ReadyStorage.UsedBytes), DimText, true, false));
+                keepPieces.Add((T(" of ", " من "), DimText, false, false));
+                keepPieces.Add((ReadySize(keepState.BudgetBytes), DimText, true, false));
+            }
+            if (Loc.Arabic)
+                FillInlines(downloadsReadyNote!, keepPieces);
+            else
+            {
+                downloadsReadyNote!.Inlines.Clear();
+                downloadsReadyNote.Text = string.Concat(keepPieces.Select(p => p.Text));
             }
             // A finished file can take a moment to appear in the library; look again until it does.
             if (rows.Values.Any(r => r.State == "Completed" && r.Library == null) && resolve == null)

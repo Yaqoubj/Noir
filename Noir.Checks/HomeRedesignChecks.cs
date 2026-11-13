@@ -8,6 +8,11 @@ public static class HomeRedesignChecks
         var expected = new[]
         {
             "continue",
+            "queue",
+            "list",
+            "ready",
+            "recently-added",
+            "upcoming",
             "top10",
             "because",
             "because-2",
@@ -19,13 +24,11 @@ public static class HomeRedesignChecks
             "comfort",
             "directors",
             "short-tonight",
-            "list",
-            "ready",
         };
         var fresh = new HomeLayout().Resolve([]);
         check(
             fresh.Take(expected.Length).Select(r => r.Id).SequenceEqual(expected),
-            "Home redesign defaults put discovery first and Keep ready immediately after My List"
+            "Home defaults put your own rows first (queue, My List, Keep ready, Recently added, Coming up), then discovery, then smart rows"
         );
         check(
             new HomeLayout().ContinueStyle == "Wide" && new HomeLayout().ShowPosterTitles,

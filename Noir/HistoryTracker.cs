@@ -168,22 +168,20 @@ public partial class MainWindow
         ContentPanel.Children.Add(row);
     }
 
-    void RenderViewingLife(List<Watched> views)
+    // The one line under the History title: how much you have watched, the weekly goal, and where your watches are
+    // sent. It was a strip at the bottom of every tab, below everything else on the page (U134).
+    FrameworkElement HistoryLifeLine(List<Watched> views)
     {
         var reward = HistoryRewards.Summary(
             views.Select(v => new RewardViewing(v.At.ToLocalTime().Date, v.Item.IsMovie, v.DateUnknown, v.Approximate)),
             DateTime.Today
         );
-        var card = new Border
+        var grid = new StackPanel
         {
             Tag = "HistoryStatsStrip",
-            CornerRadius = new(12),
-            Background = Brush("#141416"),
-            Padding = new(18, 12, 18, 12),
-            Margin = new(0, 16, 0, 12),
+            Orientation = Orientation.Horizontal,
+            Margin = new(0, 6, 0, 0),
         };
-        var grid = new DockPanel();
-        card.Child = grid;
         var paused = GoalPaused;
         var target = paused ? 0 : HistoryPrefs.WeeklyGoal;
         var goal = new StackPanel
@@ -191,12 +189,10 @@ public partial class MainWindow
             Orientation = Orientation.Horizontal,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        DockPanel.SetDock(goal, Dock.Right);
-        grid.Children.Add(goal);
         var goalButton = ActionButton("", () => { });
         goalButton.Content = Ring(
             target > 0 ? reward.Week / (double)target : 0,
-            38,
+            30,
             target > 0 ? $"{reward.Week}/{target}" : "–"
         );
         goalButton.Padding = new(0);
@@ -212,20 +208,37 @@ public partial class MainWindow
         label.Margin = new(8, 0, 0, 0);
         label.VerticalAlignment = VerticalAlignment.Center;
         goal.Children.Add(label);
+        // A streak of nothing is not worth a place on the line.
         var summary = Text(
             T(
-                "{0:N0} viewings  ·  {1:0.#} hours  ·  {2} day streak",
-                "{0:N0} مشاهدة  ·  {1:0.#} ساعة  ·  {2} أيام متتالية",
+                "{0:N0} viewings  ·  {1:0.#} hours",
+                "{0:N0} مشاهدة  ·  {1:0.#} ساعة",
                 views.Count,
-                views.Sum(v => v.Seconds) / 3600,
-                reward.Streak
-            ),
-            13,
-            "#C7C2BC"
+                views.Sum(v => v.Seconds) / 3600
+            )
+                + (
+                    reward.Streak > 0
+                        ? "  ·  "
+                            + Loc.Count(
+                                reward.Streak,
+                                "day streak",
+                                "day streak",
+                                "يوم متتالٍ واحد",
+                                "يومان متتاليان",
+                                "أيام متتالية",
+                                "يومًا متتاليًا"
+                            )
+                        : ""
+                ),
+            12.5,
+            "#AAA6A0"
         );
         summary.VerticalAlignment = VerticalAlignment.Center;
-        summary.Margin = new(0, 0, 12, 0);
+        summary.Margin = new(0, 0, 16, 0);
         grid.Children.Add(summary);
+        grid.Children.Add(goal);
+        if (HistorySyncLink() is { } syncLink)
+            grid.Children.Add(syncLink);
         goalButton.Click += (_, _) =>
         {
             void SaveGoal(int value)
@@ -299,9 +312,63 @@ public partial class MainWindow
             menu.Placement = PlacementMode.Bottom;
             menu.IsOpen = true;
         };
-        grid.SizeChanged += (_, e) =>
-            label.Visibility = e.NewSize.Width < 640 ? Visibility.Collapsed : Visibility.Visible;
-        ContentPanel.Children.Add(card);
+        return grid;
+    }
+
+    // "Trakt · Serializd · 3 h ago": where a finished episode is marked for you, and the way to Connections. With no
+    // website switched on it is the invitation to set one up. A website that has stopped has its own banner instead.
+    Button? HistorySyncLink()
+    {
+        var state = store.State;
+        if (watchSync != null && CommunityQueue.Notices(state, watchSync.Backoff, watchSync.Clock()).Count > 0)
+            return null;
+        var sites = new List<string>();
+        if (state.SyncTrakt)
+            sites.Add("Trakt");
+        if (state.SyncSerializd)
+            sites.Add("Serializd");
+        if (CommunityQueue.StremioMarkOn(state))
+            sites.Add(CommunityQueue.Stremio);
+        if (state.SyncNuvio && state.NuvioConnected)
+            sites.Add("Nuvio");
+        string words;
+        string tip;
+        if (sites.Count == 0)
+        {
+            words = T("Sync with Trakt, Serializd or Stremio", "زامن مع Trakt أو Serializd أو Stremio");
+            tip = T(
+                "Noir can mark what you finish on these sites for you. Open Connections.",
+                "يستطيع Noir تعليم ما تنتهي منه على هذه المواقع. افتح الاتصالات."
+            );
+        }
+        else
+        {
+            var last = state
+                .WatchSync.Values.Where(j => sites.Contains(j.Provider) && j.SyncedAt != null)
+                .Select(j => j.SyncedAt!.Value)
+                .DefaultIfEmpty(DateTimeOffset.MinValue)
+                .Max();
+            words = string.Join(" · ", sites) + (last > DateTimeOffset.MinValue ? " · " + Ago(last) : "");
+            tip = T(
+                "What you finish is marked on these sites. Open Connections.",
+                "ما تنتهي منه يُعلَّم على هذه المواقع. افتح الاتصالات."
+            );
+        }
+        var link = ActionButton("[[sync]]  " + words, () =>
+        {
+            settingsSection = "Connections";
+            Navigate("Settings");
+        });
+        link.Background = Brush("Transparent");
+        link.Foreground = Brush("#AAA6A0");
+        link.FontSize = 12.5;
+        link.Padding = new(8, 4, 8, 4);
+        link.Margin = new(14, 0, 0, 0);
+        link.VerticalAlignment = VerticalAlignment.Center;
+        link.ToolTip = tip;
+        link.Tag = "HistorySyncLink";
+        System.Windows.Automation.AutomationProperties.SetName(link, words);
+        return link;
     }
 
     // Re-renders after a check-off without the page entrance motion, so the list doesn't jump.
@@ -384,13 +451,24 @@ public partial class MainWindow
         import.ToolTip = T("Import history from other apps", "استورد سجلّك من التطبيقات الأخرى");
         System.Windows.Automation.AutomationProperties.SetName(import, import.Content.ToString());
         actions.Children.Add(import);
+        // Export was an item of the three-dot menu; a tracker's way out of its data belongs beside its way in.
+        var export = ActionButton(T("[[external]]  Export", "[[external]]  تصدير"), () =>
+        {
+            settingsSection = "Backup";
+            Navigate("Settings");
+        });
+        export.Padding = Density.Compact ? Density.ButtonPadding : new(18, 11, 20, 11);
+        export.Margin = new(10, 0, 0, 0);
+        export.ToolTip = T("Back up or export your history", "انسخ سجلّك احتياطيًا أو صدّره");
+        System.Windows.Automation.AutomationProperties.SetName(export, export.Content.ToString());
+        actions.Children.Add(export);
         var extras = ActionButton("[[more]]", () => { });
         extras.Padding = new(14, 6, 14, 12);
         extras.FontSize = 17;
         extras.Margin = new(10, 0, 0, 0);
         extras.ToolTip = T(
-            "More: year story, compare taste, calendar, backup",
-            "المزيد: حكاية العام ومقارنة الذوق والتقويم والنسخ الاحتياطي"
+            "More: year story, compare taste, calendar",
+            "المزيد: حكاية العام ومقارنة الذوق والتقويم"
         );
         System.Windows.Automation.AutomationProperties.SetName(
             extras,
@@ -403,6 +481,7 @@ public partial class MainWindow
         heading.TextWrapping = TextWrapping.NoWrap;
         heading.TextTrimming = TextTrimming.CharacterEllipsis;
         caption.Children.Add(heading);
+        caption.Children.Add(HistoryLifeLine(views));
         header.Children.Add(caption);
         header.SizeChanged += (_, e) => DockPanel.SetDock(actions, e.NewSize.Width < 640 ? Dock.Bottom : Dock.Right);
         ContentPanel.Children.Add(header);
@@ -434,7 +513,6 @@ public partial class MainWindow
                 ContentPanel.Children.Add(HistoryProfileHeader());
                 break;
         }
-        RenderViewingLife(views);
     }
 
     bool TrackerFits(VideoItem item)

@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -206,59 +207,130 @@ public partial class MainWindow
             : ReadyText(title.Reason) + (title.Bytes > 0 ? " · " + ReadySize(title.Bytes) : "");
     }
 
+    // Home's Keep ready row: the same artwork cards and arrows as every other row (it used to be text boxes with a
+    // scrollbar). A card plays the episode when it is on this PC and opens Downloads when it is still on its way.
     public FrameworkElement? ReadyShelf()
     {
         if (downloads == null)
             return null;
         var state = downloads.ReadyViewState;
-        var titles = state.Titles.Values.Where(t => t.Episodes.Count > 0).Take(12).ToList();
+        // Home shows what Keep ready has on this PC or is bringing in now. A title it could download but has not been
+        // asked to ("Ready to download") is a preview, and stays in Downloads where it can be switched on.
+        var titles = state
+            .Titles.Values.Where(t => t.Episodes.Count > 0 && (t.Episodes[0].Local || t.State is "Offline" or "Preparing"))
+            .OrderByDescending(t => t.Episodes[0].Local)
+            .Take(12)
+            .ToList();
         if (titles.Count == 0)
             return null;
-        var panel = new StackPanel { Margin = new(0, 18, 0, 10) };
-        panel.Children.Add(
-            Heading(
-                T("Keep ready", "إبقاء الحلقات جاهزة"),
-                T("Your next watch is already here", "مشاهدتك القادمة جاهزة هنا")
-            )
-        );
-        var rail = new StackPanel { Orientation = Orientation.Horizontal };
-        panel.Children.Add(
-            new ScrollViewer
-            {
-                Content = rail,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            }
-        );
+        var cards = new List<FrameworkElement>();
+        var anyLocal = false;
         foreach (var title in titles)
         {
-            var column = new StackPanel { Width = 250 };
-            column.Children.Add(Text(title.Title, 17, "#F4F1EB", FontWeights.SemiBold));
-            column.Children.Add(Body(state.Paused ? ReadyText("Preparation paused") : ReadyText(title.Reason), 12));
             var first = title.Episodes.First();
-            column.Children.Add(
-                Text(
-                    first.Season == 0 ? T("Movie", "فيلم") : $"S{first.Season:00} · E{first.Episode:00}",
-                    12,
-                    "#E4C084"
-                )
-            );
-            if (first.Local)
+            var group = store.EpisodesFor(title.Group);
+            var item = group.FirstOrDefault(e => e.Id == first.ItemId) ?? group.FirstOrDefault();
+            if (item == null)
+                continue;
+            var local = first.Local && CanPlay(item);
+            anyLocal |= local;
+            var panel = new StackPanel
             {
-                var item = store.EpisodesFor(title.Group).FirstOrDefault(e => e.Id == first.ItemId);
-                if (item != null)
-                    column.Children.Add(
-                        ActionButton(T("Play offline", "شاهد دون اتصال"), () => _ = PlayVideo(item), true)
-                    );
-            }
-            else
-                column.Children.Add(ActionButton(T("Keep ready", "إبقاء الحلقات جاهزة"), ShowDownloads));
-            var card = ReadyCard(column);
-            card.Margin = new(0, 0, 14, 6);
-            rail.Children.Add(card);
+                Width = Density.ContinueWidth,
+                Margin = new(0, 0, Density.CardGap, 12),
+                Tag = "HomeReadyCard",
+            };
+            var picture = new Grid { Height = Density.ContinueHeight, ClipToBounds = true };
+            var open = ActionButton("", () =>
+            {
+                if (local)
+                    _ = PlayVideo(item);
+                else
+                    ShowDownloads();
+            });
+            open.Content = Art(
+                File.Exists(item.Backdrop) ? item.Backdrop : item.Poster,
+                item.Title,
+                Density.ContinueHeight,
+                false,
+                false
+            );
+            open.Padding = new(0);
+            open.HorizontalAlignment = HorizontalAlignment.Stretch;
+            var what = local
+                ? T("Play {0} offline", "شاهد {0} دون اتصال", item.Label)
+                : T("{0} · open Downloads", "{0} · افتح التنزيلات", item.Label);
+            open.ToolTip = what;
+            System.Windows.Automation.AutomationProperties.SetName(open, what);
+            picture.Children.Add(open);
+            picture.Children.Add(
+                new Border
+                {
+                    IsHitTestVisible = false,
+                    Background = new LinearGradientBrush(Colors.Transparent, Color.FromArgb(235, 11, 11, 13), 90),
+                }
+            );
+            if (local)
+                picture.Children.Add(
+                    new Border
+                    {
+                        IsHitTestVisible = false,
+                        Background = Brush("#E6101012"),
+                        BorderBrush = Brush("#66E4C084"),
+                        BorderThickness = new(1),
+                        CornerRadius = new(6),
+                        Padding = new(8, 3, 8, 3),
+                        Margin = new(10),
+                        HorizontalAlignment = HorizontalAlignment.Left,
+                        VerticalAlignment = VerticalAlignment.Top,
+                        Child = Text(T("On this PC", "على هذا الكمبيوتر"), 10.5, "#E4C084", FontWeights.SemiBold),
+                    }
+                );
+            var caption = new StackPanel
+            {
+                Margin = new(14, 0, 14, 12),
+                VerticalAlignment = VerticalAlignment.Bottom,
+                IsHitTestVisible = false,
+            };
+            caption.Children.Add(
+                HomeTitleMark(item, Density.Scaled(44), Math.Min(240, Density.ContinueWidth - 28), 18)
+            );
+            var line = Text("", 11.5, "#D9D4CC");
+            SetMarked(
+                line,
+                (
+                    first.Season == 0
+                        ? ""
+                        : Ltr + "S" + first.Season.ToString("00") + " · E" + first.Episode.ToString("00") + End + " · "
+                ) + (state.Paused ? ReadyText("Preparation paused") : ReadyText(title.Reason))
+            );
+            line.TextWrapping = TextWrapping.NoWrap;
+            line.TextTrimming = TextTrimming.CharacterEllipsis;
+            line.Margin = new(0, 4, 0, 0);
+            caption.Children.Add(line);
+            picture.Children.Add(caption);
+            var edge = new Border
+            {
+                CornerRadius = new(10),
+                ClipToBounds = true,
+                Child = picture,
+                BorderThickness = new(1.5),
+                BorderBrush = Brush("#00000000"),
+            };
+            panel.Children.Add(edge);
+            cards.Add(FollowHomeHero(Lift(panel, edge), () => item));
         }
-        Motion.EnterOnce(panel);
-        return panel;
+        if (cards.Count == 0)
+            return null;
+        return Rail(
+            T("Keep ready", "إبقاء الحلقات جاهزة"),
+            anyLocal
+                ? T("Downloaded ahead and waiting for you.", "نُزّلت مسبقًا وتنتظرك.")
+                : T("On their way, so they are ready when you are.", "في الطريق، لتكون جاهزة عند حاجتك."),
+            cards,
+            ShowDownloads,
+            T("Manage", "إدارة")
+        );
     }
 
     public async void OfferKeepReady(VideoItem finished)
@@ -807,6 +879,14 @@ public partial class MainWindow
                 await manager.PrepareReady("Preferences changed");
                 RefreshReadyCentre();
             }));
+        // The rules (which shows, how far ahead, when to remove) live in Settings; this is the way there.
+        tools.Children.Add(
+            ActionButton("[[sliders]]  " + T("Automatic rules", "القواعد التلقائية"), () =>
+            {
+                settingsSection = "Downloads";
+                Navigate("Settings");
+            })
+        );
         foreach (var tool in tools.Children.OfType<Button>())
             tool.Margin = new(0, 0, 8, 8);
         var usage = Body("", 12);
@@ -819,16 +899,16 @@ public partial class MainWindow
             Margin = new(0, 6, 0, 8),
         };
         panel.Children.Add(storageBar);
-        panel.Children.Add(
-            Body(
-                T(
-                    "At least {0} stays free. Unwatched episodes stay on your PC.",
-                    "تبقى مساحة {0} حرة على الأقل. تبقى الحلقات غير المشاهدة على الكمبيوتر.",
-                    ReadySize(state.KeepFreeBytes)
-                ),
-                12
+        var floor = Body("", 12);
+        SetMarked(
+            floor,
+            T(
+                "At least {0} stays free. Unwatched episodes stay on your PC.",
+                "تبقى مساحة {0} حرة على الأقل. تبقى الحلقات غير المشاهدة على الكمبيوتر.",
+                Ltr + ReadySize(state.KeepFreeBytes) + End
             )
         );
+        panel.Children.Add(floor);
         var titleRows = new StackPanel();
         panel.Children.Add(titleRows);
         void DrawTitles()
@@ -836,12 +916,43 @@ public partial class MainWindow
             titleRows.Children.Clear();
             foreach (var title in state.Titles.Values.Take(40))
             {
-                var row = new StackPanel();
-                row.Children.Add(Text(title.Title, 15, "#F4F1EB", FontWeights.SemiBold));
-                row.Children.Add(Body(state.Paused ? ReadyText("Preparation paused") : ReadyText(title.Reason), 12));
+                var words = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+                words.Children.Add(Bidi(Text(title.Title, 14, "#F4F1EB", FontWeights.SemiBold)));
+                var reason = Body(state.Paused ? ReadyText("Preparation paused") : ReadyText(title.Reason), 12);
+                reason.Margin = new(0, 2, 0, 0);
+                words.Children.Add(reason);
                 if (title.Bytes > 0)
-                    row.Children.Add(Text(title.Quality + " · " + ReadySize(title.Bytes), 12, "#E4C084"));
-                titleRows.Children.Add(ReadyCard(row));
+                    words.Children.Add(
+                        Bidi(
+                            Text(
+                                (title.Quality.Length > 0 ? title.Quality + " · " : "") + ReadySize(title.Bytes),
+                                12,
+                                "#E4C084"
+                            )
+                        )
+                    );
+                // The same compact row as "On this PC": poster thumbnail, name, state.
+                var poster = store.EpisodesFor(title.Group).Select(i => i.Poster).FirstOrDefault(File.Exists);
+                var thumb = new Border
+                {
+                    Width = 40,
+                    Height = 60,
+                    CornerRadius = new(6),
+                    Background = Brush("#1C1C1F"),
+                    Margin = new(0, 0, 14, 0),
+                    Clip = new RectangleGeometry(new Rect(0, 0, 40, 60), 6, 6),
+                };
+                if (poster != null)
+                    thumb.Child = Art(poster, title.Title, 60, true, false);
+                var row = new DockPanel();
+                DockPanel.SetDock(thumb, Dock.Left);
+                row.Children.Add(thumb);
+                row.Children.Add(words);
+                var card = ReadyCard(row);
+                card.Padding = new(12, 10, 16, 10);
+                card.Margin = new(0, 4, 0, 4);
+                card.CornerRadius = new(10);
+                titleRows.Children.Add(card);
             }
             if (state.Titles.Count == 0)
                 titleRows.Children.Add(
@@ -967,12 +1078,15 @@ public partial class MainWindow
         {
             state = manager.ReadyViewState;
             storage = manager.ReadyStorage;
-            usage.Text = T(
-                "{0} used + {1} reserved · {2} budget",
-                "{0} مستخدمة + {1} محجوزة · الميزانية {2}",
-                ReadySize(storage.UsedBytes),
-                ReadySize(storage.ReservedBytes),
-                ReadySize(state.BudgetBytes)
+            SetMarked(
+                usage,
+                T(
+                    "{0} used + {1} reserved · {2} budget",
+                    "{0} مستخدمة + {1} محجوزة · الميزانية {2}",
+                    Ltr + ReadySize(storage.UsedBytes) + End,
+                    Ltr + ReadySize(storage.ReservedBytes) + End,
+                    Ltr + ReadySize(state.BudgetBytes) + End
+                )
             );
             storageBar.Maximum = Math.Max(1, state.BudgetBytes);
             storageBar.Value = Math.Min(state.BudgetBytes, storage.UsedBytes + storage.ReservedBytes);

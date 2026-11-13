@@ -531,6 +531,40 @@ public partial class MainWindow
             play.Margin = new(0, 0, 7, 0);
             row.Children.Add(play);
         }
+        else if (System.Text.RegularExpressions.Regex.IsMatch(next.ImdbId, @"^tt\d+$"))
+        {
+            // Not on this PC: the two things Noir can do about it used to be in the right-click menu only.
+            var busy = ActiveDownload(next) != null;
+            if (StreamOffered && !busy)
+            {
+                var stream = ActionButton("[[play]]", () => StreamItem(next), true);
+                stream.ToolTip = T("Stream now", "بث الآن");
+                System.Windows.Automation.AutomationProperties.SetName(
+                    stream,
+                    T("Stream now", "بث الآن") + " " + item.Title
+                );
+                stream.Padding = new(13, 7, 13, 7);
+                stream.Margin = new(0, 0, 7, 0);
+                row.Children.Add(stream);
+            }
+            if (downloads != null)
+            {
+                var get = ActionButton("[[download]]", () =>
+                {
+                    if (busy)
+                        Navigate("Downloads");
+                    else
+                        FindDownloads(next);
+                });
+                get.ToolTip = busy
+                    ? T("Downloading… · open Downloads", "جارٍ التنزيل… · افتح التنزيلات")
+                    : T("Download", "تنزيل");
+                System.Windows.Automation.AutomationProperties.SetName(get, (string)get.ToolTip + " " + item.Title);
+                get.Padding = new(12, 7, 12, 7);
+                get.Margin = new(0, 0, 7, 0);
+                row.Children.Add(get);
+            }
+        }
         var listed = store.State.Watchlist.Contains(item.GroupKey);
         var list = ActionButton(listed ? "[[check]]" : "[[plus]]", () => ToggleWatchlist(item));
         list.ToolTip = T(listed ? "In My List · click to remove" : "Add to My List");
@@ -599,11 +633,13 @@ public partial class MainWindow
         name.TextTrimming = TextTrimming.CharacterEllipsis;
         name.TextWrapping = TextWrapping.NoWrap;
         panel.Children.Add(name);
-        var meta = item.IsMovie
-            ? (item.Year > 0 ? item.Year.ToString() : "Movie")
-            : (watched > 0 ? $"{watched} / {total} watched" : $"{total} episodes");
+        var meta =
+            item.IsMovie ? (item.Year > 0 ? item.Year.ToString() : T("Movie", "فيلم"))
+            : watched > 0 ? T("{0} / {1} watched", "{0} / {1} مشاهدة", watched, total)
+            : Loc.Count(total, "episode", "episodes", "حلقة واحدة", "حلقتان", "حلقات", "حلقة");
         if (!group.Any(CanPlay))
-            meta += " · Not on this PC";
+            meta += " · " + T("Not on this PC", "ليس على هذا الكمبيوتر");
+        Bidi(name); // a Latin title keeps its brackets on the right side in Arabic
         var line = Text(meta, 11, "#9F9A93");
         line.TextTrimming = TextTrimming.CharacterEllipsis;
         line.TextWrapping = TextWrapping.NoWrap;

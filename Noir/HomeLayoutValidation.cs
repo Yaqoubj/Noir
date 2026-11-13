@@ -179,22 +179,13 @@ public partial class MainWindow
             var defaults = new HomeLayout().Resolve([]).Select(r => r.Id).ToList();
             Check(
                 defaults
-                    .Take(8)
-                    .SequenceEqual(
-                        new[]
-                        {
-                            "continue",
-                            "top10",
-                            "because",
-                            "because-2",
-                            "picked",
-                            "fav-like",
-                            "genre-popular",
-                            "genre-top",
-                        }
-                    )
-                    && defaults.IndexOf("ready") == defaults.IndexOf("list") + 1,
-                "Home default order starts Continue, Top 10 and discovery; Keep ready follows My List"
+                    .Take(6)
+                    .SequenceEqual(new[] { "continue", "queue", "list", "ready", "recently-added", "upcoming" })
+                    && defaults
+                        .Skip(6)
+                        .Take(7)
+                        .SequenceEqual(new[] { "top10", "because" }.Concat(HomeLayout.DiscoveryRows)),
+                "Home default order starts with your own rows (queue, My List, Keep ready, Recently added, Coming up), then Top 10 and discovery"
             );
             File.WriteAllText(
                 Path.Combine(store.DataDirectory, "home-layout.json"),
@@ -385,6 +376,58 @@ public partial class MainWindow
                     Descendants(ContentPanel).OfType<TextBlock>().Any(t => t.Text == homeRowNames[id]),
                     "Discovery row renders: " + id
                 );
+            // Premium round, Home (U119–U126).
+            var strip = Descendants(ContentPanel).OfType<DockPanel>().FirstOrDefault(d => Equals(d.Tag, "HomeStatusStrip"));
+            var editButtons = Descendants(ContentPanel)
+                .OfType<Button>()
+                .Where(b => System.Windows.Automation.AutomationProperties.GetName(b) == "Edit Home")
+                .ToList();
+            // A library with videos on this PC always has the storage tile, so the strip must be there.
+            var expectStrip = downloads != null && store.Archive.Any(i => i.Available) && store.State.Roots.Count > 0;
+            Check(
+                !expectStrip
+                    || strip != null
+                        && ContentPanel.Children.IndexOf(strip) == ContentPanel.Children.IndexOf(homeHero) + 1
+                        && Descendants(strip)
+                            .OfType<Button>()
+                            .Any(b => (b.Tag as string)?.StartsWith("HomeStatus:") == true),
+                "U119 the status strip sits directly under the Home hero with at least one tile"
+            );
+            Check(
+                editButtons.Count == 1 && (strip == null || Descendants(strip).Contains(editButtons[0])),
+                "U120 Edit Home is offered once: at the end of the status strip, or at the page's end when there is no strip"
+            );
+            Check(
+                IconSet.Draw("chevron-left") is System.Windows.Shapes.Path left
+                    && IconSet.Draw("more") is System.Windows.Shapes.Path dots
+                    && !ReferenceEquals(left.Data, dots.Data),
+                "U126 the row's Previous arrow is a chevron, not the three-dots fallback"
+            );
+            var quick = Descendants(PosterQuickActions(store.EpisodesFor(unwatched.GroupKey)))
+                .OfType<Button>()
+                .Select(b => System.Windows.Automation.AutomationProperties.GetName(b))
+                .ToList();
+            Check(
+                downloads == null
+                    || quick.Any(n => n.StartsWith("Stream now")) && quick.Any(n => n.StartsWith("Download")),
+                "U125 a title that is not on this PC offers Stream now and Download on hover (" + string.Join(", ", quick) + ")"
+            );
+            // Every smart row that made it onto Home has at least SmartRowMin cards.
+            var smartNames = SmartLists.Ids.Select(SmartName).ToHashSet();
+            var thin = ContentPanel
+                .Children.OfType<StackPanel>()
+                .Where(rail =>
+                    Descendants(rail).OfType<TextBlock>().FirstOrDefault() is { } heading
+                    && smartNames.Contains(heading.Text)
+                    && rail.Children.OfType<ScrollViewer>().FirstOrDefault()?.Content is Panel cards
+                    && cards.Children.Count < HomeLayout.SmartRowMin
+                )
+                .Select(rail => Descendants(rail).OfType<TextBlock>().First().Text)
+                .ToList();
+            Check(
+                thin.Count == 0,
+                "U121 a smart row with fewer than three titles is not drawn on Home (" + string.Join(", ", thin) + ")"
+            );
             var savedLikes = store.State.Likes;
             var savedFavorites = store.State.Favorites;
             store.State.Likes = [];
@@ -476,6 +519,32 @@ public partial class MainWindow
                         .OfType<TextBlock>()
                         .Any(t => t.Text == unwatched.Title && t.Visibility == Visibility.Collapsed),
                 "Show titles under posters setting persists and hides Home poster captions"
+            );
+            // Tile size (Edit Home): Small draws Home's cards smaller, and only Home's.
+            new HomeLayout().Save(store.DataDirectory);
+            Render();
+            await Settle(300);
+            double WideWidth() =>
+                Descendants(ContentPanel)
+                    .OfType<FrameworkElement>()
+                    .First(e => Equals(e.Tag, "HomeWideContinue"))
+                    .Width;
+            var medium = WideWidth();
+            new HomeLayout { CardSize = "S" }.Save(store.DataDirectory);
+            Render();
+            await Settle(300);
+            var small = WideWidth();
+            new HomeLayout { CardSize = "L" }.Save(store.DataDirectory);
+            Render();
+            await Settle(300);
+            var large = WideWidth();
+            Navigate("Shows");
+            await Settle(300);
+            var elsewhere = Density.CardScale;
+            Navigate("Home");
+            Check(
+                small < medium && medium < large && elsewhere == 1,
+                $"Edit Home's tile size draws Home's cards smaller or larger ({small} < {medium} < {large}) and leaves other pages at their own size"
             );
             new HomeLayout().Save(store.DataDirectory);
             Render();

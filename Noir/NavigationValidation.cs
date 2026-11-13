@@ -292,7 +292,7 @@ public partial class MainWindow
             await OpenDiscover(discoverResults!.Titles.First(t => !t.IsMovie));
             Check(discoverTitle?.Episodes.Count == 3, "Title details contain the full known episode schedule");
             Check(
-                Descendants(ContentPanel).OfType<Button>().Any(b => b.Content as string == "Find season downloads"),
+                Descendants(ContentPanel).OfType<Button>().Any(b => b.Content as string == "Download season"),
                 "Discover exposes whole-season downloads"
             );
             discoverSeason = 2;
@@ -325,7 +325,7 @@ public partial class MainWindow
             Render();
             var seasonDownload = Descendants(ContentPanel)
                 .OfType<Button>()
-                .First(b => b.Content as string == "Find season downloads");
+                .First(b => b.Content as string == "Download season");
             seasonDownload.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await Wait(() =>
                 FindSheet("Download season") is { } found
@@ -422,6 +422,21 @@ public partial class MainWindow
                         .OfType<Button>()
                         .Count(b => b.ToolTip?.ToString()?.StartsWith("Explore ") == true) == 30,
                     "Discover creates only thirty initial cards for large result sets"
+                );
+                var quickRows = Descendants(ContentPanel)
+                    .OfType<Grid>()
+                    .Where(g => Equals(g.Tag, "DiscoverQuickActions"))
+                    .ToList();
+                Check(
+                    quickRows.Count == 30
+                        && quickRows.All(g =>
+                            Descendants(g)
+                                .OfType<Button>()
+                                .Any(b =>
+                                    System.Windows.Automation.AutomationProperties.GetName(b).Contains("My List")
+                                )
+                        ),
+                    "U143 every Discover card carries hover actions (My List always; Stream and Download when available)"
                 );
             }
             File.WriteAllText(

@@ -221,10 +221,10 @@ public partial class MainWindow
             var order = ContentPanel.Children.OfType<FrameworkElement>().ToList();
             var watchIndex = order.FindIndex(e => e.Tag as string == "HistoryWatchNext");
             var recentIndex = order.FindIndex(e => e.Tag as string == "HistoryRecentlyWatched");
-            var statsIndex = order.FindIndex(e => e.Tag as string == "HistoryStatsStrip");
+            var statsInHeader = Descendants(order[0]).OfType<FrameworkElement>().Any(e => e.Tag as string == "HistoryStatsStrip");
             Check(
-                watchIndex >= 0 && recentIndex == watchIndex + 1 && statsIndex > recentIndex,
-                "Tracker-only puts Recently watched directly after Up next and stats below both"
+                watchIndex >= 0 && recentIndex == watchIndex + 1 && statsInHeader,
+                "Tracker-only puts Recently watched directly after Up next, with the totals in the header (U134)"
             );
             // U4: the tracker rail already holds Next, Diary, Discover and Stats, so the pill row offers only the other destinations.
             Check(

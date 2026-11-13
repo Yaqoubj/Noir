@@ -48,8 +48,9 @@ internal static class Density
         : width < 1400 ? Pick(28, 40)
         : Pick(36, 56);
 
+    // Compact: the hero takes half the window so the status strip and the first row are on screen without scrolling.
     internal static double HomeHeroMin => Pick(380, 500);
-    internal static double HomeHeroFactor => Pick(.56, .78);
+    internal static double HomeHeroFactor => Pick(.50, .78);
     internal static double DetailHeroMin => Pick(360, 440);
     internal static double DetailHeroFactor => Pick(.52, .66);
     internal static double CarouselMin => Pick(380, 620);
@@ -66,16 +67,21 @@ internal static class Density
 
     internal static double HeroLogoWidth => Pick(320, 480);
     internal static double HeroRound => Pick(38, 48);
-    internal static double PosterWidth => Pick(150, 176);
-    internal static double PosterHeight => Pick(225, 264);
-    internal static double LatestWidth => Pick(260, 300);
-    internal static double LatestHeight => Pick(146, 168);
-    internal static double ContinueWidth => Pick(272, 312);
-    internal static double ContinueHeight => Pick(153, 176);
+    // Home's tile size (Edit Home → Tile size). It scales the cards of Home's rows; every other page draws at 1.
+    internal static double CardScale { get; set; } = 1;
+
+    internal static double Scaled(double value) => Math.Round(value * CardScale);
+
+    internal static double PosterWidth => Scaled(Pick(150, 176));
+    internal static double PosterHeight => Scaled(Pick(225, 264));
+    internal static double LatestWidth => Scaled(Pick(260, 300));
+    internal static double LatestHeight => Scaled(Pick(146, 168));
+    internal static double ContinueWidth => Scaled(Pick(272, 312));
+    internal static double ContinueHeight => Scaled(Pick(153, 176));
     internal static double CardGap => Pick(14, 18);
     internal static double CardTitle => Pick(13, 14);
-    internal static double DiscoveryWide => Pick(400, 470);
-    internal static double DiscoveryWideHeight => Pick(225, 264);
+    internal static double DiscoveryWide => Scaled(Pick(400, 470));
+    internal static double DiscoveryWideHeight => Scaled(Pick(225, 264));
 
     internal static double LibraryWidth(string size) =>
         size == "S" ? Pick(120, 140)

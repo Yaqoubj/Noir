@@ -230,10 +230,7 @@ public partial class MainWindow
         FrameworkElement shelf;
         if (titles.Count == 0)
         {
-            var empty = new StackPanel { Margin = new(0, 24, 0, 8) };
-            empty.Children.Add(Text(T("Favourites", "المفضلة"), 21, "#F4F1EB", FontWeights.SemiBold));
-            empty.Children.Add(Body(T("♡ titles to keep them here", "أضف ♡ إلى الأعمال لتبقى هنا"), 13));
-            shelf = empty;
+            shelf = new StackPanel();
         }
         else
             shelf = Rail(
