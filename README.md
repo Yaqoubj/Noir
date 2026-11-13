@@ -10,6 +10,27 @@ and Android phones, with a Google TV / Android TV app for the sofa.
 
 ![Noir Home, with cinematic artwork and Continue Watching](docs/screenshots/home.jpg)
 
+## What's new in 0.18.0
+
+Windows 0.18.0 and Android 0.11.0.
+
+- **Downloads without a debrid account.** A built-in torrent engine on PC and phone
+  picks healthy releases, shows peers and speed, and switches release if one stalls.
+- **Whole seasons or shows at once**, with quality and size limits. Episodes you
+  already have are skipped.
+- **A tidier library.** The organizer renames and files videos into show and season
+  folders, with a preview and Undo, and can work on new files automatically.
+  **Free up space** finds empty folders, samples, leftovers and duplicate copies.
+- **Automatic downloading and removal** with rules you choose, and overrides per show.
+- **Subtitles from more sources**, with faster syncing that also fixes frame-rate
+  mismatches.
+- **Watch sync for big histories.** Trakt and Serializd marks go newest first, and
+  the phone can send its own marks.
+- **Mark watched in Stremio** (off by default), and **Open in Harbor** from any title.
+- **Faster with big libraries**: start-up, importing, restoring and History stats.
+- **A clearer Home, Downloads, History and Discover** on PC and phone, a drawn icon
+  set, and a full Arabic pass on PC, phone and TV.
+
 ## Make yourself comfortable
 
 Point Noir at your movie and show folders on Windows, or stream through your own
@@ -23,7 +44,7 @@ points that let you leave an episode halfway through and come back to it.
 - Skip known intros, recaps and credits; let Up Next take you into the following
   episode, or cancel it.
 - Save movies and episodes for offline viewing on PC and phone, with downloads
-  managed inside Noir.
+  managed inside Noir. A built-in torrent engine downloads without a debrid account.
 
 Streaming and downloads use your configured sources, including AIOStreams, TorBox
 and Real-Debrid, with each service's own connection and account requirements.
@@ -77,6 +98,7 @@ without having to remember every episode you've seen.
   Simkl backups, or a CSV of your own.
 - **Connect your other libraries:** pull watched titles from Stremio, Plex,
   Jellyfin, Emby or Kodi; Nuvio can exchange watched status in both directions.
+  Noir can also mark what you finish as watched in Stremio, which is off by default.
 - **Review file imports before adding them.** Re-imports skip duplicate viewings,
   and an import can be undone.
 
@@ -94,7 +116,8 @@ ratings and My List with the linked PC profile.
 - **On your TV:** browse and play with the remote, using your own AIOStreams link
   or a paired PC.
 - **For later:** choose shows to **Keep ready**, with automatic episode downloads
-  within a storage budget you set on PC or phone.
+  within a storage budget you set on PC or phone. Rules set how far ahead to
+  download, when downloads may run, and when watched files are removed.
 
 Keep Noir running on the PC for local sync and PC-file streaming.
 The phone saves offline progress for the next connection; its own streams and
@@ -127,8 +150,9 @@ Choose English or Arabic, with right-to-left browsing layouts and support for Ar
 ## Get started
 
 1. [Download Noir](https://github.com/Yaqoubj/Noir/releases/latest). On Windows,
-   unzip the package and run **Noir.exe**; on Android, install the phone or TV APK
-   for your device.
+   unzip `Noir-Windows-0.18.0.zip` and run **Noir.exe**. On a phone, install
+   `Noir-Android-0.11.0.apk` (ARM64, most phones) or `Noir-Android-0.11.0-All.apk`
+   (older or unusual devices). On a TV, install `Noir-TV-0.11.0.apk`.
 2. Make it yours: add your media folders on Windows, search and log what you've
    watched, or import an existing watch history. The phone works without pairing.
 3. Connect what you want: add your AIOStreams link in download settings for
