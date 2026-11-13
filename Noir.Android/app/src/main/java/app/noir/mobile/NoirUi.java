@@ -99,7 +99,6 @@ final class NoirUi {
   // No recap here: a recap card inside one rail card made the whole rail as tall as it, leaving an empty band under the others (the recap shows on the hero and Up next).
   card.setOnLongClickListener(v->{if(!i.optBoolean("placeholder"))a.options(i);return true;});return card;
  }
- View setupCard(){LinearLayout card=a.column();card.setTag("stream-setup");card.setPadding(a.dp(16),a.dp(14),a.dp(16),a.dp(8));card.setBackground(MainActivity.bg(MainActivity.PANEL,a.dp(16)));card.addView(a.text("Watch titles that aren't on your PC by adding a streaming source.",PhoneDensity.pick(13,14),MainActivity.WHITE));LinearLayout actions=new LinearLayout(a);actions.setPadding(0,a.dp(10),0,0);actions.addView(chip("Set up streaming",()->a.startActivity(new android.content.Intent(a,PhoneDownloadSettingsActivity.class)),true));card.addView(actions);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.setMargins(0,a.dp(4),0,a.dp(8));card.setLayoutParams(lp);return card;}
  View posterCard(List<JSONObject> g){
   JSONObject i=g.get(0);LinearLayout card=a.column();LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(a.dp(PhoneDensity.posterWidth()),-2);cp.setMargins(0,0,a.dp(PhoneDensity.pick(10,12)),0);card.setLayoutParams(cp);
   FrameLayout art=art(i,true,-1,a.dp(PhoneDensity.posterArt()-2));StatusLabels.pill(a,art,i);long watched=g.stream().filter(DataStore::watched).count();

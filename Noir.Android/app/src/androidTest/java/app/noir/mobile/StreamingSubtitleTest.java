@@ -13,7 +13,7 @@ public final class StreamingSubtitleTest {
         try{
             JSONObject movie=new JSONObject().put("id","tt123").put("noirType","movie").put("name","Stream movie");
             JSONObject show=new JSONObject().put("id","tt124").put("noirType","series").put("name","Stream show").put("videos",new JSONArray().put(new JSONObject().put("season",1).put("episode",1).put("released","2099-01-01T00:00:00Z")));
-            test.runOnMainSync(()->{if(a.current!=null)a.current.cancel(true);a.title=movie;a.showDetails();assertNotNull(new DiscoverTest().find(a.body,"Stream"));a.title=show;a.season=1;a.showDetails();android.widget.Button stream=new DiscoverTest().find(a.body,"Stream episode");assertNotNull(stream);assertFalse(stream.isEnabled());});
+            test.runOnMainSync(()->{if(a.current!=null)a.current.cancel(true);a.title=movie;a.showDetails();assertNotNull(new DiscoverTest().find(a.body,"Stream"));a.title=show;a.season=1;a.showDetails();android.view.View stream=DiscoverTest.described(a.body,"Stream episode");assertNotNull(stream);assertFalse(stream.isEnabled());assertFalse("Nothing released: the gold Stream is off too",new DiscoverTest().find(a.body,"Stream").isEnabled());});
         }finally{test.runOnMainSync(a::finish);}
     }
     @Test public void playerLoadsStreamSubtitlesAndRemembersOff()throws Exception{

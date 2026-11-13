@@ -35,10 +35,12 @@ final class PhoneDensity {
  static float navItem(){return pick(52,56);}
  static float railTop(){return pick(20,26);}
  static float railBottom(){return pick(10,12);}
- static float continueWidth(){return pick(232,264);}
- static float continueArt(){return pick(130,148);}
- static float posterWidth(){return pick(112,128);}
- static float posterArt(){return pick(168,192);}
+ // Home tile size (Edit Home, U152): 1 on every other page. MainActivity.render sets it before a page is built.
+ static volatile float cardScale=1;
+ static float continueWidth(){return pick(232,264)*cardScale;}
+ static float continueArt(){return pick(130,148)*cardScale;}
+ static float posterWidth(){return pick(112,128)*cardScale;}
+ static float posterArt(){return pick(168,192)*cardScale;}
  static float latestWidth(){return pick(240,270);}
  static float latestArt(){return pick(134,150);}
  static float hero(boolean home){return home?pick(340,420):pick(300,360);}

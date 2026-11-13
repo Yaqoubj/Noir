@@ -18,7 +18,7 @@ public final class HomeHistoryRedesignTest {
  void close(DataStore data){data.flush();data.network.shutdownNow();data.images.shutdownNow();}
  @Test public void defaultOrderAndOneTimeMigrationKeepPersonalChoices()throws Exception{
   List<String> order=new ArrayList<>();for(HomeLayout.Row r:HomeLayout.resolve(null,List.of()))order.add(r.id);
-  assertEquals(Arrays.asList("continue","top10","because","because-2","picked","fav-like","genre-popular","genre-top","unfinished","comfort","directors","short-tonight","list","ready"),order.subList(0,14));
+  assertEquals(Arrays.asList("continue","queue","list","ready","recently-added","upcoming","top10","because","because-2","picked","fav-like","genre-popular","genre-top","unfinished"),order.subList(0,14));
   JSONArray old=new JSONArray("[{\"id\":\"continue\"},{\"id\":\"ready\",\"visible\":false,\"pinned\":true},{\"id\":\"genre:Drama\",\"pinned\":true},{\"id\":\"because\",\"visible\":false},{\"id\":\"list\"}]");
   JSONArray migrated=HomeLayout.migrate(old);List<HomeLayout.Row> rows=HomeLayout.resolve(migrated,List.of("genre:Drama"));List<String> ids=new ArrayList<>();for(HomeLayout.Row r:rows)ids.add(r.id);
   assertEquals(ids.indexOf("list")+1,ids.indexOf("ready"));assertEquals(ids.indexOf("because")+1,ids.indexOf("because-2"));assertTrue(rows.get(ids.indexOf("ready")).pinned);assertFalse(rows.get(ids.indexOf("ready")).visible);assertFalse(rows.get(ids.indexOf("because")).visible);assertTrue(rows.get(ids.indexOf("genre:Drama")).pinned);

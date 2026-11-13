@@ -193,7 +193,7 @@ public final class ScreenShotsTest {
    try{pickItems();}catch(Throwable t){missing("choosing fixture items",t);}
    try{prepareDiscover();}catch(Throwable t){missing("preparing fake Discover caches",t);}
    JSONArray picks=fakeTitles("Fixture pick","movie",9100401,24);DiscoveryClient.genreOverride=(genre,top)->picks;
-   for(String l:langs()){lang=l;try{if(b2only())phoneBatch2();else phoneLang();}catch(Throwable t){missing("phone "+l+" run",t);}closeActivities();}
+   for(String l:langs()){lang=l;try{if(b2only())phoneBatch2();else if(premiumOnly())phonePremium();else phoneLang();}catch(Throwable t){missing("phone "+l+" run",t);}closeActivities();}
   }finally{
    DiscoveryClient.genreOverride=oldGenre;
    try{lang="en";DataStore now=NoirApp.data;now.pref("language","en");Loc.use(now);now.phoneSetting("historyOnly",oldHistoryOnly);now.pref("tipPlayerGestures",oldGesture);if(!oldPreview.isEmpty())now.pref(PhonePreview.PREF,oldPreview);}catch(Throwable t){missing("restoring English and settings",t);}
@@ -246,6 +246,37 @@ public final class ScreenShotsTest {
  }
  static boolean b2only(){return "b2".equals(TestRunner.arguments.getString("shotsOnly"));}
  void phoneBatch2()throws Exception{seq=0;setLang();a=null;batch2();end(a);a=null;}
+
+ // ---------------------------------------------------------------- premium pass (opt-in: -e shotsOnly p runs only these)
+ static boolean premiumOnly(){return "p".equals(TestRunner.arguments.getString("shotsOnly"));}
+ void hubTab(String name,String tab){step(name,()->{Activity x=start(in(DownloadHubActivity.class).putExtra("tab",tab));DownloadHubActivity h=(DownloadHubActivity)waitFor(DownloadHubActivity.class,10000);opened.add(h);try{ui(h::update);shot(1200);}finally{end(h);}});}
+ void homeAtStrip(String name,String size){step(name,()->{NoirApp.data.pref("homeCardSize",size);try{go("Home",null);settle(1200);View[] strip={null};ui(()->strip[0]=a.body.findViewWithTag("home-status"));assertNotNull("status strip",strip[0]);scrollToView(a.scroller,strip[0],10);shot(700);}finally{NoirApp.data.pref("homeCardSize","Medium");}});}
+ void waitDiscover()throws Exception{long end=SystemClock.elapsedRealtime()+10000;boolean[] ready={false};while(SystemClock.elapsedRealtime()<end&&!ready[0]){ui(()->ready[0]=!d.loading&&d.titles.length()>0);Thread.sleep(80);}if(!ready[0])note("browse list did not load");}
+ void openTitle(int index)throws Exception{JSONObject[] seed={null};ui(()->seed[0]=d.titles.optJSONObject(index));assertNotNull(seed[0]);ui(()->d.open(seed[0]));long end=SystemClock.elapsedRealtime()+10000;boolean[] ready={false};while(SystemClock.elapsedRealtime()<end&&!ready[0]){ui(()->ready[0]=!d.loading&&d.title!=null);Thread.sleep(80);}if(!ready[0])note("title details did not load");}
+ JSONObject readyItem(String id,int episode)throws Exception{return new JSONObject().put("id",id).put("group","b2-night").put("imdb","tt9300001").put("title","Night Signal").put("movie",false).put("season",1).put("episode",episode).put("episodeTitle","Episode "+episode);}
+ void phonePremium()throws Exception{
+  seq=0;setLang();a=null;
+  step("p-seed",()->{long now=System.currentTimeMillis();DownloadStore store=NoirApp.downloads;
+   savedDownload("b2-ns1","b2-night","Night Signal",1,now-2*DAYMS);savedDownload("b2-ns2","b2-night","Night Signal",2,now-DAYMS);savedDownload("b2-ns3","b2-night","Night Signal",3,0);savedDownload("b2-pl1","b2-paper","Paper Lanterns",1,0);
+   JSONObject waiting=NoirApp.data.rememberPhoneItem(new JSONObject().put("id","p-w1").put("group","b2-paper").put("imdb","tt9300002").put("title","Paper Lanterns").put("movie",false).put("season",1).put("episode",3).put("episodeTitle","Episode 3"));store.enqueue(waiting);store.update("p-w1","paused",1500,4096,"","");
+   store.enqueueReady(readyItem("p-r1",4),null,4096);java.nio.file.Files.write(store.file("p-r1",false).toPath(),new byte[4096]);store.update("p-r1","complete",4096,4096,"","");store.enqueueReady(readyItem("p-r2",5),null,4096);
+   NoirApp.data.pref("downloadsFilter","All");NoirApp.data.pref("homeCardSize","Medium");expected.remove(current);});
+  step("p-home-top",()->{go("Home",null);shot(1500);});
+  homeAtStrip("p-home-strip","Medium");
+  step("p-home-rows",()->{go("Home",null);settle(1200);ui(()->{ScrollView s=a.scroller;int max=Math.max(0,s.getChildAt(0).getHeight()-s.getHeight());s.scrollTo(0,Math.min(max,Math.round(s.getHeight()*1.45f)));});shot(700);});
+  step("p-home-rows2",()->{go("Home",null);settle(1200);ui(()->{ScrollView s=a.scroller;int max=Math.max(0,s.getChildAt(0).getHeight()-s.getHeight());s.scrollTo(0,Math.min(max,Math.round(s.getHeight()*2.3f)));});shot(700);});
+  step("p-home-edit",()->{go("Home",null);settle(800);ui(()->a.homeLayout.edit());shot(1200);});
+  homeAtStrip("p-home-small","Small");homeAtStrip("p-home-large","Large");
+  hubTab("p-downloads-queue","queue");hubTab("p-downloads-phone","phone");hubTab("p-downloads-ready","ready");
+  step("p-history",()->{go("History","Up next");shot(1200);});
+  step("p-discover-sheet",()->{d=start(in(DiscoverActivity.class).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK));waitDiscover();ui(()->{View card=AuditPhoneFixture.find(d.results,v->v.getContentDescription()!=null&&v.getContentDescription().toString().startsWith("Explore ")&&v.hasOnClickListeners());assertNotNull("no result card",card);assertTrue(card.performClick());});shot(2000);});
+  step("p-discover-show",()->{assertNotNull("Discover not open",d);openTitle(1);shot(1000);});
+  step("p-discover-show-episodes",()->{assertNotNull("Discover not open",d);ui(()->{View chips=d.body.findViewWithTag("discover-seasons");if(chips!=null){android.graphics.Rect r=new android.graphics.Rect();chips.getDrawingRect(r);d.scroll.offsetDescendantRectToMyCoords(chips,r);d.scroll.scrollTo(0,Math.max(0,r.top-dp(12)));}});shot(700);});
+  step("p-discover-movie",()->{assertNotNull("Discover not open",d);ui(()->d.back());waitDiscover();openTitle(0);shot(1000);});
+  step("p-download-sheet",()->{end(d);d=null;assertNotNull("no fixture show",show);Activity x=start(in(PhoneDownloadsActivity.class).putExtra("id",show.optString("id")).putExtra("season",true));opened.add(x);try{shot(1800);}finally{end(x);}});
+  step("p-restore",()->{DownloadStore store=NoirApp.downloads;for(String id:new String[]{"p-w1","p-r1","p-r2","b2-ns1","b2-ns2","b2-ns3","b2-pl1"})try{store.remove(id);}catch(Throwable ignored){}expected.remove(current);});
+  end(a);a=null;
+ }
 
  // ---------------------------------------------------------------- TV
  void key2(int code,int times)throws Exception{for(int n=0;n<times;n++)key(code);}

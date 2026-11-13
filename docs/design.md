@@ -33,6 +33,14 @@ Noir is a downloader, an organizer, a streamer and a library, and Home has to sh
 - **A title you have just met can be acted on where it stands**: the spotlight and every poster's hover actions offer Stream, Download and My List; the preview panel has its actions right under the synopsis.
 - **Discover shows what you do not have.** Titles already in the library keep their badge in the rows; there is no row of them.
 
+## Phone
+The phone follows the same four roles and the same decisions as the PC pages above; what changes is the shape.
+- **Home**: the status strip is one sideways row of tiles under the hero (streaming setup while it is missing, downloads, the next episode, free space, Edit Home). The default row order is the PC's: your own rows first. Tile size (Small, Medium, Large) is in Edit Home. Keep ready is a row of artwork cards.
+- **Downloads**: three tab cards across the top (Queue, On this phone, Keep ready), each with its live number; one part of the page shows at a time. The PC's queue and the download settings are two links under the tabs. There is no separate "Offline videos" page in the flow: it is the On this phone tab.
+- **No hover on a phone**: the actions a PC poster shows on hover live in the title's sheet, with drawn icons, and one gold action pinned at the bottom.
+- **One gold action per screen.** A title page has one gold Stream button; saving and downloading are quiet buttons; an episode row carries a stream icon and a download icon instead of full-width buttons. A download asks "this phone or your PC" only when a PC is paired.
+- **History**: the viewing life (episodes, movies, hours) is one line under the heading and opens Stats. One "Import & export" chip opens the import, export and backup page.
+
 ## Vocabulary
 | Thing | English | Arabic | Not |
 |---|---|---|---|
